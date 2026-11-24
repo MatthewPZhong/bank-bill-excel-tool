@@ -44,30 +44,38 @@
 
 一个导入进程、一次读取、一个 SQLite 事务。公共部分在 `position-reconciliation-import/import-common.js`：取消检查、导入连接参数（128MB 页缓存、256MB mmap）、结构版本核对、范围 revision、暂存文件身份快照比对、提交后 `wal_checkpoint(TRUNCATE)`。
 
+银行与来源导入共同遵守的三条边界：
+
+- **磁盘门禁**：行数要读完才知道，写库前按暂存文件大小估算行数据与 WAL 的增长（银行 5 倍、来源 18 倍，取自 §1 的实测峰值），加上现有侧库、暂存文件与 512MB 余量；空间不足在改动旧数据之前拒绝。
+- **取消**：导入进程收到写入授权即进入不可取消阶段（之后的取消应答为未接受）；暂存文件核对结束后、提交前再核一次取消标记。
+- **暂存目录归属**：拿到写入授权之前的失败、取消、拒绝由导入进程删除暂存目录；拿到授权之后 Main 已把文件登记进待完成操作与存档清单，无论提交成败都由 Main 回收，导入进程不再删除（与 v3.2.21「只清理写入前的产物」一致）。
+
+XLSX 读取器把行回调（单遍导入在这里写库）抛出的错误原样上抛，不包装成 `position-workbook-invalid`：数据库错误必须让整批回滚，不能被当成单个坏文件。
+
 ### 3.1 银行对账单（`BANK_IMPORT`，`bank-import.js`）
 
 1. `stageInputFilesAsync` 复制到暂存目录并算 SHA-256。
 2. 打开侧库，`runPositionSideDbMutation` 开事务并核对基准 checkpoint。
 3. 每个文件先登记一条 `position_raw_files`（版本号），再流式逐行：取交互字段 → 校验 BizId / Channel / BillDate → 首次遇到的渠道 + 月份先删除旧行（只删本次导入之前的行，以自增 id 区分）→ `INSERT`。
-4. `UNIQUE(biz_id)` 冲突：对方是本次导入的行 → 文件内重复，立即拒绝；对方是旧行 → 先挂起，全部读完后补写一次，仍冲突才报跨范围冲突（旧行所在范围可能在文件后面才出现并被整体替换）。
+4. `UNIQUE(biz_id)` 冲突：对方是本次导入的行 → 文件内重复，立即拒绝；对方是旧行 → 先挂起（放事务内的临时表，不随行数占用进程内存），全部读完后按原顺序补写一次，仍冲突才报跨范围冲突（旧行所在范围可能在文件后面才出现并被整体替换）。
 5. 核对「读取行数 = 写入行数」，把已无行的旧版本标为 superseded，推进范围 revision，向 Main 发 `PREFLIGHT_READY`（范围、行数、被替换行数、文件凭证），事务保持未提交。
 6. Main 侧 `prepareStreamingBankImport` 返回 `needs-confirmation`；`existing` 只列确实会被替换的范围，为空时界面不弹确认直接调用 apply。
 7. `applyStreamingBankImport` 在存档任务内发 `APPLY_GRANTED`（operation token、基准 checkpoint、batch owner、存档路径）；导入进程核对授权、比对暂存文件身份快照（不重读内容）、写文件凭证、推进 checkpoint、`COMMIT`，随后截断 WAL。
-8. 取消 / 拒绝 / 新一次选择文件：`APPLY_REJECTED` → 回滚并删除暂存目录。进程异常退出：SQLite 自动回滚；提交后退出：`recoverPositionImportWorkerExit` 按提交链与 ready 消息重建结果。
+8. 取消 / 拒绝 / 新一次选择文件：`APPLY_REJECTED` → 回滚并删除暂存目录。确认写入的任务没能接管这次导入（存档初始化失败、任务准入被拒、模块锁被占）时，`abandonPreparedBankImport(token)` 按令牌拒绝授权并等导入进程回滚，释放侧库写锁。进程异常退出：SQLite 自动回滚；提交后退出：`recoverPositionImportWorkerExit` 按提交链与 ready 消息重建结果。
 
 ### 3.2 链接原始表（`SOURCE_IMPORT`，`source-import.js`）
 
 1. 全部文件复制到暂存目录并算 SHA-256；`runPositionSideDbMutation` 开事务。
 2. 外层 `SAVEPOINT position_source_attempt`；每个文件一个 `SAVEPOINT position_source_file`：识别表头 → 登记版本号 → 流式逐行取必用列 → `classifySourceRow` 判定正常 / 过滤 → 正常行算记录标识并写 `position_source_rows`（命中同标识时逐值比较，相同则折叠并更新文件血缘，不同则报 `position-source-record-hash-collision`），过滤行写 `position_filtered_source_rows` 与临时表 `position_import_filtered_payload`。
 3. 文件级错误（表头不识别、结构不符、读取出错）只回滚该文件的 savepoint 并记为失败；数据库错误（`ERR_SQLITE*`）、取消、侧库状态异常中止整批。
-4. 全部读完后复核「过滤行与其他文件的正常记录同业务单号」；有则把含该过滤行的文件加入排除表，回滚到外层 savepoint 整轮重读（读它的时候后面的文件还没读，看不出冲突）。异常报告写失败同样把含过滤行的文件排除后重读。
+4. 全部读完后统一裁决「过滤行与正常记录（同批任一文件或库内已有）同业务单号」：所有通过文件级校验的正常记录都在库里时一次判定，命中的文件全部加入排除表，回滚到外层 savepoint 整轮重读。不在读完单个文件时判：那时回滚该文件会连它的正常记录一起撤掉，别的文件就查不到与这些记录的冲突，被拒文件的集合会随文件顺序而变（与 v3.2.21 预检的整批判定一致）。异常报告写失败同样把含过滤行的文件排除后重读。
 5. 重建受影响来源类型的链接行（`writeLinkRows`）与摘要缓存，写一份异常报告（`anomaly-report.js` 从临时表读过滤行，写出后算一次 SHA-256 作存档凭证）。
-6. 发 `PREFLIGHT_READY`（逐文件结果、文件凭证、报告凭证、清单摘要）并暂停；Main 把凭证持久化到 pending 后发 `APPLY_GRANTED`。授权须 jobId、清单摘要、operation token、batch owner、基准 checkpoint 全部一致；有可提交文件时拒绝 `preflightOnly`。
+6. 发 `PREFLIGHT_READY`（逐文件结果、文件凭证、报告凭证、清单摘要）并暂停；Main 把凭证持久化到 pending 后发 `APPLY_GRANTED`。授权须 jobId、清单摘要、operation token、batch owner、基准 checkpoint 全部一致；有可提交文件时拒绝 `preflightOnly`。过滤记录里的报告键（`report_artifact_key`）保持生成报告时的键：存档批次的删除保护（`archive-report-delete-protection.js`）与运行冻结都按它核对；存档条目自己的键由文件计划另行分配，生成键登记在条目的 `preGeneratedOutput.producerArtifactKey`。
 7. 比对暂存文件身份快照 → 写文件凭证 → 推进 checkpoint 一次 → `COMMIT` → 截断 WAL。没有任何可提交文件时内部以 `NothingToCommit` 回滚，checkpoint 不动。
 
 ### 3.3 清结算银行账户表（`account-import.js`）
 
-账户表随来源批次读取时只做统计（有效行数、读取行数、sheet），不写库，结果为 `needs-confirmation`，暂存目录保留。用户确认后 `ACCOUNT_APPLY` 重读同一份暂存文件整表替换：先比对文件身份快照与确认时的行数 / sheet，不一致即拒绝；登记新版本、旧版本标为 superseded、重建账户链接行。这样主进程不持有整表数据。
+账户表随来源批次读取时只做统计（有效行数、读取行数、sheet），不写库，结果为 `needs-confirmation`，暂存目录保留。用户确认后 `ACCOUNT_APPLY` 重读同一份暂存文件整表替换：读取前后各比对一次文件身份快照，并核对确认时的行数 / sheet，任何一项不一致即拒绝、旧账户表不变；登记新版本、旧版本标为 superseded、重建账户链接行。这样主进程不持有整表数据。
 
 ### 3.4 维护命令（`maintenance-writer.js`）
 
@@ -79,7 +87,7 @@
 
 ### 3.6 暂存副本回收
 
-暂存副本在三处被引用：存档中心未完成的条目、主库里的待完成操作记录（pending）、主进程里的活动导入与待确认令牌。回收点有两个：存档完成时的来源释放回调，以及任务收尾。改造前（v3.2.21 同样如此）两处都被尚未清除的 pending 挡住，pending 清除后又没有再触发，副本只能等 7 天后的启动清理。现在 `task-owner.js` 的 `finalizePositionOwnedPending` 在清除 pending 后对它登记的文件补一次回收；仍未存档的文件、活动导入的作业目录继续受保护。待确认账户表的令牌除作业根目录外单独登记它的暂存文件（保护规则按「目标目录内是否含受保护路径」判断，只登记根目录护不住其下的文件目录）。异常报告的暂存文件随作业目录一并删除，之后的导出从存档中心取回（既有回退逻辑）。
+暂存副本在三处被引用：存档中心未完成的条目、主库里的待完成操作记录（pending）、主进程里的活动导入与待确认令牌。回收点有两个：存档完成时的来源释放回调，以及任务收尾。改造前（v3.2.21 同样如此）两处都被尚未清除的 pending 挡住，pending 清除后又没有再触发，副本只能等 7 天后的启动清理。现在 `task-owner.js` 的 `finalizePositionOwnedPending` 在清除 pending 后对它登记的文件补一次回收；仍未存档的文件、活动导入的作业目录继续受保护。待确认账户表的令牌除作业根目录外单独登记它的暂存文件（保护规则按「目标目录内是否含受保护路径」判断，只登记根目录护不住其下的文件目录）。异常报告的暂存文件随作业目录一并删除，之后的导出从存档中心取回：`findArchivedPositionReportArtifact` 按侧库记录的生成键在原批次里找报告条目。原来的回退逻辑直接拿生成键当条目键去查，查不到（v3.2.21 起如此，暂存要 7 天后才回收所以没暴露），回收提前后必须一并修正。
 
 ### 3.7 删除的代码
 
@@ -90,13 +98,14 @@
 主进程建库时直接建成最终形态，导入进程只核对 `position_meta.position_schema_version`。
 
 - `position_raw_files`：`version`（自增，即版本号）、`kind`（bank / 各来源类型）、原始文件名 / 路径、sheet、大小、`sha256`、行数、`status`（active / superseded）、`operation_token`、`archive_batch_number`、导入与被替换时间。
-- `position_bank_rows`：索引列（`biz_id` 唯一、`channel`、`month_key`、`bill_date`、`status`、`import_order`、两个资金性质、三个审计列）+ `raw_version`、`raw_row_number` + 12 个交互字段值列 + 3 个覆盖列（BizId / Channel / FundType 的原值与规范化值不同时才存）。值列不声明类型，数字按数字、文本按文本保存；日期、布尔以「前缀 + JSON 标记」保存并在读取时还原，取值与原来经 JSON 往返的结果一致。列映射与换算集中在 `position-reconciliation/bank-row-storage.js`。
+- `position_bank_rows`：索引列（`biz_id` 唯一、`channel`、`month_key`、`bill_date`、`status`、`import_order`、两个资金性质、三个审计列）+ `raw_version`、`raw_row_number` + 12 个交互字段值列 + 3 个覆盖列（BizId / Channel / FundType 的原值与规范化值不同时才存）。值列不声明类型，数字按数字、文本按文本保存；日期、布尔以「前缀 + JSON 标记」保存并在读取时还原，取值与原来经 JSON 往返的结果一致；原文本身以该前缀开头时按 JSON 字符串保存，读回仍是原文。列映射与换算集中在 `position-reconciliation/bank-row-storage.js`。
 - `position_run_rows`：去掉 `result_json`；`original_json` 为交互字段 + 原始版本号 / 行号。
-- `position_source_rows`：`source_type`、`business_key`、`raw_version`、`source_row_number`、`row_hash`、`fields_json`（只含该来源的必用列），`UNIQUE(source_type, row_hash)`。记录标识与字段取舍集中在 `position-reconciliation/source-row-storage.js`；账户表的标识另含行号（内容相同的物理行不折叠）。
+- `position_source_rows`：`source_type`、`business_key`、`raw_version`、`source_row_number`、`row_hash`、`fields_json`（只含该来源的必用列），`UNIQUE(source_type, row_hash)`。记录标识与字段取舍集中在 `position-reconciliation/source-row-storage.js`；账户表的标识另含行号（内容相同的物理行不折叠）。标识、相等判断与落库用同一套带类型的表示：日期单元格与内容相同的 ISO 文本是两个值。
 - `position_filtered_source_rows`：以 `raw_version` 取代原来的文件路径 / 文件名 / sheet 三列，读取时经版本记录取回文件名与 sheet；`report_row_key` 为 `<jobId>#<文件序号>#<行号>`。
 - `position_link_rows` / `position_consumed_sources`：直接带 `source_record_key`，不再有旧身份模式的分支。账户链接行的币种取「币种」列，列为 5 个必用列。
 - 内存中的银行行对象字段为 `POSITION_BANK_ROW_FIELDS`（15 个交互字段 + 原始版本号 + 原始行号）；导出 / 回导列 `POSITION_BANK_HEADERS` = 3 个审计列 + 这 17 列，共 20 列。结果模板 `assets/平盘银行对账单.xlsx` 已按新表头重建。`assets/清结算银行账户表.xlsx` 同时是账户表的导入识别结构，保持 40 列不变。
-- 旧结构的库不迁移：`main.js` 启动时 `discardOutdatedPositionSideDb` 删除旧库并清空主库里的 checkpoint / bootstrap / pending 绑定，之后按全新侧库初始化；没有任何平盘表的文件不算旧库，保持原有阻断。v3.2.21 的库没有结构版本标记，一律视为旧库。
+- 旧结构的库不迁移：`main.js` 启动时 `discardOutdatedPositionSideDb` 先清空主库里的 checkpoint / bootstrap / pending 绑定、再删除旧库，之后按全新侧库初始化。顺序不能反：三项写入可重复执行，删除放最后，任何一步中断后旧库还在，下次启动会重做；先删库则会留下「绑定还在、库已不存在」无法自愈的状态。
+- 只丢弃能认出是旧版本结构的库：有整数版本标记且低于当前版本，或没有版本标记但银行行表带 `original_json` / `working_json` 两列（v3.2.22 之前各版本的共同特征）。没有任何平盘表的文件、只有零散 `position_` 表的文件、版本标记损坏的库都不删除，由 store 按原有的「侧库不完整」阻断。
 
 ## 5. 兼容与影响
 
@@ -141,6 +150,31 @@
 | `node scripts/integration/bank-statement-input-template-version.js` | 6/6 |
 | `npm run benchmark:position-import -- --kind=bank --apply` / `--kind=source --apply`（各 100 万行） | 见 §1 |
 | 真实应用实测（临时数据目录，替换系统对话框，脚本不入库）：银行导入 2 行 → 一批 3 份来源（调拨 2 行 + 1 过滤行、出账 1 行、账户表待确认）→ 账户确认 → 同文件重导 → 三种导出 → 打开「对账数据管理」「链接表管理」「链接原始表」截图 | 全部符合预期：版本号 V1–V5 均带存档批次号，重导后旧版本为 superseded；银行导出 20 列、原始表导出必用列 + 版本号 / 行号、账户链接表 5 列；两处界面显示「原始版本」列；15 条存档条目全部就绪，结束时暂存目录为空 |
-| `npm run release-check`（2026-11-23，最终内容） | 通过：lint、架构检查、smoke、单测 9042 通过 / 0 失败 / 4 跳过、90 个集成脚本全部通过（已按规则回写 `rules/integration-test-policy.md`「七」） |
+| `npm run release-check`（2026-11-23，首次提交 `361ccd05`） | 通过：lint、架构检查、smoke、单测 9042 通过 / 0 失败 / 4 跳过、90 个集成脚本全部通过（已按规则回写 `rules/integration-test-policy.md`「七」） |
+
+### Codex 审查（第一轮，2026-11-23，`codex review --base v3.2.21`）
+
+9 条 P1、5 条 P2，逐条对照代码核实均属实，全部修复并补回归测试：
+
+| 结论 | 处理 |
+| --- | --- |
+| 暂存报告回收后异常报告取不回（库里记的是生成键，回退逻辑却拿它当存档条目键去查） | 取回时按条目登记的生成键查找；库里的键不动。真实应用实测回收后导出成功。第一版修法是把库里的键改写成存档键，`release-check` 里存档批次删除保护的两条用例随即失败（保护按生成键核对），已撤回 |
+| 互为「过滤行撞对方正常记录」的两份文件只拒绝后读的那份 | 改为全部读完后统一裁决 |
+| 写库时的数据库错误被读取器包装成坏工作簿，其余文件仍提交 | 读取器原样上抛回调错误 |
+| 写入授权之后到达的取消被应答为已接受，但仍然提交 | 授权即进入不可取消阶段，提交前再核一次 |
+| 银行确认写入未被任务接管时导入进程一直占着写锁 | `onAbandon` 与模块锁被占时按令牌放弃 |
+| 旧库删除与主库解绑之间中断后无法自愈 | 先解绑后删除 |
+| 任意带 `position_` 表或版本标记损坏的库都会被当旧库删除 | 只丢弃能认出的旧结构 |
+| 授权后提交失败时导入进程删除已交接给 Main 的暂存文件 | 授权后不再删除 |
+| 账户表重读期间文件被替换成同 sheet 同行数的另一份不被发现 | 读完再核一次身份快照 |
+| 磁盘门禁行数恒为 0 | 按暂存文件大小估算增长 |
+| 银行冲突行全部缓存在内存 | 改存事务内临时表 |
+| 与类型标记同前缀的原文读回出错或变成布尔 | 可逆转义 |
+| 日期单元格与同内容 ISO 文本标识相同、相等判断不同 | 统一用带类型的表示 |
+| 异常报告把日期写成内部标记的 JSON 文本 | 按配套方式还原日期 |
+
+修复后重跑 `npm run release-check`（2026-11-23，修复的最终代码）：通过，lint、架构检查、smoke、单测 9051 通过 / 0 失败 / 4 跳过、90 个集成脚本全部通过（集成用例数未变，`rules/integration-test-policy.md` 无回写）。修复未再经 Codex 复审。
+
+对账专项补充（§6 资金红线第 8 项）：暂存报告回收后，异常报告与运行过滤数据的导出、以及含过滤行的运行确认都改从存档取报告；存档批次被永久删除前仍由删除保护按生成键拦住（`archive-position-fileplan-delete.test.js`）。
 
 未做（B139）：界面人工点按、Windows 实机、真实 1.2GB 文件。

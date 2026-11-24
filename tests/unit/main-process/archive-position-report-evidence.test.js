@@ -16,7 +16,7 @@ const {
 const { normalizeFilePlanV1, artifactManifestFromFilePlan } = require('../../../src/main-process/archive-center/file-plan');
 const { captureStagedInputEvidenceAsync } = require('../../../src/main-process/position-reconciliation/input-staging');
 const { createPositionReconciliationStore } = require('../../../src/main-process/position-reconciliation/store');
-const { positionOutputFilePlanEvidence, positionFilePlanSettlementFiles } = require('../../../src/main-process/position-reconciliation/archive-file-plan-evidence');
+const { findArchivedPositionReportArtifact, positionOutputFilePlanEvidence, positionFilePlanSettlementFiles } = require('../../../src/main-process/position-reconciliation/archive-file-plan-evidence');
 const { createPositionOwnedDeleteSourceResolver, positionDeleteSourceReferences } = require('../../../src/main-process/archive-center/position-owned-delete-sources');
 const { createPositionReportDeleteProtection } = require('../../../src/main-process/position-reconciliation/archive-report-delete-protection');
 
@@ -204,4 +204,41 @@ test('报告job保留原operation/双artifact身份，metadata删除后新增冻
   assert.equal((await f.controller.retryDeleteCleanupJob(pending.cleanupJobId)).fullyDeleted, true);
   assert.equal(fs.existsSync(f.reportPath), false);
   assert.equal(f.service.repository.listCleanupJobs().length, 0);
+});
+
+test('异常报告条目按侧库记录的生成键在原存档批次里找到；条目键不同、多份同键或不是输出时不误取', () => {
+  const report = (overrides = {}) => ({
+    id: 1, direction: 'output', artifactKey: 'output-archive-assigned',
+    metadata: { preGeneratedOutput: { producerArtifactKey: 'source-import-anomaly-report' } },
+    ...overrides
+  });
+  const repositoryOf = (artifacts) => ({
+    getArtifactByKey: (_batchId, key) => artifacts.find((item) => item.artifactKey === key) || null,
+    listArtifacts: () => artifacts
+  });
+  const input = { id: 9, direction: 'input', artifactKey: 'input-1', metadata: {} };
+
+  // 存档条目的键由文件计划另行分配：按条目里登记的生成键找到。
+  assert.equal(
+    findArchivedPositionReportArtifact(repositoryOf([input, report()]), 7, 'source-import-anomaly-report').id,
+    1
+  );
+  // 条目键与记录的键相同（直接以该键入库的批次）时直接取用。
+  const direct = report({ id: 2, artifactKey: 'source-import-anomaly-report', metadata: {} });
+  assert.equal(
+    findArchivedPositionReportArtifact(repositoryOf([direct]), 7, 'source-import-anomaly-report').id,
+    2
+  );
+  // 同一批次里两份条目登记了同一个生成键：无法确定是哪一份，不取。
+  assert.equal(
+    findArchivedPositionReportArtifact(repositoryOf([report(), report({ id: 3, artifactKey: 'output-other' })]), 7, 'source-import-anomaly-report'),
+    null
+  );
+  // 输入条目、其他生成键、空键都不匹配。
+  assert.equal(
+    findArchivedPositionReportArtifact(repositoryOf([report({ direction: 'input' })]), 7, 'source-import-anomaly-report'),
+    null
+  );
+  assert.equal(findArchivedPositionReportArtifact(repositoryOf([report()]), 7, 'another-report'), null);
+  assert.equal(findArchivedPositionReportArtifact(repositoryOf([report()]), 7, ''), null);
 });

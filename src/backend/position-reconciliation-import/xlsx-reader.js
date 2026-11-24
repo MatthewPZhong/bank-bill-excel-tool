@@ -418,6 +418,9 @@ function valuesFromToolboxRow(row, width) {
 async function streamPositionXlsxRows(filePath, options = {}) {
   const kind = options.kind === 'bank' ? 'bank' : 'source';
   const workbook = await openPositionWorkbook(filePath, options);
+  // 调用方回调（单遍导入在这里写库）抛出的错误不是工作簿的问题：记下来原样上抛，
+  // 不能包装成 position-workbook-invalid，否则数据库错误会被当成单个坏文件处理。
+  let callbackFailure = null;
   try {
     const detected = await locatePositionBusinessSheet(
       workbook,
@@ -449,13 +452,19 @@ async function streamPositionXlsxRows(filePath, options = {}) {
         if (isBlankRow(row, sourceHeaders)) return;
         nonBlankRowCount += 1;
         if (typeof options.onRow === 'function') {
-          options.onRow({
-            row: project(row),
-            excelRowNumber: toolboxRow.rowIndex,
-            sourceType: detected.sourceType,
-            sourceHeaders,
-            sheetName: detected.sheet.name
-          });
+          const projected = project(row);
+          try {
+            options.onRow({
+              row: projected,
+              excelRowNumber: toolboxRow.rowIndex,
+              sourceType: detected.sourceType,
+              sourceHeaders,
+              sheetName: detected.sheet.name
+            });
+          } catch (error) {
+            callbackFailure = { error };
+            throw error;
+          }
         }
       }
     });
@@ -472,6 +481,7 @@ async function streamPositionXlsxRows(filePath, options = {}) {
       sharedStringsCount: workbook.sharedStrings.count
     };
   } catch (error) {
+    if (callbackFailure) throw callbackFailure.error;
     if (error instanceof PositionReconciliationError) throw error;
     throw workbookInvalid(workbook.sourceFile, error);
   } finally {

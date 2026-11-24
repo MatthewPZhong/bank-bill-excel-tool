@@ -279,6 +279,13 @@ channel.onMessage((message) => {
           required: message.preflightOnly !== true
         });
         active.batchContext = batchContext;
+        // 写入授权一到就进入不可取消阶段：之后还有异步的暂存文件核对，
+        // 若仍停在等待授权阶段，期间到达的取消会被应答为已接受，而提交照常发生。
+        if (message.preflightOnly !== true
+            && !active.cancelToken.cancelled
+            && active.stage === 'awaiting-apply-grant') {
+          active.stage = 'committing';
+        }
         active.resolveApplyGrant({ ...message, batchContext });
       } catch (error) {
         active.rejectApplyGrant(error);

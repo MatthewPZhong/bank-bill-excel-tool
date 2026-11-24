@@ -3499,7 +3499,12 @@ test('旧版本结构的侧库：store 拒绝接管；启动清理整体丢弃�
   );
   assert.equal(fs.existsSync(dbPath), true, 'store 自身不删除旧库');
 
-  assert.equal(discardOutdatedPositionSideDb(userDataDir), true);
+  // 先解除主库绑定、后删除旧库：解绑回调执行时旧库必须还在，中途退出才能在下次启动重做。
+  const unbindObserved = [];
+  assert.equal(discardOutdatedPositionSideDb(userDataDir, {
+    beforeDelete: () => unbindObserved.push(fs.existsSync(dbPath))
+  }), true);
+  assert.deepEqual(unbindObserved, [true]);
   for (const suffix of ['', '-wal', '-shm', '-journal']) {
     assert.equal(fs.existsSync(`${dbPath}${suffix}`), false, `旧库文件 ${suffix || '主文件'} 应已删除`);
   }
@@ -3517,6 +3522,35 @@ test('旧版本结构的侧库：store 拒绝接管；启动清理整体丢弃�
   fs.writeFileSync(emptyPath, '');
   assert.equal(discardOutdatedPositionSideDb(emptyDir), false);
   assert.equal(fs.existsSync(emptyPath), true);
+
+  // 只有零散的 position_ 表、或结构版本标记损坏的库：结构无法识别，保留文件并由 store 阻断，不当旧库删除。
+  for (const [label, schema] of [
+    ['unrelated', 'CREATE TABLE position_history (id INTEGER PRIMARY KEY, note TEXT);'],
+    ['bad-version', `
+      CREATE TABLE position_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO position_meta(key, value) VALUES ('position_schema_version', 'two');
+      CREATE TABLE position_bank_rows (id INTEGER PRIMARY KEY, biz_id TEXT NOT NULL UNIQUE);
+    `]
+  ]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `position-unknown-${label}-`));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const unknownPath = path.join(dir, POSITION_DB_RELATIVE_PATH);
+    fs.mkdirSync(path.dirname(unknownPath), { recursive: true });
+    const unknown = new DatabaseSync(unknownPath);
+    unknown.exec(schema);
+    unknown.close();
+    let unbound = false;
+    assert.equal(discardOutdatedPositionSideDb(dir, { beforeDelete: () => { unbound = true; } }), false, label);
+    assert.equal(unbound, false, `${label}：不删除就不得解除主库绑定`);
+    assert.equal(fs.existsSync(unknownPath), true, label);
+    assert.throws(
+      () => createPositionReconciliationStore(dir, {
+        initialCheckpoint: { identity: `${label}-identity`, generation: 0, token: `${label}-token` }
+      }),
+      (error) => error && error.code === 'position-side-db-missing',
+      label
+    );
+  }
 });
 
 test('首次 bootstrap 只绑定同一份 generation 0 侧库，旧 marker 和既有现代库均不得接管', (t) => {
@@ -3590,9 +3624,12 @@ test('首次 bootstrap 只绑定同一份 generation 0 侧库，旧 marker 和�
       templatePath: TEMPLATE_PATH,
       initialSideDbCheckpoint: bootstrap
     }),
-    (error) => error && error.code === 'position-side-db-outdated',
-    '仅有旧 marker 的旧结构库不得被 store 补成空库（由启动清理整体丢弃后重建）'
+    (error) => error && error.code === 'position-side-db-missing',
+    '仅有旧 marker 的残缺库不得被补成空库'
   );
+  // 认不出是旧版本结构的文件不属于「旧版本库」：启动清理不得删除它。
+  assert.equal(discardOutdatedPositionSideDb(markerOnlyDir), false);
+  assert.equal(fs.existsSync(markerOnlyPath), true);
 });
 
 test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t) => {

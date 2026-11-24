@@ -400,8 +400,11 @@ function outdatedSideDatabaseError(dbPath) {
   return error;
 }
 
-// 读取侧库结构版本：没有任何平盘表（空文件、非平盘库）返回 null，交给原有的缺失 / 残缺校验；
-// 有平盘表但没有版本标记（v3.2.22 之前建的库）返回 0。
+// 读取侧库结构版本：
+// - 没有任何平盘表（空文件、非平盘库）返回 null，交给原有的缺失 / 残缺校验；
+// - 有版本标记且是整数，返回该版本；
+// - 没有版本标记，但银行行表带整行 JSON 两列（v3.2.22 之前各版本的共同特征），返回 0；
+// - 其余情况（版本标记损坏、只有零散的 position_ 表等）返回 NaN：结构无法识别，既不当旧库丢弃，也不放行使用。
 function readPositionSchemaVersion(db) {
   const tables = new Set(
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
@@ -409,10 +412,20 @@ function readPositionSchemaVersion(db) {
       .filter((name) => name.startsWith('position_'))
   );
   if (tables.size === 0) return null;
-  if (!tables.has('position_meta')) return 0;
-  const row = db.prepare('SELECT value FROM position_meta WHERE key = ?').get(POSITION_SCHEMA_VERSION_KEY);
-  const version = Number(row && row.value);
-  return Number.isSafeInteger(version) ? version : 0;
+  if (tables.has('position_meta')) {
+    const row = db.prepare('SELECT value FROM position_meta WHERE key = ?').get(POSITION_SCHEMA_VERSION_KEY);
+    if (row) {
+      const stored = String(row.value === null || row.value === undefined ? '' : row.value).trim();
+      const version = /^\d+$/.test(stored) ? Number(stored) : Number.NaN;
+      return Number.isSafeInteger(version) ? version : Number.NaN;
+    }
+  }
+  if (!tables.has('position_bank_rows')) return Number.NaN;
+  const bankColumns = new Set(
+    db.prepare("SELECT name FROM pragma_table_info('position_bank_rows')").all()
+      .map((row) => String(row.name))
+  );
+  return bankColumns.has('original_json') && bankColumns.has('working_json') ? 0 : Number.NaN;
 }
 
 function assertNewDatabaseHasNoUserSchema(db, dbPath) {
@@ -1587,6 +1600,9 @@ class PositionReconciliationStore {
         // v3.2.22 起银行行改为列式存储，旧结构的侧库不迁移（平盘尚无需要保留的正式数据），
         // 由 Main 在创建 service 前整体丢弃后重建；走到这里说明没有经过那一步。
         const schemaVersion = readPositionSchemaVersion(this.db);
+        if (Number.isNaN(schemaVersion)) {
+          throw incompleteSideDatabaseError(this.dbPath, '平盘侧库结构版本无法识别');
+        }
         if (schemaVersion !== null && schemaVersion !== POSITION_SCHEMA_VERSION) {
           throw outdatedSideDatabaseError(this.dbPath);
         }
@@ -3159,8 +3175,10 @@ class PositionReconciliationStore {
 }
 
 // 旧结构侧库整体丢弃（spec v3.2.22 D4：平盘没有需要保留的正式数据，不做迁移）。
-// 只处理版本低于当前的库；返回 true 表示已删除，调用方需同时清掉主库里的 checkpoint / pending 绑定。
-function discardOutdatedPositionSideDb(userDataDir) {
+// 只处理能认出是旧版本结构的库；结构无法识别的文件保留并由 store 阻断。返回 true 表示已删除。
+// beforeDelete 在确认要丢弃之后、删除文件之前执行（Main 在这里解除主库里的 checkpoint / pending 绑定）：
+// 先解绑后删除，中途退出时旧库还在，下次启动会重新走一遍；反过来则会留下「绑定还在、库已不存在」的死局。
+function discardOutdatedPositionSideDb(userDataDir, { beforeDelete = null } = {}) {
   const dbPath = path.join(path.resolve(userDataDir), POSITION_DB_RELATIVE_PATH);
   if (!fs.existsSync(dbPath)) return false;
   let version;
@@ -3171,7 +3189,8 @@ function discardOutdatedPositionSideDb(userDataDir) {
     db.close();
   }
   // 没有平盘表的文件不是「旧版本库」，不在这里处理（保持原有阻断，不静默重建）。
-  if (version === null || version >= POSITION_SCHEMA_VERSION) return false;
+  if (!Number.isSafeInteger(version) || version >= POSITION_SCHEMA_VERSION) return false;
+  if (typeof beforeDelete === 'function') beforeDelete();
   for (const suffix of ['', '-wal', '-shm', '-journal']) {
     fs.rmSync(`${dbPath}${suffix}`, { force: true });
   }

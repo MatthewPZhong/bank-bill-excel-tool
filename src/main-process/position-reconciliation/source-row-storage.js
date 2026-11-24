@@ -29,15 +29,24 @@ function pickSourceFields(sourceType, row) {
   return picked;
 }
 
+// 标识、相等判断与落库用同一套带类型的表示：日期单元格与内容相同的 ISO 文本不是同一个值。
+// 直接对字段对象算摘要时 Date 会被写成 ISO 文本，两者得到同一个标识，而逐值比较却认为不同。
+function typedSourceFields(fields) {
+  for (const value of Object.values(fields)) {
+    if (value instanceof Date) return JSON.parse(serializeSourceFields(fields));
+  }
+  return fields;
+}
+
 // 来源记录标识：保存下来的必用列内容相同即同一条记录（再次导入时更新文件血缘，不新增）；
 // 业务单号相同但内容不同的行各自成为独立记录。标识只在入库时算一次，不用于任何复核。
 function sourceRecordKeyOf(fields) {
-  return stableHash(fields);
+  return stableHash(typedSourceFields(fields));
 }
 
 // 账户快照允许内容完全相同的两行独立存在；整表替换后行号是稳定的批内身份。
 function accountRecordKeyOf(fields, sourceRowNumber) {
-  return stableHash({ row: fields, sourceRowNumber });
+  return stableHash({ row: typedSourceFields(fields), sourceRowNumber });
 }
 
 function serializeSourceFields(fields) {
@@ -51,8 +60,25 @@ function serializeSourceFields(fields) {
   });
 }
 
+// serializeSourceFields 的逆操作：日期标记还原成 Date。
+function parseSourceFields(value) {
+  const parsed = JSON.parse(value, (_key, item) => {
+    if (item && typeof item === 'object' && !Array.isArray(item)
+        && item[DATE_JSON_TYPE_KEY] === 'Date') {
+      const date = typeof item.value === 'string' ? new Date(item.value) : new Date(Number.NaN);
+      if (Number.isNaN(date.getTime())) throw new TypeError('日期标记无效');
+      return date;
+    }
+    return item;
+  });
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new TypeError('来源行内容不是对象');
+  }
+  return parsed;
+}
+
 function sameSourceFields(left, right) {
-  return stableJson(left) === stableJson(right);
+  return stableJson(typedSourceFields(left)) === stableJson(typedSourceFields(right));
 }
 
 function insertSourceRowStatement(db) {
@@ -157,6 +183,7 @@ function markSupersededSourceRawFiles(db, sourceType) {
 
 module.exports = {
   accountRecordKeyOf,
+  parseSourceFields,
   insertLinkRowStatement,
   insertSourceRawFile,
   insertSourceRowStatement,

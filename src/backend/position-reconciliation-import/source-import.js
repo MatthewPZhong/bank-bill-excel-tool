@@ -494,12 +494,8 @@ async function importSourceFile({
       );
     }
     if (rawVersion !== null) {
-      const collisions = statements.filteredCollisions.all(rawVersion);
-      if (collisions.length > 0) {
-        const error = collisionError(descriptor, collisions, batch.fileIndexByVersion);
-        error.sourceType = sourceType;
-        throw error;
-      }
+      // 过滤行与正常记录同单号的冲突不在这里判：此刻回滚本文件会连它的正常记录一起撤掉，
+      // 别的文件的过滤行就查不到与这些记录的冲突，结果随文件顺序而变。全部文件读完后统一裁决。
       statements.finishRawFile.run(
         sheetName,
         stats.persistedCandidateRows + stats.filteredRows,
@@ -651,6 +647,8 @@ async function runPositionSourceImport(input = {}) {
       sideDbPath,
       rowCount: 0,
       stagedBytes: staged.reduce((sum, file) => sum + Number(file.stagedSizeBytes || 0), 0),
+      // 行数要读完才知道：按暂存文件大小估算行数据与 WAL 的增长，在改动旧数据之前拦住空间不足。
+      estimateGrowthFromStagedBytes: true,
       availableBytes: input.availableBytes
     });
 
@@ -681,7 +679,7 @@ async function runPositionSourceImport(input = {}) {
         // 过滤行内容的临时表先建好再准备语句；每轮尝试回到回滚点时它随之清空。
         createFilteredPayloadTable(db);
         const statements = sourceStatements(db);
-        // 事后才发现要整份拒绝的文件（过滤行与后面文件的正常记录同单号、异常报告写不出来）：
+        // 全部读完才能判定要整份拒绝的文件（过滤行与正常记录同单号、异常报告写不出来）：
         // 记下来后整体回到起点重读其余文件。正常情况下每个文件只读一遍。
         const excluded = new Map();
         let attempt = null;
@@ -753,7 +751,8 @@ async function runPositionSourceImport(input = {}) {
           }
 
           const acceptedOutcomes = outcomes.filter((item) => item.stats && !item.account);
-          // 过滤行所在文件早于同单号的正常记录时，读它的时候还看不出冲突：全部读完后再核一遍。
+          // 过滤行与正常记录（同批任一文件或库内已有）同单号的文件整份拒绝。必须等全部文件读完、
+          // 所有通过文件级校验的正常记录都在库里时一次判定，被拒文件的集合才与文件顺序无关。
           const retroactive = new Map();
           for (const item of acceptedOutcomes) {
             if (Number(item.stats.filteredRows) === 0) continue;
@@ -945,13 +944,20 @@ async function runPositionSourceImport(input = {}) {
         if (grant.preflightOnly || acceptedFiles.length === 0) {
           throw new NothingToCommit(ready);
         }
+        // 拿到写入授权即表示 Main 已把这些暂存文件登记进待完成操作与存档清单：
+        // 此后无论提交成败，暂存目录都由 Main 按存档状态回收，导入进程不再删除。
+        keepJobRoot = true;
         for (const file of acceptedFiles) await assertStagedFileUntouched(file);
+        // 授权后导入进程已进入不可取消阶段；这里再核一次，防止取消与授权同时到达时仍然提交。
+        assertNotCancelled(cancelToken);
         // 版本记录与过滤记录补上本次操作凭证与存档批次号，便于从版本号找到存档中心里的原件。
         const bindRawFile = db.prepare(`
           UPDATE position_raw_files
           SET operation_token = ?, archive_batch_number = ?
           WHERE version = ?
         `);
+        // 过滤记录里的 report_artifact_key 保持生成报告时的键：存档批次的删除保护与运行冻结都按它核对；
+        // 存档条目的键由文件计划另行分配，取回报告时按条目里登记的生成键去找。
         const bindFiltered = db.prepare(`
           UPDATE position_filtered_source_rows
           SET import_operation_token = ?, archive_operation_key = ?
@@ -1063,7 +1069,7 @@ async function runPositionSourceImport(input = {}) {
       try { db.close(); } catch (_closeError) { /* 关闭失败不覆盖结果 */ }
     }
     if (!committed && !keepJobRoot) {
-      // 未提交且没有待确认的账户表：暂存目录不再需要。
+      // 未提交、未拿到写入授权且没有待确认的账户表：暂存目录不再需要。
       await fs.promises.rm(jobRoot, {
         recursive: true,
         force: true,

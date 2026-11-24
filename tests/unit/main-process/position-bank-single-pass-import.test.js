@@ -194,6 +194,36 @@ test('取消确认：导入整体回滚，库内数据、checkpoint 不变，暂
   assert.deepEqual(storedBizIds(service), ['DBS/2026-07/NEW-2']);
 });
 
+test('确认写入的任务未接管时按令牌放弃：等待中的导入回滚并释放写锁，重复放弃无副作用', async (t) => {
+  const { service, userDataDir } = setup(t);
+  await importFile(service, writeBank(path.join(userDataDir, 'old.xlsx'), [bankRow({ BizId: 'OLD-1' })]));
+  const jobsBefore = stagingJobs(userDataDir);
+  const before = service.store.persistenceCheckpoint();
+  const prepared = await service.prepareBankImport([
+    writeBank(path.join(userDataDir, 'new.xlsx'), [bankRow({ BizId: 'NEW-1' })])
+  ]);
+  // 导入进程握着未提交的事务：此时其他写操作被拒。
+  assert.throws(
+    () => service.assertNoImportHoldingWriteLock(),
+    (error) => error.code === 'position-bank-import-awaiting-confirmation'
+  );
+
+  await service.abandonPreparedBankImport(prepared.token);
+  await service.abandonPreparedBankImport(prepared.token);
+  await service.abandonPreparedBankImport('unknown-token');
+
+  service.assertNoImportHoldingWriteLock();
+  assert.deepEqual(storedBizIds(service), ['DBS/2026-07/OLD-1']);
+  assert.deepEqual(service.store.persistenceCheckpoint(), before);
+  assert.deepEqual(stagingJobs(userDataDir), jobsBefore, '被放弃的导入不留暂存目录');
+  await assert.rejects(
+    () => apply(service, prepared.token),
+    (error) => error.code === 'position-bank-import-token-expired'
+  );
+  await importFile(service, writeBank(path.join(userDataDir, 'again.xlsx'), [bankRow({ BizId: 'NEW-2' })]));
+  assert.deepEqual(storedBizIds(service), ['DBS/2026-07/NEW-2']);
+});
+
 test('文件存在非法行：整批拒绝并提示行号，已有数据不变', async (t) => {
   const { service, userDataDir } = setup(t);
   await importFile(service, writeBank(path.join(userDataDir, 'old.xlsx'), [bankRow({ BizId: 'OLD-1' })]));

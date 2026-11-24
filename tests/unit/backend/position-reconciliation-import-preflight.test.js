@@ -39,8 +39,23 @@ const {
   runPositionSourceImport
 } = require('../../../src/backend/position-reconciliation-import/source-import');
 const {
-  pickSourceFields
+  runPositionBankImport
+} = require('../../../src/backend/position-reconciliation-import/bank-import');
+const {
+  applyPositionAccountSnapshot
+} = require('../../../src/backend/position-reconciliation-import/account-import');
+const {
+  parseSourceFields,
+  pickSourceFields,
+  sameSourceFields,
+  serializeSourceFields,
+  sourceRecordKeyOf
 } = require('../../../src/main-process/position-reconciliation/source-row-storage');
+const {
+  bankFieldsFromStoredRow,
+  bankValueColumnsFromFields,
+  BANK_VALUE_COLUMNS
+} = require('../../../src/main-process/position-reconciliation/bank-row-storage');
 const {
   openPositionWorkbook,
   streamPositionXlsxRows
@@ -84,8 +99,11 @@ const MUTATING_OPERATION_CONTEXT = Object.freeze({
   operationKey: 'position-maintenance-operation'
 });
 const {
+  POSITION_IMPORT_DISK_SAFETY_MARGIN_BYTES,
+  POSITION_IMPORT_GROWTH_PER_STAGED_BYTE,
   assertPositionImportDiskSpace,
-  estimatePositionImportDiskBytes
+  estimatePositionImportDiskBytes,
+  existingStorageBytes
 } = require('../../../src/backend/position-reconciliation-import/disk-space-gate');
 
 const tempDirs = [];
@@ -1548,6 +1566,239 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
       db.prepare('SELECT original_name AS name FROM position_raw_files').all().map((row) => row.name),
       ['plain.xlsx']
     );
+  });
+
+  test('两份文件互为「过滤行撞对方正常记录」：全部读完后统一裁决，两份都拒绝，结果与文件顺序无关', async (t) => {
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const filteredOf = (key) => ({ ...base, 调拨单号: key, 调拨状态: '处理中', 付款金额: '' });
+    for (const order of ['a-first', 'b-first']) {
+      const dir = tempDir(t, `position-source-mutual-collision-${order}-`);
+      const side = createSideDb(dir);
+      const a = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [{ ...base, 调拨单号: 'FT-X' }, filteredOf('FT-Y')], 'a.xlsx');
+      const b = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [{ ...base, 调拨单号: 'FT-Y' }, filteredOf('FT-X')], 'b.xlsx');
+      const jobId = `mutual-collision-${order}`;
+      const { result } = await importSources({
+        dir, files: order === 'a-first' ? [a, b] : [b, a], ...side, jobId,
+        grant: (ready) => ({ jobId, archiveManifestHash: ready.archiveManifestHash, preflightOnly: true })
+      });
+      assert.equal(result.status, 'failed', order);
+      assert.deepEqual(
+        result.results.map((item) => item.code),
+        ['position-filtered-key-collision', 'position-filtered-key-collision'],
+        order
+      );
+      assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0, order);
+      assert.equal(countRows(side.sideDbPath, 'position_filtered_source_rows'), 0, order);
+      assert.equal(countRows(side.sideDbPath, 'position_raw_files'), 0, order);
+      const db = new DatabaseSync(side.sideDbPath, { readOnly: true });
+      try {
+        assert.deepEqual(readPositionDatabaseCheckpoint(db), side.checkpoint, order);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  test('写库时的数据库错误不当成单个坏文件：整批回滚，其余文件也不提交', async (t) => {
+    const dir = tempDir(t, 'position-source-sqlite-failure-');
+    const side = createSideDb(dir);
+    const setupDb = new DatabaseSync(side.sideDbPath);
+    setupDb.exec(`
+      CREATE TRIGGER position_test_fail_insert BEFORE INSERT ON position_source_rows
+      WHEN NEW.business_key = 'FT-BOOM'
+      BEGIN SELECT RAISE(ABORT, 'simulated sqlite failure'); END;
+    `);
+    setupDb.close();
+    const base = sourceRows();
+    const failing = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [
+      { ...base[SOURCE_TYPES.FUND_TRANSFER], 调拨单号: 'FT-BOOM' }
+    ], 'failing.xlsx');
+    const plain = sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [base[SOURCE_TYPES.GATEWAY_OUTBOUND]], 'plain.xlsx');
+
+    await assert.rejects(
+      importSources({ dir, files: [failing, plain], ...side, jobId: 'sqlite-failure-job' }),
+      (error) => String(error && error.code || '').startsWith('ERR_SQLITE')
+        && /simulated sqlite failure/.test(String(error.message))
+    );
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    assert.equal(countRows(side.sideDbPath, 'position_raw_files'), 0);
+    const db = new DatabaseSync(side.sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.deepEqual(readPositionDatabaseCheckpoint(db), side.checkpoint);
+  });
+
+  test('拿到写入授权后才到的取消不再提交；授权后的失败不删除已交接给 Main 的暂存文件', async (t) => {
+    const dir = tempDir(t, 'position-source-cancel-after-grant-');
+    const side = createSideDb(dir);
+    const file = sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]]);
+    const cancelToken = { cancelled: false };
+    const jobId = 'cancel-after-grant-job';
+    await assert.rejects(
+      importSources({
+        dir, files: [file], ...side, jobId, cancelToken,
+        grant: (ready) => {
+          cancelToken.cancelled = true;
+          return {
+            jobId, archiveManifestHash: ready.archiveManifestHash, operationToken: 'cancel-after-grant',
+            baseCheckpoint: side.checkpoint, batchContext: MUTATING_BATCH_CONTEXT
+          };
+        }
+      }),
+      (error) => error && error.code === 'position-import-cancelled'
+    );
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    const db = new DatabaseSync(side.sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.deepEqual(readPositionDatabaseCheckpoint(db), side.checkpoint);
+    // 授权意味着 Main 已把暂存文件登记进待完成操作与存档清单：回收归 Main，导入进程不得删除。
+    const stagedDir = path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH, jobId, '1');
+    assert.equal(fs.existsSync(path.join(stagedDir, path.basename(file))), true);
+
+    // 银行导入同样：授权后取消不提交，暂存保留。
+    const bankDir = tempDir(t, 'position-bank-cancel-after-grant-');
+    const bankSide = createSideDb(bankDir, 'bank-cancel');
+    const bankPath = path.join(bankDir, 'bank.xlsx');
+    writeWorkbook(bankPath, [{ name: BANK_SHEET_NAME, headers: POSITION_BANK_HEADERS, rows: [bankRow()] }]);
+    const bankCancel = { cancelled: false };
+    await assert.rejects(
+      runPositionBankImport({
+        jobId: 'bank-cancel-after-grant', files: [bankPath],
+        userDataDir: path.join(bankDir, 'worker-user-data'),
+        sideDbPath: bankSide.sideDbPath, expectedCheckpoint: bankSide.checkpoint,
+        cancelToken: bankCancel,
+        awaitApplyGrant: async () => {
+          bankCancel.cancelled = true;
+          return {
+            jobId: 'bank-cancel-after-grant', operationToken: 'bank-cancel-after-grant',
+            baseCheckpoint: bankSide.checkpoint, batchContext: MUTATING_BATCH_CONTEXT
+          };
+        }
+      }),
+      (error) => error && error.code === 'position-import-cancelled'
+    );
+    assert.equal(countRows(bankSide.sideDbPath, 'position_bank_rows'), 0);
+    assert.equal(
+      fs.existsSync(path.join(bankDir, 'worker-user-data', STAGING_RELATIVE_PATH, 'bank-cancel-after-grant', '1', 'bank.xlsx')),
+      true
+    );
+  });
+
+  test('来源记录标识、相等判断与落库对日期单元格用同一套表示；异常报告写出日期而不是内部标记', async (t) => {
+    const date = new Date(Date.UTC(2026, 6, 20, 3, 4, 5));
+    const asDate = { 调拨单号: 'FT-1', 交易时间: date };
+    const asText = { 调拨单号: 'FT-1', 交易时间: date.toISOString() };
+    assert.notEqual(sourceRecordKeyOf(asDate), sourceRecordKeyOf(asText));
+    assert.equal(sameSourceFields(asDate, asText), false);
+    // 落库再读回的日期与读取器给出的日期是同一个值、同一个标识。
+    const revived = parseSourceFields(serializeSourceFields(asDate));
+    assert.ok(revived['交易时间'] instanceof Date);
+    assert.equal(sourceRecordKeyOf(revived), sourceRecordKeyOf(asDate));
+    assert.equal(sameSourceFields(JSON.parse(serializeSourceFields(asDate)), asDate), true);
+    // 不含日期的行标识不变（仍是字段对象的稳定摘要）。
+    assert.equal(sourceRecordKeyOf({ a: '1', b: 2 }), stableHash({ a: '1', b: 2 }));
+
+    const dir = tempDir(t, 'position-source-report-date-');
+    const side = createSideDb(dir);
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const file = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [
+      { ...base, 调拨单号: 'FT-DATE', 调拨状态: '处理中', 付款金额: '', 交易时间: new Date(2026, 6, 20) }
+    ]);
+    const { result } = await importSources({ dir, files: [file], ...side, jobId: 'report-date-job' });
+    assert.equal(result.results[0].filteredRowCount, 1, JSON.stringify(result.results[0]));
+    const workbook = XLSX.readFile(result.anomalyReport.filePath, { cellDates: true });
+    const detail = XLSX.utils.sheet_to_json(workbook.Sheets['调拨异常明细'], { header: 1, raw: true });
+    const column = detail[0].indexOf('交易时间');
+    assert.ok(column >= 0);
+    const cell = detail[1][column];
+    assert.ok(cell instanceof Date, `交易时间应写成日期，实际：${JSON.stringify(cell)}`);
+    assert.equal(JSON.stringify(detail).includes('__position_reconciliation_type__'), false);
+  });
+
+  test('单遍导入的磁盘门禁按暂存文件大小估算行数据与 WAL 增长，空间不足时在写库前拒绝', async (t) => {
+    assert.equal(estimatePositionImportDiskBytes({
+      kind: 'source', sideDbPath: path.join(os.tmpdir(), 'missing-position-side.sqlite'),
+      stagedBytes: 1000, estimateGrowthFromStagedBytes: true, safetyMarginBytes: 0
+    }).requiredBytes, BigInt(1000 + 1000 * POSITION_IMPORT_GROWTH_PER_STAGED_BYTE.source));
+    assert.equal(estimatePositionImportDiskBytes({
+      kind: 'bank', sideDbPath: path.join(os.tmpdir(), 'missing-position-side.sqlite'),
+      stagedBytes: 1000, estimateGrowthFromStagedBytes: true, safetyMarginBytes: 0
+    }).requiredBytes, BigInt(1000 + 1000 * POSITION_IMPORT_GROWTH_PER_STAGED_BYTE.bank));
+
+    const dir = tempDir(t, 'position-source-disk-growth-');
+    const side = createSideDb(dir);
+    const file = sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]]);
+    const staged = BigInt(fs.statSync(file).size);
+    // 侧库现有占用含 -wal / -shm，只读连接也会留下 -shm：每次导入前按当时的文件重新计算。
+    const requiredNow = () => existingStorageBytes(side.sideDbPath) + staged
+      + staged * BigInt(POSITION_IMPORT_GROWTH_PER_STAGED_BYTE.source)
+      + BigInt(POSITION_IMPORT_DISK_SAFETY_MARGIN_BYTES);
+    await assert.rejects(
+      importSources({ dir, files: [file], ...side, jobId: 'disk-growth-short', availableBytes: requiredNow() - 1n }),
+      (error) => error && error.code === 'position-import-disk-space-insufficient'
+    );
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    const { result } = await importSources({
+      dir, files: [file], ...side, jobId: 'disk-growth-enough', availableBytes: requiredNow()
+    });
+    assert.equal(result.results[0].status, 'ok');
+  });
+
+  test('账户表确认写入：重读期间暂存文件被改动即拒绝，旧账户表不变', async (t) => {
+    const dir = tempDir(t, 'position-account-changed-during-read-');
+    const side = createSideDb(dir);
+    const base = sourceRows()[SOURCE_TYPES.BANK_ACCOUNT];
+    // 行数超过一次进度间隔，才能在读取途中改动文件。
+    const rows = Array.from({ length: 4100 }, (_item, index) => ({
+      ...base, 账户状态: '正常', 银行账号: `BANK-${index}`, 系统账号: `SYS-${index}`
+    }));
+    const file = sourceFile(dir, SOURCE_TYPES.BANK_ACCOUNT, rows, 'account.xlsx');
+    const jobId = 'account-changed-job';
+    const { ready } = await importSources({
+      dir, files: [file], ...side, jobId,
+      grant: (value) => ({ jobId, archiveManifestHash: value.archiveManifestHash, preflightOnly: true })
+    });
+    const descriptor = ready.accountConfirmationDescriptor;
+    assert.equal(descriptor.status, 'needs-confirmation');
+    let touched = false;
+    await assert.rejects(
+      applyPositionAccountSnapshot({
+        preflightReady: { jobId, jobRoot: ready.jobRoot, accountConfirmationDescriptor: descriptor },
+        sideDbPath: side.sideDbPath,
+        expectedCheckpoint: side.checkpoint,
+        operationToken: 'account-changed-operation',
+        batchContext: MUTATING_BATCH_CONTEXT,
+        onProgress: () => {
+          if (touched) return;
+          touched = true;
+          const later = new Date(Date.now() + 60_000);
+          fs.utimesSync(descriptor.archivePath, later, later);
+        }
+      }),
+      (error) => error && error.code === 'position-staged-input-changed'
+    );
+    assert.equal(touched, true);
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    assert.equal(countRows(side.sideDbPath, 'position_raw_files'), 0);
+  });
+
+  test('银行行取值往返：与内部类型标记同前缀的原文、日期、布尔读回都是原值', () => {
+    const fields = {
+      BizId: 'B-1', Channel: 'DBS', FundType: 'Inbound', BillDate: new Date(Date.UTC(2026, 6, 20)),
+      地区: 'HK', MerchantId: '00123', Currency: 'USD', 'Credit Amount': 100.5, 'Debit Amount': 0,
+      ReconciliationId: '\u0001true', ChannelOrderNo: true, CustomerRef: '\u0001note',
+      'Payee CardNo': '\u0001{"__position_reconciliation_type__":"Date","value":"2026-07-20T00:00:00.000Z"}',
+      'Drawee CardNo': '', 'Extra Fee': ''
+    };
+    const stored = Object.fromEntries(
+      bankValueColumnsFromFields(fields).map((value, index) => [BANK_VALUE_COLUMNS[index], value])
+    );
+    const restored = bankFieldsFromStoredRow({
+      ...stored, biz_id: 'B-1', channel: 'DBS', original_fund_type: 'Inbound',
+      raw_version: 1, raw_row_number: 2
+    });
+    for (const key of Object.keys(fields)) {
+      assert.deepEqual(restored[key], fields[key], key);
+    }
   });
 
   test('未识别文件的差异明细放进逐文件失败结果', async (t) => {

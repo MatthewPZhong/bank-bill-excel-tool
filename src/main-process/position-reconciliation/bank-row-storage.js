@@ -51,7 +51,12 @@ const BANK_RAW_FILE_KIND = 'bank';
 
 function encodeStoredCell(value) {
   if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    // 原文本身以保留前缀开头时按 JSON 字符串保存，读回仍是原文，不会被当成日期 / 布尔标记。
+    return value.startsWith(ENCODED_CELL_PREFIX)
+      ? ENCODED_CELL_PREFIX + JSON.stringify(value)
+      : value;
+  }
   if (typeof value === 'number') return Number.isFinite(value) ? value : '';
   if (value instanceof Date) {
     return ENCODED_CELL_PREFIX + JSON.stringify({

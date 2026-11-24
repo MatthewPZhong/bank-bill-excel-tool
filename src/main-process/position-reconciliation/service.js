@@ -499,13 +499,8 @@ class PositionReconciliationService {
   clearSourceImportTokens() {
     const paths = [];
     for (const parsed of this.sourceImportTokens.values()) {
-      if (parsed.jobRoot) {
-        paths.push(parsed.jobRoot);
-        // 保护规则按「目标目录内是否含受保护路径」判断：只登记作业根目录护不住其下的文件目录，
-        // 待确认账户表的暂存文件必须单独列出，否则同批其他文件收尾时会被一并回收。
-        const descriptor = parsed.descriptor || {};
-        if (descriptor.archivePath) paths.push(descriptor.archivePath);
-      } else if (parsed.stagingDir) paths.push(parsed.stagingDir);
+      if (parsed.jobRoot) paths.push(parsed.jobRoot);
+      else if (parsed.stagingDir) paths.push(parsed.stagingDir);
     }
     this.sourceImportTokens.clear();
     this.cleanupUnprotectedStagingPaths(paths);
@@ -533,13 +528,8 @@ class PositionReconciliationService {
   async clearSourceImportTokensAsync() {
     const paths = [];
     for (const parsed of this.sourceImportTokens.values()) {
-      if (parsed.jobRoot) {
-        paths.push(parsed.jobRoot);
-        // 保护规则按「目标目录内是否含受保护路径」判断：只登记作业根目录护不住其下的文件目录，
-        // 待确认账户表的暂存文件必须单独列出，否则同批其他文件收尾时会被一并回收。
-        const descriptor = parsed.descriptor || {};
-        if (descriptor.archivePath) paths.push(descriptor.archivePath);
-      } else if (parsed.stagingDir) paths.push(parsed.stagingDir);
+      if (parsed.jobRoot) paths.push(parsed.jobRoot);
+      else if (parsed.stagingDir) paths.push(parsed.stagingDir);
     }
     this.sourceImportTokens.clear();
     await this.cleanupUnprotectedStagingPathsAsync(paths);
@@ -1174,6 +1164,20 @@ class PositionReconciliationService {
   async cancelBankImport() {
     await this.clearBankImportTokensAsync();
     return { status: 'cancelled' };
+  }
+
+  // 确认写入的任务没能接管这次导入（存档初始化失败、任务准入被拒、模块锁被占等）：
+  // 导入进程还握着未提交的事务和侧库写锁，必须按本次令牌拒绝授权并等它回滚，否则后续写操作一直被拒。
+  async abandonPreparedBankImport(token) {
+    const normalizedToken = text(token);
+    const parsed = this.bankImportTokens.get(normalizedToken);
+    if (!parsed) return;
+    this.bankImportTokens.delete(normalizedToken);
+    if (parsed.streaming === true) {
+      await this.discardStreamingBankImport(parsed);
+      return;
+    }
+    await this.cleanupUnprotectedStagingPathsAsync(parsed.stagingDirs || []);
   }
 
   prepareSourceImport(filePaths) {

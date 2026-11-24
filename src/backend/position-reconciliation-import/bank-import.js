@@ -152,6 +152,7 @@ async function runPositionBankImport(input = {}) {
   const startedAt = Date.now();
   const jobRoot = path.join(userDataDir, STAGING_RELATIVE_PATH, jobId);
   let committed = false;
+  let handedOff = false;
   let db = null;
 
   try {
@@ -176,6 +177,8 @@ async function runPositionBankImport(input = {}) {
       sideDbPath,
       rowCount: 0,
       stagedBytes: staged.reduce((sum, file) => sum + Number(file.stagedSizeBytes || 0), 0),
+      // 行数要读完才知道：按暂存文件大小估算行数据与 WAL 的增长，在改动旧数据之前拦住空间不足。
+      estimateGrowthFromStagedBytes: true,
       availableBytes: input.availableBytes
     });
 
@@ -223,8 +226,21 @@ async function runPositionBankImport(input = {}) {
         const fileIndexByVersion = new Map();
         const scopes = new Map();
         // 与旧数据撞 BizId 的行先挂起：旧行所在的渠道 + 月份可能在后面才出现并被整体替换，
-        // 全部读完后再补写一次，仍冲突才是真冲突。
-        const deferred = [];
+        // 全部读完后再补写一次，仍冲突才是真冲突。挂起的行放事务内的临时表，不随行数占用进程内存。
+        db.exec(`
+          CREATE TEMP TABLE IF NOT EXISTS position_import_deferred_bank (
+            seq INTEGER PRIMARY KEY,
+            file_name TEXT NOT NULL,
+            row_number INTEGER NOT NULL,
+            values_json TEXT NOT NULL
+          );
+          DELETE FROM position_import_deferred_bank;
+        `);
+        const deferRow = db.prepare(`
+          INSERT INTO position_import_deferred_bank(file_name, row_number, values_json)
+          VALUES (?, ?, ?)
+        `);
+        let deferredRows = 0;
         let importOrder = 0;
         let insertedRows = 0;
 
@@ -236,7 +252,7 @@ async function runPositionBankImport(input = {}) {
             totalFiles: staged.length,
             fileName: descriptor.sourceFileName,
             scannedRows,
-            acceptedRows: insertedRows + deferred.length,
+            acceptedRows: insertedRows + deferredRows,
             committedRows: 0,
             elapsedMs: Date.now() - startedAt
           });
@@ -343,7 +359,8 @@ async function runPositionBankImport(input = {}) {
                     ]
                   );
                 }
-                deferred.push({ values, fileName: descriptor.sourceFileName, rowNumber: excelRowNumber });
+                deferRow.run(descriptor.sourceFileName, excelRowNumber, JSON.stringify(values));
+                deferredRows += 1;
               }
               importOrder += 1;
               scope.rowCount += 1;
@@ -371,27 +388,36 @@ async function runPositionBankImport(input = {}) {
         }
 
         const conflicts = [];
-        for (const item of deferred) {
-          try {
-            insert.run(...item.values);
-            insertedRows += 1;
-          } catch (insertError) {
-            const existing = findByBizId.get(item.values[0]);
-            if (!existing) throw insertError;
-            if (Number(existing.id) > previousMaxId) {
-              throw new PositionReconciliationError(
-                'position-bank-row-invalid',
-                `银行对账单存在非法行：${item.fileName} 第 ${item.rowNumber} 行`,
-                [`BizId 与本次导入的第 ${Number(existing.rowNumber)} 行重复`]
-              );
-            }
-            if (conflicts.length < MAX_CONFLICT_DETAIL_LINES) {
-              conflicts.push(
-                `BizId=${item.values[0]}：已存在于 ${existing.channel}/${existing.monthKey}，` +
-                `本次文件位于 ${item.values[1]}/${item.values[2]}`
-              );
+        if (deferredRows > 0) {
+          const pendingRows = db.prepare(`
+            SELECT file_name AS fileName, row_number AS rowNumber, values_json AS valuesJson
+            FROM position_import_deferred_bank
+            ORDER BY seq
+          `).iterate();
+          for (const item of pendingRows) {
+            const values = JSON.parse(item.valuesJson);
+            try {
+              insert.run(...values);
+              insertedRows += 1;
+            } catch (insertError) {
+              const existing = findByBizId.get(values[0]);
+              if (!existing) throw insertError;
+              if (Number(existing.id) > previousMaxId) {
+                throw new PositionReconciliationError(
+                  'position-bank-row-invalid',
+                  `银行对账单存在非法行：${item.fileName} 第 ${Number(item.rowNumber)} 行`,
+                  [`BizId 与本次导入的第 ${Number(existing.rowNumber)} 行重复`]
+                );
+              }
+              if (conflicts.length < MAX_CONFLICT_DETAIL_LINES) {
+                conflicts.push(
+                  `BizId=${values[0]}：已存在于 ${existing.channel}/${existing.monthKey}，` +
+                  `本次文件位于 ${values[1]}/${values[2]}`
+                );
+              }
             }
           }
+          db.exec('DELETE FROM position_import_deferred_bank');
         }
         if (conflicts.length > 0) {
           throw new PositionReconciliationError(
@@ -460,7 +486,12 @@ async function runPositionBankImport(input = {}) {
             archivePath: path.resolve(String(grant.archivePaths[index] || file.archivePath))
           }));
         }
+        // 拿到写入授权即表示 Main 已把这些暂存文件登记进待完成操作与存档清单：
+        // 此后无论提交成败，暂存目录都由 Main 按存档状态回收，导入进程不再删除。
+        handedOff = true;
         for (const file of acceptedFiles) await assertStagedFileUntouched(file);
+        // 授权后导入进程已进入不可取消阶段；这里再核一次，防止取消与授权同时到达时仍然提交。
+        assertNotCancelled(cancelToken);
         // 版本记录补上本次操作凭证与存档批次号，便于从版本号找到存档中心里的原件。
         const bindRawFile = db.prepare(`
           UPDATE position_raw_files
@@ -509,7 +540,7 @@ async function runPositionBankImport(input = {}) {
       jobId
     };
   } catch (error) {
-    if (!committed) {
+    if (!committed && !handedOff) {
       if (db) {
         try { db.close(); } catch (_closeError) { /* 保留原始错误 */ }
         db = null;

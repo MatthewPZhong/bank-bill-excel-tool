@@ -136,6 +136,7 @@ const {
 } = require('./main-process/archive-center/position-owned-delete-sources');
 const { createPositionReportDeleteProtection } = require('./main-process/position-reconciliation/archive-report-delete-protection');
 const {
+  findArchivedPositionReportArtifact,
   positionInputFilePlanEvidence
 } = require('./main-process/position-reconciliation/archive-file-plan-evidence');
 const {
@@ -21508,8 +21509,9 @@ async function resolvePositionAnomalyReportReference(report = {}) {
   const batch = repository && operationKey
     ? repository.getBatchByOperationKey('position-reconciliation-process', operationKey)
     : null;
-  const artifact = batch && artifactKey
-    ? repository.getArtifactByKey(batch.id, artifactKey)
+  // 侧库记的是生成报告时的键，存档条目的键由文件计划另行分配：按条目里登记的生成键去找。
+  const artifact = batch
+    ? findArchivedPositionReportArtifact(repository, batch.id, artifactKey)
     : null;
   if (!artifact || artifact.status !== 'ready') {
     throw new PositionReconciliationError(
@@ -21534,10 +21536,15 @@ async function resolvePositionAnomalyReportReference(report = {}) {
 // 之后按全新侧库初始化。必须早于任何读取侧库的入口（service、存档删除保护、启动恢复）。
 function discardOutdatedPositionSideDbAtStartup() {
   try {
-    if (!discardOutdatedPositionSideDb(path.dirname(database.dbPath))) return;
-    database.setSetting(POSITION_SIDE_DB_CHECKPOINT_SETTING, '');
-    database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
-    database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+    // 先解除主库绑定再删旧库：三项写入可重复执行，删除放在最后，任何一步中断后下次启动都会重做。
+    const discarded = discardOutdatedPositionSideDb(path.dirname(database.dbPath), {
+      beforeDelete: () => {
+        database.setSetting(POSITION_SIDE_DB_CHECKPOINT_SETTING, '');
+        database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
+        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+      }
+    });
+    if (!discarded) return;
     appendActivityLogEntry({
       level: 'info',
       source: 'main',
@@ -21803,18 +21810,25 @@ function registerPositionReconciliationHandlers() {
               sourceOperation: 'position-reconciliation:bank:apply-import'
             })),
             outputs: []
-          }
+          },
+          // 任务未接管就结束时回滚等待中的导入，释放侧库写锁。
+          onAbandon: () => getPositionReconciliationService().abandonPreparedBankImport(token)
         };
       },
-      execute: (_event, _prepared, taskContext, token) => (
-        withPositionReconciliationLock('bank-import-apply', () => {
+      execute: async (_event, _prepared, taskContext, token) => {
+        const result = await withPositionReconciliationLock('bank-import-apply', () => {
           return getPositionReconciliationService().applyBankImport(
             token,
             taskContext.batchContext,
             taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)
           );
-        })
-      )
+        });
+        // 模块锁被占时 applyBankImport 没有执行：同样要回滚等待中的导入。
+        if (result && result.status === 'busy') {
+          await getPositionReconciliationService().abandonPreparedBankImport(token);
+        }
+        return result;
+      }
     }
   );
 

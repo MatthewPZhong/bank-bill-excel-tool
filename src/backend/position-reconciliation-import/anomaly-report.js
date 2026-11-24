@@ -22,6 +22,7 @@ const {
 const {
   hashFileSha256Async
 } = require('../../main-process/position-reconciliation/input-staging');
+const { parseSourceFields } = require('../../main-process/position-reconciliation/source-row-storage');
 
 const EXCEL_MAX_ROWS = 1048576;
 const REPORT_ARTIFACT_KEY = 'source-import-anomaly-report';
@@ -144,12 +145,10 @@ function createFilteredPayloadTable(db) {
   `);
 }
 
+// 过滤行内容由 serializeSourceFields 写入，日期单元格带类型标记：按配套的方式还原，
+// 报告里写出的是日期本身，而不是内部标记的 JSON 文本。
 function parsePayload(value) {
-  const parsed = JSON.parse(value);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new TypeError('过滤行内容不是对象');
-  }
-  return parsed;
+  return parseSourceFields(value);
 }
 
 function detailSheetBaseName(sourceType) {

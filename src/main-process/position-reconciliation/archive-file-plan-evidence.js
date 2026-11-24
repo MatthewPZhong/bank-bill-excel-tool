@@ -30,4 +30,28 @@ function positionFilePlanSettlementFiles(filePlan) {
   }));
 }
 
-module.exports = { positionInputFilePlanEvidence, positionOutputFilePlanEvidence, positionFilePlanSettlementFiles };
+// 按侧库记录的报告键在原存档批次里找异常报告条目。
+// 侧库记的是生成报告时的键（存档批次的删除保护与运行冻结都按它核对）；存档条目自己的键由文件计划另行分配，
+// 生成键登记在条目的 preGeneratedOutput.producerArtifactKey。先按条目键找（兼容直接以生成键入库的批次），
+// 再按生成键找；同一批次里对应多个条目时无法确定是哪一份，返回 null。
+function findArchivedPositionReportArtifact(repository, batchId, reportArtifactKey) {
+  const key = String(reportArtifactKey || '').trim();
+  if (!repository || !key) return null;
+  const direct = repository.getArtifactByKey(batchId, key);
+  if (direct) return direct;
+  const produced = repository.listArtifacts(batchId).filter((item) => (
+    item
+    && item.direction === 'output'
+    && item.metadata
+    && item.metadata.preGeneratedOutput
+    && item.metadata.preGeneratedOutput.producerArtifactKey === key
+  ));
+  return produced.length === 1 ? produced[0] : null;
+}
+
+module.exports = {
+  findArchivedPositionReportArtifact,
+  positionInputFilePlanEvidence,
+  positionOutputFilePlanEvidence,
+  positionFilePlanSettlementFiles
+};

@@ -208,6 +208,9 @@ async function applyPositionAccountSnapshot(input = {}) {
           }
         });
         sheetName = sheetName || summary.sheetName;
+        // 读取期间文件被换成同 sheet、同行数的另一份也能通过下面的行数核对：
+        // 读完再比一次冻结的身份快照，不一致即回滚，旧账户表不变。
+        await assertStagedFileUntouched(descriptor);
         if (rowCount === 0) {
           throw new PositionReconciliationError(
             'position-bank-account-empty',
