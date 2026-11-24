@@ -35,7 +35,11 @@ test('openReadSnapshot固定query_only事务且禁止写入', () => {
   }
 });
 
-function providerHarness({ scenarios = [], metaRef = { value: { version: 1 } } } = {}) {
+function providerHarness({
+  scenarios = [],
+  metaRef = { value: { version: 1 } },
+  mappingRef = { value: new Map() }
+} = {}) {
   let closeCount = 0;
   const linkedRepo = {
     readMetaSnapshot() {
@@ -61,7 +65,8 @@ function providerHarness({ scenarios = [], metaRef = { value: { version: 1 } } }
     },
     linkedTableRepository: linkedRepo,
     scenariosRepository: { listDetailedScenarios: () => scenarios },
-    channelsRepository: {}
+    channelsRepository: {},
+    fundTransferAccountMappingRepository: { getMappingMap: () => mappingRef.value }
   });
   return { provider, getCloseCount: () => closeCount };
 }
@@ -132,4 +137,33 @@ test('启用调拨消费方时缺失或过期派生证据均fail closed', () => 
   assert.equal(snapshot.reconRows.length, 1);
   snapshot.close();
   assert.equal(getCloseCount(), 3, '成功和两条失败路径都必须关闭 snapshot');
+});
+
+test('v3.2.22：账户映射进入快照并参与签名（映射变化使已跑结果失效）', () => {
+  const mappingRef = { value: new Map([['GW-ACC-1', 'CLR-ACC-1']]) };
+  const { provider } = providerHarness({ mappingRef });
+  const first = provider.openRunSnapshot({ databasePath: '/tmp/fake.sqlite', bankRows: [] });
+  assert.equal(first.accountMappingMap.get('GW-ACC-1'), 'CLR-ACC-1', '快照透传映射供 R5s2 网关来源使用');
+  const firstSignature = first.evidenceSignature;
+  first.close();
+
+  assert.equal(
+    provider.readCurrentSignature({ databasePath: '/tmp/fake.sqlite', bankRows: [] }),
+    firstSignature,
+    '映射未变 → 签名稳定'
+  );
+
+  mappingRef.value = new Map([['GW-ACC-1', 'CLR-ACC-2']]);
+  assert.notEqual(
+    provider.readCurrentSignature({ databasePath: '/tmp/fake.sqlite', bankRows: [] }),
+    firstSignature,
+    '映射值变化 → 签名变化'
+  );
+
+  mappingRef.value = new Map();
+  assert.notEqual(
+    provider.readCurrentSignature({ databasePath: '/tmp/fake.sqlite', bankRows: [] }),
+    firstSignature,
+    '清空映射 → 签名变化'
+  );
 });

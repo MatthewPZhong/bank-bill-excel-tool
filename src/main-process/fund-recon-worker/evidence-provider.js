@@ -3,6 +3,7 @@
 const { DatabaseSync } = require('node:sqlite');
 
 const channelsRepository = require('../../backend/database/channels-repository');
+const fundTransferAccountMappingRepository = require('../../backend/database/fund-transfer-account-mapping-repository');
 const linkedTableRepository = require('../../backend/database/linked-table-repository');
 const scenariosRepository = require('../../backend/database/scenarios-repository');
 const { canonicalSha256, canonicalJsonSnapshot } = require('../background-execution/canonical-json-v1');
@@ -112,12 +113,14 @@ function linkedMetaSnapshot(db) {
   ));
 }
 
-function createEvidenceSignature({ scenarios, datePolicy, linkedMeta, derivation, reconRows }) {
+function createEvidenceSignature({ scenarios, datePolicy, linkedMeta, derivation, reconRows, accountMapping = [] }) {
   return canonicalSha256({
     scenarios,
     datePolicy,
     linkedMeta,
     derivation,
+    // v3.2.22：R5s2 网关来源与多对多检测器网关侧按账户映射取值，映射变化须使已跑结果失效。
+    accountMapping,
     derivedReconRows: {
       rowCount: reconRows.length,
       sha256: canonicalSha256(reconRows)
@@ -130,6 +133,7 @@ function createFundReconEvidenceProvider(options = {}) {
   const linkedRepo = options.linkedTableRepository || linkedTableRepository;
   const scenarioRepo = options.scenariosRepository || scenariosRepository;
   const channelsRepo = options.channelsRepository || channelsRepository;
+  const accountMappingRepo = options.fundTransferAccountMappingRepository || fundTransferAccountMappingRepository;
 
   function buildSnapshot({ databasePath, bankRows, derivationEvidence, includeRows = true }) {
     const snapshot = openSnapshot(databasePath);
@@ -158,6 +162,10 @@ function createFundReconEvidenceProvider(options = {}) {
       const reconRows = includeRows && needsReconRows
         ? linkedRepo.readFundTransferReconRows(snapshot.db)
         : [];
+      // v3.2.22（🔴 资金红线）：与主路径同口径读账户映射（链接表账户号 → 清结算系统银行账号），供 R5s2 网关来源与
+      //   多对多检测器网关侧使用；有序 entries 进入证据签名。
+      const accountMappingMap = accountMappingRepo.getMappingMap(snapshot.db);
+      const accountMappingSnapshot = canonicalJsonSnapshot(Array.from(accountMappingMap.entries()));
       const scenarioSnapshot = canonicalJsonSnapshot(scenarios);
       const datePolicySnapshot = canonicalJsonSnapshot(resolution.policy);
       const evidenceSignature = createEvidenceSignature({
@@ -165,7 +173,8 @@ function createFundReconEvidenceProvider(options = {}) {
         datePolicy: datePolicySnapshot,
         linkedMeta,
         derivation,
-        reconRows
+        reconRows,
+        accountMapping: accountMappingSnapshot
       });
       return {
         db: snapshot.db,
@@ -178,6 +187,7 @@ function createFundReconEvidenceProvider(options = {}) {
         gatewayPools,
         depositRows,
         reconRows,
+        accountMappingMap,
         evidenceSignature,
         evidence: Object.freeze({
           scenarios: scenarioSnapshot,

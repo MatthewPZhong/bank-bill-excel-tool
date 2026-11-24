@@ -976,3 +976,85 @@ test.describe('R5场景2 — 边界兜底', () => {
     assert.equal(banks[1].ReconciliationId, '');
   });
 });
+
+// ---- v3.2.22 账户映射：网关 merchantid 先映射再匹配（🔴 资金红线）----------------
+
+test.describe('R5场景2 — v3.2.22 网关 merchantid 按账户映射取值', () => {
+  const mapping = () => new Map([['GW-ACC-1', 'CLR-ACC-1']]);
+
+  test('网关账户号与银行 MerchantId 不同：无映射不命中，有映射后 in/out 两方向都回填', () => {
+    const makeRows = () => ({
+      gws: [
+        gwRow({ tradeType: 'FundTransfer-out', merchantId: 'GW-ACC-1', amount: 500, reconId: 'GW-OUT' }),
+        gwRow({ tradeType: 'FundTransfer-in', merchantId: ' GW-ACC-1 ', amount: 600, reconId: 'GW-IN' })
+      ],
+      banks: [
+        bankRow({ rowId: 'bo', fundType: 'FundTransfer-out', merchantId: 'CLR-ACC-1', credit: 0, debit: 500 }),
+        bankRow({ rowId: 'bi', fundType: 'FundTransfer-in', merchantId: 'CLR-ACC-1', credit: 600, debit: 0 })
+      ]
+    });
+
+    const before = makeRows();
+    const unmapped = runRound5FundTransferBackfill(before.gws, before.banks);
+    assert.deepEqual(unmapped.modifications, []);
+    assert.equal(unmapped.usedBankRowIds.size, 0);
+
+    const after = makeRows();
+    const mapped = runRound5FundTransferBackfill(after.gws, after.banks, { accountMappingMap: mapping() });
+    assert.deepEqual(
+      mapped.modifications.map((m) => [m.rowId, m.newValue]).sort(),
+      [['bi', 'GW-IN'], ['bo', 'GW-OUT']]
+    );
+    assert.equal(after.banks[0].ReconciliationId, 'GW-OUT');
+    assert.equal(after.banks[1].ReconciliationId, 'GW-IN');
+    // 网关行本身不被改写（映射只用于匹配取值）
+    assert.equal(after.gws[0].merchantid, 'GW-ACC-1');
+  });
+
+  test('映射命中但银行 MerchantId 仍是网关原账户号 → 不命中（与调拨来源「替换」语义一致）', () => {
+    const gws = [gwRow({ merchantId: 'GW-ACC-1', reconId: 'GW-1' })];
+    const banks = [bankRow({ rowId: 'b1', merchantId: 'GW-ACC-1', debit: 100 })];
+    const { modifications, usedBankRowIds } = runRound5FundTransferBackfill(gws, banks, {
+      accountMappingMap: mapping()
+    });
+    assert.deepEqual(modifications, []);
+    assert.equal(usedBankRowIds.size, 0);
+    assert.equal(banks[0].ReconciliationId, '');
+  });
+
+  test('网关账户号不在映射表 → 按原值匹配（未命中原样）', () => {
+    const gws = [gwRow({ merchantId: 'M001', reconId: 'GW-1' })];
+    const banks = [bankRow({ rowId: 'b1', merchantId: 'M001', debit: 100 })];
+    const { modifications } = runRound5FundTransferBackfill(gws, banks, { accountMappingMap: mapping() });
+    assert.deepEqual(modifications.map((m) => m.newValue), ['GW-1']);
+  });
+
+  test('空映射 / 非 Map 与不传完全一致（零变化）', () => {
+    const run = (options) => {
+      const gws = [gwRow({ merchantId: 'M001', reconId: 'GW-1' }), gwRow({ merchantId: 'GW-ACC-1', reconId: 'GW-2' })];
+      const banks = [
+        bankRow({ rowId: 'b1', merchantId: 'M001', debit: 100 }),
+        bankRow({ rowId: 'b2', merchantId: 'CLR-ACC-1', debit: 100 })
+      ];
+      const result = runRound5FundTransferBackfill(gws, banks, options);
+      return { modifications: result.modifications, warnings: result.warnings, used: [...result.usedBankRowIds], banks };
+    };
+    const baseline = run(undefined);
+    assert.deepEqual(run({ accountMappingMap: new Map() }), baseline);
+    assert.deepEqual(run({ accountMappingMap: { 'GW-ACC-1': 'CLR-ACC-1' } }), baseline);
+    assert.deepEqual(baseline.used, ['b1']);
+  });
+
+  test('映射后仍严格 1:1：两条网关行映射到同一账号只消费一条银行行', () => {
+    const map = new Map([['GW-A', 'CLR-1'], ['GW-B', 'CLR-1']]);
+    const gws = [
+      gwRow({ merchantId: 'GW-A', reconId: 'GW-1' }),
+      gwRow({ merchantId: 'GW-B', reconId: 'GW-2' })
+    ];
+    const banks = [bankRow({ rowId: 'b1', merchantId: 'CLR-1', debit: 100 })];
+    const { modifications, usedBankRowIds } = runRound5FundTransferBackfill(gws, banks, { accountMappingMap: map });
+    assert.equal(modifications.length, 1);
+    assert.equal(modifications[0].newValue, 'GW-1', '按网关原序先到先得');
+    assert.deepEqual([...usedBankRowIds], ['b1']);
+  });
+});

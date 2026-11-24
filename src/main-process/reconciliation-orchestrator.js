@@ -275,6 +275,8 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  *   （{ dispatchReconRows }）；数据源同为调拨对账单派生表（linked_fund_transfer_recon），但语义独立于需求2 —
  *   DBS-Charge 总需调拨对账单，**不受**需求2 reconSourceMid 开关控制，故 bank-statement:run 单独 structuredClone
  *   注入。gating = dbsChargeFundCheck 桶非空（场景 enabled）。缺省 / 空 → R3.5 no-op（不抛、不改行）。
+ * @param {Map<string,string>} [params.fundTransferAccountMappingMap] v3.2.22 账户映射（链接表账户号 → 清结算系统银行账号）。
+ *   只传给 R5s2 网关来源与多对多检测器网关侧（调拨来源在派生 big_account 时已映射）；缺省 / 非 Map = 不映射。
  * @returns {{
  *   modifiedRows: Array<Object>,
  *   unmatchedRows: Array<Object>,
@@ -301,6 +303,7 @@ async function runReconciliation({
   fundTransferReconContext,
   fundTransferAuditContext,
   dispatchReconContext,
+  fundTransferAccountMappingMap,
   fundTransferDatePolicy,
   initialWarnings,
   onProgress
@@ -309,6 +312,10 @@ async function runReconciliation({
     throw new Error('runReconciliation: bankRows 必须是数组');
   }
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
+  // v3.2.22：账户映射缺省 / 非 Map → 空 Map（不映射，与改动前口径一致）。
+  const safeAccountMappingMap = fundTransferAccountMappingMap instanceof Map
+    ? fundTransferAccountMappingMap
+    : new Map();
   // v3.0.23：仅 R2/C3 使用 trim+NOCASE 的候选预筛池；旧调用缺省时保持原 gwRows 行为。
   const safeC3GwRows = Array.isArray(c3GwRows) ? c3GwRows : safeGwRows;
   // v3.0.8 需求3：轮次边界让出 + 进度上报。onProgress 异常吞掉（绝不影响对账结果）；
@@ -524,7 +531,9 @@ async function runReconciliation({
     } else {
       const r5GatewayResult = runRound5FundTransferBackfill(safeGwRows, bankRows, {
         directions: r5s2Options.directions,
-        fundTransferDatePolicy: resolvedFundTransferDatePolicy
+        fundTransferDatePolicy: resolvedFundTransferDatePolicy,
+        // v3.2.22（🔴 资金红线）：网关来源与调拨来源共用账户映射，网关 merchantid 先映射再匹配。
+        accountMappingMap: safeAccountMappingMap
       });
       mergeMods(r5GatewayResult.modifications);
       allWarnings.push(...(r5GatewayResult.warnings || []));
@@ -612,7 +621,9 @@ async function runReconciliation({
   const manyToManyReviewRows = detectFundTransferManyToMany(actuallyModifiedBankRows, safeGwRows, detectorReconRows, {
     dateMatchEnabled: resolvedFundTransferDatePolicy.enabled,
     dateToleranceDays: resolvedFundTransferDatePolicy.toleranceDays,
-    fundTransferDatePolicy: resolvedFundTransferDatePolicy
+    fundTransferDatePolicy: resolvedFundTransferDatePolicy,
+    // v3.2.22：网关侧账号与 R5s2 网关匹配同口径（调拨侧 big_account 派生时已映射）。
+    accountMappingMap: safeAccountMappingMap
   }).reviewRows;
   await yieldTick('M2M'); // 轮次边界让出（M2M 异常说明检测已完成，进 buildOutputRows 前；上游 R5s4+detector 不再挤成同步块）
 

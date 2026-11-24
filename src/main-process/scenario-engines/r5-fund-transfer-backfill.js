@@ -9,7 +9,7 @@
 // 跨表字段（显式映射，绝不假设同名 —— TECH_DESIGN §4）：
 //   网关（gateway-bill，真实表头）：
 //     gw.TradeType            交易类型（用于按 direction 过滤）
-//     gw.merchantid（小写）    商户 ID
+//     gw.merchantid（小写）    商户 ID（v3.2.22：先按账户映射换成清结算系统银行账号，再与 bank.MerchantId 比较）
 //     gw.currency（小写）      币种
 //     gw.amount（小写，单列）  金额（含正负方向，本场景取绝对值）
 //     gw.Billdate            账单日期
@@ -36,6 +36,10 @@
 //   Phase2：仅 Phase1 未命中的 gw，对未被消费的银行行用 ±dateToleranceDays（dayDiffWithin）再匹配。
 //   日期解析复用 engine-date-utils 的 sameDay / dayDiffWithin（内部走 normalizeDateExportValue，勿自写解析）。
 //
+// 账户映射（🔴 v3.2.22）：options.accountMappingMap（链接表账户号 → 清结算系统银行账号，与调拨对账单派生
+//   big_account 同一张表）只作用于匹配用的网关账号：engine-utils.resolveMappedAccount(map, gw.merchantid)，
+//   命中替换、未命中原值；空表 / 缺省 = 改动前口径。网关行本身与回填的 reconciliationid 不变。
+//
 // 严格 1v1：usedBankRowId 单向消费（每个 direction 独立一份），一条银行行最多被一条网关行回填。
 // 多候选 tie-break：同日优先（Phase 分离已保证）→ 银行行原序最前（cand 保持 bankPool 顺序，取 cand[0]）+ warning。
 //
@@ -45,7 +49,8 @@ const {
   makeModificationCollector,
   makeWarningCollector,
   normalizeCellValue,
-  parseNumber
+  parseNumber,
+  resolveMappedAccount
 } = require('./engine-utils');
 
 const { sameDay, dayDiffWithin, toDate } = require('./engine-date-utils');
@@ -165,6 +170,8 @@ function dateMismatchReason(counterpartDateValue, bankDateValue) {
  * @param {Object} [options]
  * @param {Array<{gwTradeType:string,bankFundType:string}>} [options.directions] 双方向定义（默认 out/in）
  * @param {number} [options.dateToleranceDays] Phase2 日期容差天数（默认 1）
+ * @param {Map<string,string>} [options.accountMappingMap] v3.2.22 账户映射（链接表账户号 → 清结算系统银行账号），
+ *   只用于网关 merchantid 的匹配取值；缺省 / 非 Map = 不映射
  * @returns {{ modifications: Array, warnings: Array, usedBankRowIds: Set }}
  *   modifications：实际改写 ReconciliationId 的行（{ rowId, column:'ReconciliationId', oldValue, newValue }），用于标黄
  *   warnings：multi-bank-match-backfill / r5-invalid-extra-fee
@@ -214,10 +221,20 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
     };
   }
 
-  // 对账字段全等：非空 merchantid↔MerchantId、非空 currency↔Currency
+  // v3.2.22：网关账号先按账户映射取值（每个网关行只算一次，避免 N×M 重复查表；结果与逐次计算一致）。
+  const accountMappingMap = options.accountMappingMap;
+  const mappedGwMerchantIds = new Map();
+  const mappedGwMerchantIdOf = (gw) => {
+    if (mappedGwMerchantIds.has(gw)) return mappedGwMerchantIds.get(gw);
+    const mapped = resolveMappedAccount(accountMappingMap, gw && gw.merchantid);
+    mappedGwMerchantIds.set(gw, mapped);
+    return mapped;
+  };
+
+  // 对账字段全等：非空 merchantid（映射后）↔MerchantId、非空 currency↔Currency
   //   + (|Credit-Debit| + signed Extra Fee) 先加总后精确到分。
   const fieldEq = (gw, bank) => {
-    const gwMerchantId = normalizeCellValue(gw && gw.merchantid);
+    const gwMerchantId = mappedGwMerchantIdOf(gw);
     const bankMerchantId = normalizeCellValue(bank && bank.MerchantId);
     const gwCurrency = normalizeCellValue(gw && gw.currency);
     const bankCurrency = normalizeCellValue(bank && bank.Currency);

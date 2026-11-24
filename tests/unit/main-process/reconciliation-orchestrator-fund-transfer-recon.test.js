@@ -315,3 +315,77 @@ test.describe('v3.1.1 resolved policy 接线（两来源共用，配置失败关
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 });
+
+// ---- v3.2.22：账户映射透传（网关来源生效、调拨来源不重复映射）-------------------
+
+test.describe('runReconciliation R5s2 —— v3.2.22 fundTransferAccountMappingMap 透传', () => {
+  const mapping = () => new Map([['GW-ACC-1', '202782001']]);
+
+  test('取消路（网关来源）：网关账户号经映射对上银行 MerchantId → 回填、_round=R5s2；不传映射则不命中', async () => {
+    const run = (fundTransferAccountMappingMap) => {
+      const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
+      return runReconciliation({
+        bankRows,
+        gwRows: [makeGwRow({ merchantid: 'GW-ACC-1', reconciliationid: 'GW-RECON-MAPPED' })],
+        scenarios: [makeR5s2Scenario({ reconSourceMid: false })],
+        fundTransferAccountMappingMap
+      }).then((result) => ({ result, bankRows }));
+    };
+
+    const unmapped = await run(undefined);
+    assert.equal(unmapped.bankRows[0].ReconciliationId, '', '未传映射：账号不同不回填');
+    assert.equal(unmapped.result.stats.r5s2BackfilledCount, 0);
+
+    const mapped = await run(mapping());
+    assert.equal(mapped.bankRows[0].ReconciliationId, 'GW-RECON-MAPPED');
+    const mod = mapped.result.modifications.find((m) => m.rowId === 'b1' && m.column === 'ReconciliationId');
+    assert.equal(mod && mod._round, 'R5s2');
+    assert.equal(mapped.result.modifiedRows.length + mapped.result.unmatchedRows.length, 1);
+  });
+
+  test('勾选路（调拨来源）：映射不再作用于已派生的 big_account，结果与不传映射一致', async () => {
+    const run = (fundTransferAccountMappingMap) => {
+      const bankRows = [makeBankRow({ _rowId: 'b1', MerchantId: 'GW-ACC-1', 'Credit Amount': 100 })];
+      return runReconciliation({
+        bankRows,
+        gwRows: [],
+        scenarios: [makeR5s2Scenario({ reconSourceMid: true })],
+        fundTransferReconContext: { reconRows: [makeReconRow({ big_account: 'GW-ACC-1', ReconID: 'RECON-MID' })] },
+        fundTransferAccountMappingMap
+      }).then((result) => ({ modifications: result.modifications, bankRows }));
+    };
+    const baseline = await run(undefined);
+    assert.equal(baseline.bankRows[0].ReconciliationId, 'RECON-MID');
+    assert.deepEqual(await run(mapping()), baseline);
+  });
+
+  test('取消路：多对多检测器网关侧用同一映射（2 银行 × 2 网关映射后同账号 → 异常说明命中）', async () => {
+    const bankRows = [
+      makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 }),
+      makeBankRow({ _rowId: 'b2', 'Credit Amount': 100 })
+    ];
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [
+        makeGwRow({ merchantid: 'GW-ACC-1', reconciliationid: 'GW-1' }),
+        makeGwRow({ merchantid: 'GW-ACC-1', reconciliationid: 'GW-2' })
+      ],
+      scenarios: [makeR5s2Scenario({ reconSourceMid: false })],
+      fundTransferAccountMappingMap: mapping()
+    });
+    assert.deepEqual(bankRows.map((r) => r.ReconciliationId), ['GW-1', 'GW-2']);
+    assert.deepEqual(result.manyToManyReviewRows.map((r) => r.row._rowId), ['b1', 'b2']);
+    assert.ok(result.manyToManyReviewRows.every((r) => /银行↔网关多对多/.test(r.note)));
+  });
+
+  test('非 Map 映射入参按不映射处理（不崩）', async () => {
+    const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
+    await runReconciliation({
+      bankRows,
+      gwRows: [makeGwRow({ merchantid: 'GW-ACC-1' })],
+      scenarios: [makeR5s2Scenario({ reconSourceMid: false })],
+      fundTransferAccountMappingMap: { 'GW-ACC-1': '202782001' }
+    });
+    assert.equal(bankRows[0].ReconciliationId, '');
+  });
+});

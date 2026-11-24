@@ -53,6 +53,7 @@ function evidenceProvider(signatureRef) {
         gatewayPools: { exactRows: [], c3Rows: [] },
         depositRows: [],
         reconRows: [],
+        accountMappingMap: new Map([['GW-ACC-1', 'CLR-ACC-1']]),
         evidenceSignature: signatureRef.value,
         evidence: { version: 1 }
       };
@@ -146,6 +147,8 @@ test('run使用同一working rows并仅在全成功+adopt ACK后发布结果', a
   assert.equal(runCalls.length, 1);
   assert.notStrictEqual(runCalls[0].bankRows, beforeRun.bankSession.rows);
   assert.deepEqual(runCalls[0].bankRows, beforeRun.bankSession.rows);
+  // v3.2.22：快照中的账户映射透传给编排器（R5s2 网关来源与多对多检测器网关侧）。
+  assert.equal(runCalls[0].fundTransferAccountMappingMap.get('GW-ACC-1'), 'CLR-ACC-1');
   assert.equal(service.status().stableSummary.hasProcessingResult, true);
 });
 

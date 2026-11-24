@@ -1,4 +1,4 @@
-// v3.0.12 功能2（批A）：账户映射管理仓储 —— 全局对照表「中台调拨单账户号 → 清结算系统银行账号」。
+// v3.0.12 功能2（批A）：账户映射管理仓储 —— 全局对照表「链接表账户号（中台调拨单 / 网关对账单共用）→ 清结算系统银行账号」。
 //   表：fund_transfer_account_mappings（migrations.ensureFundTransferAccountMappingSupport 建表，UNIQUE(mid_account_id)）。
 //   归一化口径：账号统一走引擎 normalizeCellValue（trim + String 化），与调拨派生 / 对账引擎单一真相对齐
 //   —— 批B 派生 buildFundTransferReconRows 时用 getMappingMap 快查替换 big_account，键值口径必须与本仓写入一致。
@@ -36,7 +36,7 @@ function saveMappings(db, mappings) {
       return; // 空行跳过
     }
     if (midAccountId === '' || clearingAccountId === '') {
-      throw new Error('账户映射存在未填写完整的行（中台调拨单账户号 / 清结算系统银行账号 必须同时填写）');
+      throw new Error('账户映射存在未填写完整的行（链接表账户号 / 清结算系统银行账号 必须同时填写）');
     }
     cleaned.push({ midAccountId, clearingAccountId });
   });

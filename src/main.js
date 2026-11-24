@@ -7144,6 +7144,21 @@ function registerAppHandlers() {
       const workingFundTransferAuditReconRows = dbsChargeScenarioEnabled
         ? workingDispatchReconRows
         : workingReconRows;
+      // v3.2.22（🔴 资金红线）：账户映射（链接表账户号 → 清结算系统银行账号）同时供 R5s2 网关来源与多对多检测器网关侧使用
+      //   （调拨来源已在上方派生 big_account 时映射）。facade 缺失（旧 mock）→ 空 Map；读库失败则整轮失败，
+      //   不按空表继续（防静默少回填）。映射保存会清 processingResult（fund-transfer-account-mapping:save），导出前必重跑。
+      let fundTransferAccountMappingMap = new Map();
+      if (typeof database.getFundTransferAccountMappingMap === 'function') {
+        try {
+          fundTransferAccountMappingMap = database.getFundTransferAccountMappingMap() || new Map();
+        } catch (mappingError) {
+          const readError = new Error(
+            `读取账户映射失败：${mappingError && mappingError.message ? mappingError.message : String(mappingError)}`
+          );
+          readError.code = 'fund-transfer-account-mapping-read-failed';
+          throw readError;
+        }
+      }
       // v3.0.8 需求3：进入 R1-R5 编排前让出一次（大表读已完成，下面是 CPU 密集的多轮对账）。
       await yieldRun('reconcile');
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
@@ -7165,6 +7180,8 @@ function registerAppHandlers() {
         // v3.1.1 self-review：调拨多对多只读审计入参独立于 R5 写入 gating。
         // R5 关闭但 R3.5 开启时仍注入 R3.5 已使用的调拨副本；编排器不得把它交给 R5。
         fundTransferAuditContext: { reconRows: workingFundTransferAuditReconRows },
+        // v3.2.22：R5s2 网关来源与 M2M 网关侧共用账户映射（调拨来源已在派生时映射）。
+        fundTransferAccountMappingMap,
         // v3.1.1：R3.5、R5s2 两来源和 M2M 审计共享同一不可变日期策略；配置告警排在引擎告警之前。
         fundTransferDatePolicy,
         initialWarnings: fundTransferPolicyResolution.warnings,
@@ -8703,7 +8720,7 @@ function registerAccountMappingHandlers() {
 
 // v3.0.12 功能2（批A）：账户映射管理保存前校验（仿 validateAccountMappings，无币种 / 无模板维度）。
 //   - 两列皆空 → 跳过（空行不保存）；仅一列为空 → 报错。
-//   - 中台调拨单账户号去重（DB UNIQUE(mid_account_id) 兜底，这里先给友好提示）。
+//   - 链接表账户号（中台调拨单 / 网关对账单共用）去重（DB UNIQUE(mid_account_id) 兜底，这里先给友好提示）。
 //   - 长度护栏（≤128，防异常脏数据；不强加字符集正则，账号格式跨系统不一）。
 //   归一化（trim + String）由仓储 saveMappings 统一执行；本函数仅做完整性 / 唯一性 / 长度校验。
 function validateFundTransferAccountMappings(mappings) {
@@ -8741,7 +8758,7 @@ function validateFundTransferAccountMappings(mappings) {
     if (midAccountSeen.has(midAccountId)) {
       return {
         status: 'error',
-        message: '中台调拨单账户号不可重复，请重新确认'
+        message: '链接表账户号不可重复，请重新确认'
       };
     }
 
@@ -8787,7 +8804,8 @@ function registerFundTransferAccountMappingHandlers() {
 
       database.saveFundTransferAccountMappings(validationResult.mappings);
       // 🔴 资金红线：账户映射改写调拨对账派生的 big_account（批B buildFundTransferReconRows 用 getMappingMap 替换），
-      //   影响「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 → 失效已缓存对账结果，强制用户重跑后才能导出。
+      //   影响「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5；v3.2.22 起 R5s2 网关来源与多对多检测器网关侧也按此映射
+      //   → 失效已缓存对账结果，强制用户重跑后才能导出。
       //   （同 linked-table 变更范式：bank-statement:export 守卫只校验 scenariosSnapshot、不认账户映射变更，须在此清缓存兜底。）
       processingResult = null;
       clearLastErrorReport();

@@ -862,7 +862,7 @@
 
     // v3.0.12 功能2（批A）：账户映射管理弹窗 preview（「链接表管理」左下角入口打开的全局对照表弹窗）。
     //   由同一 modalHost 挂载；列表读取在 onMount 开始，关闭后的读取不会改动新窗口。
-    //   打开后异步拉列表（preview 临时库为空 → 渲染空表 + 末行「新增」+ 三列表头「中台调拨单账户号/清结算系统银行账号/执行操作」）。
+    //   打开后异步拉列表（preview 临时库为空 → 渲染空表 + 末行「新增」+ 三列表头「链接表账户号/清结算系统银行账号/执行操作」）。
     function applyFundTransferAccountMappingPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       return openModal(() => createFundTransferAccountMappingDialog());

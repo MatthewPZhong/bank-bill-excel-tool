@@ -855,20 +855,23 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - `app:get-info` 两段式：init 未完返回 `{initPending:true,version}`；改字段须同步 renderer `applyFullInfo` 消费。
   - 前端改动 → 重跑 `npm run preview`；改时序 → `npm run startup:measure` 对比（建窗≤300ms / 日常≤1.5s / 升级首启≤3s）。
 
-### 账户映射 → 调拨对账单 `big_account` 派生（v3.0.12 功能2 新增 Risk-sensitive ⚠️🔴 资金红线 — 全局对照表改对账大账号取值）
+### 账户映射 → 调拨对账单 `big_account` 派生 / R5s2 网关 `merchantid`（v3.0.12 功能2 新增、v3.2.22 扩到网关来源 Risk-sensitive ⚠️🔴 资金红线 — 全局对照表改对账大账号取值）
 - 定义：
   - 全局表 `fund_transfer_account_mappings`（DDL `migrations.js` `ensureFundTransferAccountMappingSupport`，`UNIQUE(mid_account_id)`，幂等 `CREATE TABLE IF NOT EXISTS`、**不进 `ALL_TABLE_KEYS`**）。
   - 仓储 `src/backend/database/fund-transfer-account-mapping-repository.js`：`listMappings`（UI 回填，按 `row_index` 升序）/ `saveMappings`（事务内全删重插、空行跳过、半填抛错）/ `getMappingMap`（归一化 `Map<midAccountId, clearingAccountId>` + 🔴 空键护栏）。
   - facade `database.js`：`ensureFundTransferAccountMappingSupport` / `listFundTransferAccountMappings` / `saveFundTransferAccountMappings` / `getFundTransferAccountMappingMap`。
-  - 消费点 `src/main-process/fund-transfer-recon-builder.js` `buildFundTransferReconRows(midRows, { accountMappingMap })` 第 2 参——in 行 `big_account`（收款卡号）/ out 行 `big_account`（付款卡号）取 `accountMappingMap.get(acc) ?? acc`（命中换清结算账号、未命中原样）；注入点 `src/main-process/linked-derive-rebuild.js` `rebuildFundTransferReconDerivation`（builder **唯一生产调用处**，run / mid-allocation 导入两链皆经此）实时取 `database.getFundTransferAccountMappingMap()` 传入。
-  - IPC `fund-transfer-account-mapping:list` / `:save`（`main.js` `registerFundTransferAccountMappingHandlers` + `validateFundTransferAccountMappings` 完整性/唯一/长度≤128）；preload `fundTransferAccountMappings.list/save`；UI `createFundTransferAccountMappingDialog`（链接表管理左下角入口）。
-- 关联功能：软件自动整理出的「调拨对账单」是「中台调拨订单对账ID回填」（R5s2-recon）与「DBS-Charge资金校验」（R3.5）的对账对手方；`big_account` 是这两处对账的匹配键（账号维度）。映射改了 `big_account` ＝ 改了这两处的命中口径。
+  - 单一取值口径（v3.2.22）：`scenario-engines/engine-utils.js` `resolveMappedAccount(map, raw)` = `normalizeCellValue(raw)` 后 `map.get(key) ?? key`，非 Map 按空表。
+  - 消费点 `src/main-process/fund-transfer-recon-builder.js` `buildFundTransferReconRows(midRows, { accountMappingMap })` 第 2 参——in 行 `big_account`（收款卡号）/ out 行 `big_account`（付款卡号）经 `resolveMappedAccount` 取值（命中换清结算账号、未命中原样）；注入点 `src/main-process/linked-derive-rebuild.js` `rebuildFundTransferReconDerivation`（builder **唯一生产调用处**，run / mid-allocation 导入两链皆经此）实时取 `database.getFundTransferAccountMappingMap()` 传入。
+  - v3.2.22 消费点（网关来源）：`r5-fund-transfer-backfill.js` `runRound5FundTransferBackfill(gw, bank, { accountMappingMap })` 的 `fieldEq` 用 `resolveMappedAccount(map, gw.merchantid)` 对 `bank.MerchantId`；`many-to-many-detector.js` `detectFundTransferManyToMany(..., { accountMappingMap })` 网关侧账号同口径。编排器 `runReconciliation({ fundTransferAccountMappingMap })` 只传这两处；注入点 `main.js` `bank-statement:run`（`database.getFundTransferAccountMappingMap()`，facade 缺失 → 空 Map，读库抛错 → 整轮失败 `fund-transfer-account-mapping-read-failed`）与 G7 worker `fund-recon-worker/evidence-provider.js`（`getMappingMap(snapshot.db)`，entries 进入 `evidenceSignature`）→ `service.js` 透传。
+  - IPC `fund-transfer-account-mapping:list` / `:save`（`main.js` `registerFundTransferAccountMappingHandlers` + `validateFundTransferAccountMappings` 完整性/唯一/长度≤128）；preload `fundTransferAccountMappings.list/save`；UI `createFundTransferAccountMappingDialog`（链接表管理左下角入口；v3.2.22 起表头「链接表账户号」）。
+- 关联功能：软件自动整理出的「调拨对账单」是「中台调拨订单对账ID回填」（R5s2-recon）与「DBS-Charge资金校验」（R3.5）的对账对手方；`big_account` 是这两处对账的匹配键（账号维度）。映射改了 `big_account` ＝ 改了这两处的命中口径。v3.2.22 起「中台调拨订单对账ID回填」的网关来源（`reconSourceMid:false`，R5s2）与「异常-人工判断」网关侧也按同一映射取网关账号；R1 / C3 / R4 / 退款等其余对 `gw.merchantid` 的使用不映射。
 - 🔴 变更 review 要点（资金红线，改动前必读）：
   - **口径单一真值源**：map 键值与 builder 内 `payAccount`/`payeeAccount` 均经 `normalizeCellValue`——`getMappingMap` 写入即归一化、builder **不再二次归一化**（二次归一化口径漂移 ＝ `map.get` 落空 ＝ 该换没换 ＝ 写错对账 ID）。改任一侧归一化口径须同步另一侧。
   - **仅作用 `big_account`**：付款/收款展示账户、渠道、金额、币种、FundType 一律不动；映射只换匹配用的大账号。
   - **空表 ＝ 零变化护栏**：映射表空 / facade 缺失（旧 mock database 单测）→ 空 `Map` → 全 passthrough → 调拨派生与升级前字节级一致。改 `rebuildFundTransferReconDerivation` 注入点须保 run / 导入两链一致（漏一条 ＝ 两链口径分裂）。
-  - **唯一性**：`UNIQUE(mid_account_id)` + IPC validate 双重兜底；一个中台调拨单账户号只能映一个清结算银行账号。
-  - 必跑：`fund-transfer-account-mapping-repository.test.js` + `fund-transfer-recon-builder.test.js`（映射组）+ 集成 `fund-transfer-recon-account-mapping.js`（导入中台单 → 配映射 → 派生 `big_account` 换值端到端）+ 真实数据手测（配映射前后调拨对账命中变化）。
+  - **唯一性**：`UNIQUE(mid_account_id)` + IPC validate 双重兜底；一个链接表账户号只能映一个清结算银行账号（中台调拨单 / 网关对账单共用键空间）。
+  - **网关来源只换匹配取值**（v3.2.22）：不改网关行、不改回填的 `reconciliationid`；命中映射后只按清结算账号比（银行 `MerchantId` 仍是网关原账号时不再命中，与调拨来源「替换」语义一致）。检测器网关侧必须与 R5s2 网关同一 map，否则映射后命中的多对多漏报。映射保存清 `processingResult`（op-lock 内），worker 签名含映射。
+  - 必跑：`fund-transfer-account-mapping-repository.test.js` + `fund-transfer-recon-builder.test.js`（映射组）+ `engine-utils.test.js`（`resolveMappedAccount`）+ `r5-fund-transfer-backfill.test.js` / `many-to-many-detector.test.js` / `reconciliation-orchestrator-fund-transfer-recon.test.js`（v3.2.22 映射组）+ `fund-recon-worker-evidence.test.js` + 集成 `fund-transfer-recon-account-mapping.js`（Case A-C 调拨派生、D-F 网关来源端到端）+ 真实数据手测（配映射前后两种来源的命中变化）。
 
 ### `PreFundReconciliationService` / `SCENARIO_MISSING_GATEWAY` / `RECONCILIATION_RULES`（v3.0.14 新增、v3.0.16 扩展 Risk-sensitive ⚠️🔴🔴 资金红线）
 - 定义：

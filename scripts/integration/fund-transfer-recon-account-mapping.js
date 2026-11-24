@@ -15,6 +15,11 @@
 //   6. 断言：无映射 → big_account=原始账号 → 不命中（ReconciliationId 不回填）；
 //           有映射 → big_account=清结算账号 → 命中（ReconciliationId 回填为调拨 ReconID）。in/out 两方向都覆盖。
 //
+// v3.2.22 追加（Case D-F）：网关来源（场景取消勾选「对账数据来源为中台调拨单表」，reconSourceMid:false）共用同一张映射表。
+//   真实链路：saveFundTransferAccountMappings → 网关账单 upsert 落 linked_gateway_bill → readGatewayBillRowPoolsByChannels
+//   → runReconciliation（fundTransferAccountMappingMap 取自 getFundTransferAccountMappingMap，与 bank-statement:run 注入一致）
+//   → R5s2 网关引擎 merchantid 先映射再匹配；断言无映射不命中、有映射两方向回填、清空映射复原，且调拨来源 big_account 与 Case B 同口径。
+//
 // 用法：node scripts/integration/fund-transfer-recon-account-mapping.js
 
 const fs = require('node:fs');
@@ -27,6 +32,7 @@ const { rebuildFundTransferReconDerivation } = require('../../src/main-process/l
 const {
   runRound5FundTransferReconBackfill
 } = require('../../src/main-process/scenario-engines/r5-fund-transfer-recon-backfill');
+const { runReconciliation } = require('../../src/main-process/reconciliation-orchestrator');
 const {
   FT_RECON_FIELD_MAP,
   MID_ALLOCATION_SUCCESS_STATUS
@@ -102,12 +108,61 @@ function deriveReconRows(appDb) {
   return { derive: fundTransferReconDerive, reconRows: appDb.readFundTransferReconRows() };
 }
 
+// v3.2.22：网关账单两行（真实小写表头）；merchantid 用网关账户号（与中台调拨单原始账号同一份映射键）。
+function gatewayRows() {
+  return [
+    {
+      Channel: 'JPM', TradeType: 'FundTransfer-in', merchantid: 'MID-RECV-001', currency: 'USD',
+      amount: '2100000', Billdate: '2026-05-04', reconciliationid: 'GW-RECON-IN', ReconBillBizId: 'GB-IN', orderid: 'GW-1'
+    },
+    {
+      Channel: 'JPM', TradeType: 'FundTransfer-out', merchantid: 'MID-PAY-002', currency: 'HKD',
+      amount: '-900000', Billdate: '2026-05-04', reconciliationid: 'GW-RECON-OUT', ReconBillBizId: 'GB-OUT', orderid: 'GW-2'
+    }
+  ];
+}
+
+// R5s2 场景：取消勾选 → 网关来源。
+function gatewaySourceScenario() {
+  return {
+    id: 9001,
+    name: '中台调拨订单对账ID回填',
+    category: 'builtin-fixed',
+    priority: 0,
+    enabled: true,
+    config: {
+      funcCategory: 'platform-order',
+      subCategory: 'fund-transfer-backfill',
+      roundPhase: 5,
+      directions: [
+        { gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-out' },
+        { gwTradeType: 'FundTransfer-in', bankFundType: 'FundTransfer-in' }
+      ],
+      dateToleranceDays: 1,
+      reconSourceMid: false
+    }
+  };
+}
+
+// 镜像 bank-statement:run：按银行 Channel 读网关池，映射从 facade 实时取。
+async function runGatewaySource(appDb) {
+  const bankRows = freshBankRows().map((row) => ({ ...row, Channel: 'JPM' }));
+  const gwRows = appDb.readGatewayBillRowPoolsByChannels(bankRows.map((row) => row.Channel)).exactRows;
+  const result = await runReconciliation({
+    bankRows,
+    gwRows,
+    scenarios: [gatewaySourceScenario()],
+    fundTransferAccountMappingMap: appDb.getFundTransferAccountMappingMap()
+  });
+  return { result, bankRows, gwRows };
+}
+
 function bigAccountOf(reconRows, fundType) {
   const row = reconRows.find((r) => r[R.fundType] === fundType);
   return row ? row[R.bigAccount] : undefined;
 }
 
-function run() {
+async function run() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ftr-acct-map-'));
   let appDb;
   try {
@@ -165,6 +220,48 @@ function run() {
       const { modifications } = runRound5FundTransferReconBackfill(reconRows, bankRows);
       assertEq(modifications.length, 0, '🔴 C: 清空映射 → 不再命中（映射表空＝零变化）');
     }
+
+    // ===== v3.2.22 网关来源：同一张映射表作用于网关 merchantid =====
+    appDb.upsertLinkedGatewayBill(gatewayRows(), { sourceFileName: 'gateway.xlsx', legacySource: true });
+
+    // ===== Case D：无映射 → 网关账户号对不上银行 MerchantId → 不回填 =====
+    {
+      appDb.saveFundTransferAccountMappings([]);
+      const { result, bankRows, gwRows } = await runGatewaySource(appDb);
+      assertEq(gwRows.length, 2, 'D: 网关账单经链接表按 Channel 读回 2 行');
+      assertEq(result.stats.r5s2BackfilledCount, 0, '🔴 D: 无映射 → 网关来源 0 回填');
+      assertEq(bankRows.map((b) => b.ReconciliationId), ['', ''], 'D: 银行行 ReconciliationId 仍空');
+      assertEq(result.modifiedRows.length + result.unmatchedRows.length, 2, 'D: 行数守恒');
+    }
+
+    // ===== Case E：配映射 → 网关 merchantid 换成清结算账号 → in/out 两方向回填网关 reconciliationid =====
+    {
+      appDb.saveFundTransferAccountMappings([
+        { midAccountId: 'MID-RECV-001', clearingAccountId: 'CLR-RECV-999' },
+        { midAccountId: 'MID-PAY-002', clearingAccountId: 'CLR-PAY-888' }
+      ]);
+      const { result, bankRows, gwRows } = await runGatewaySource(appDb);
+      assertEq(bankRows.find((b) => b._rowId === 'BIN').ReconciliationId, 'GW-RECON-IN', '🔴 E: 银行 in 行回填网关 reconciliationid');
+      assertEq(bankRows.find((b) => b._rowId === 'BOUT').ReconciliationId, 'GW-RECON-OUT', '🔴 E: 银行 out 行回填网关 reconciliationid');
+      const rounds = result.modifications.filter((m) => m.column === 'ReconciliationId').map((m) => m._round);
+      assertEq(rounds, ['R5s2', 'R5s2'], 'E: 两条改写均来自 R5s2 网关来源');
+      assertEq(gwRows.map((g) => g.merchantid), ['MID-RECV-001', 'MID-PAY-002'], 'E: 网关行 merchantid 不被改写');
+      assertEq(result.manyToManyReviewRows.length, 0, 'E: 1:1 命中，不产生多对多异常说明');
+      assertEq(result.modifiedRows.length + result.unmatchedRows.length, 2, 'E: 行数守恒');
+
+      // 同一份映射下调拨来源口径一致（共用一张表）：派生 big_account 同样是清结算账号。
+      const { reconRows } = deriveReconRows(appDb);
+      assertEq(bigAccountOf(reconRows, FT_RECON_FIELD_MAP.FUND_TYPE_IN), 'CLR-RECV-999', 'E: 调拨来源 in big_account 同表映射');
+      assertEq(bigAccountOf(reconRows, FT_RECON_FIELD_MAP.FUND_TYPE_OUT), 'CLR-PAY-888', 'E: 调拨来源 out big_account 同表映射');
+    }
+
+    // ===== Case F：清空映射 → 网关来源回到未映射口径 =====
+    {
+      appDb.saveFundTransferAccountMappings([]);
+      const { result, bankRows } = await runGatewaySource(appDb);
+      assertEq(result.stats.r5s2BackfilledCount, 0, '🔴 F: 清空映射 → 网关来源不再回填（映射表空＝零变化）');
+      assertEq(bankRows.map((b) => b.ReconciliationId), ['', ''], 'F: 银行行 ReconciliationId 仍空');
+    }
   } catch (err) {
     failed += 1;
     failures.push({ label: '运行抛错', actual: String(err && err.stack ? err.stack : err), expected: '无异常' });
@@ -188,4 +285,7 @@ function run() {
   }
 }
 
-run();
+run().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  process.exitCode = 1;
+});

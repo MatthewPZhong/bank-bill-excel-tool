@@ -8,6 +8,7 @@ const {
   makeModificationCollector,
   makeWarningCollector,
   normalizeCellValue,
+  resolveMappedAccount,
   parseNumber,
   valuesEqual
 } = require('../../../../src/main-process/scenario-engines/engine-utils');
@@ -301,5 +302,39 @@ test.describe('makeModificationCollector', () => {
     c.record('r1', 'col', 'old', 'new');
     const mods = c.listModifications();
     assert.deepEqual(mods[0], { rowId: 'r1', column: 'col', oldValue: 'old', newValue: 'new' });
+  });
+});
+
+// v3.2.22（🔴 资金红线）：账户映射单一取值口径（调拨对账单派生 big_account 与 R5s2 网关 merchantid 共用）。
+test.describe('resolveMappedAccount', () => {
+  const map = new Map([['ACC-1', 'CLR-1'], ['123456', 'CLR-NUM'], ['ZERO', '0']]);
+
+  test('命中 → 换成清结算系统银行账号；键按 normalizeCellValue 归一化（trim）', () => {
+    assert.equal(resolveMappedAccount(map, 'ACC-1'), 'CLR-1');
+    assert.equal(resolveMappedAccount(map, '  ACC-1 '), 'CLR-1');
+  });
+
+  test('数字账号按字符串口径命中（与 getMappingMap 写入键一致）', () => {
+    assert.equal(resolveMappedAccount(map, 123456), 'CLR-NUM');
+  });
+
+  test('未命中 → 归一化后的原值', () => {
+    assert.equal(resolveMappedAccount(map, ' OTHER '), 'OTHER');
+  });
+
+  test('空值 → 空串，不会命中任何映射', () => {
+    assert.equal(resolveMappedAccount(map, ''), '');
+    assert.equal(resolveMappedAccount(map, null), '');
+    assert.equal(resolveMappedAccount(map, undefined), '');
+  });
+
+  test('映射值为假值但非空（"0"）也按命中替换（?? 只在键缺失时回退）', () => {
+    assert.equal(resolveMappedAccount(map, 'ZERO'), '0');
+  });
+
+  test('非 Map（缺省 / 普通对象）→ 不映射，返回归一化原值', () => {
+    assert.equal(resolveMappedAccount(undefined, ' ACC-1 '), 'ACC-1');
+    assert.equal(resolveMappedAccount(null, 'ACC-1'), 'ACC-1');
+    assert.equal(resolveMappedAccount({ 'ACC-1': 'CLR-1' }, 'ACC-1'), 'ACC-1');
   });
 });

@@ -398,3 +398,37 @@ test('大组封顶：nb×nc 超 MAX_BIPARTITE_EDGES → 不建图、整组银行
   assert.ok(reviewRows.every((r) => /规模过大/.test(r.note)), 'note 含「规模过大」（区别于普通命中文案）');
   assert.ok(reviewRows.every((r) => /银行 448 × 对手 448/.test(r.note)), 'note 含 银行N×对手M 规模');
 });
+
+// ---- v3.2.22：网关侧账号按账户映射取值（与 R5s2 网关匹配同口径）-----------------
+
+test('v3.2.22：网关 merchantid 经账户映射后与银行 MerchantId 成组 → NvM 命中；不传映射则不成组', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', merchantId: 'CLR-1' }),
+    bankRow({ rowId: 'b2', merchantId: 'CLR-1' })
+  ];
+  const gws = [gwRow({ merchantid: 'GW-1' }), gwRow({ merchantid: ' GW-1 ' })];
+  const before = structuredClone(banks);
+
+  assert.equal(detectFundTransferManyToMany(banks, gws, []).reviewRows.length, 0, '未映射：账号不同不成组');
+
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, [], {
+    accountMappingMap: new Map([['GW-1', 'CLR-1']])
+  });
+  assert.deepEqual(hitRowIds({ reviewRows }), ['b1', 'b2']);
+  assert.ok(reviewRows.every((r) => /账号 CLR-1/.test(r.note)), 'note 中账号为银行侧清结算账号');
+  assert.deepEqual(banks, before, '🔴 纯只读：映射只影响分组键，不改银行行');
+  assert.equal(gws[0].merchantid, 'GW-1', '网关行不被改写');
+});
+
+test('v3.2.22：调拨侧不受网关映射影响（big_account 已在派生时映射）', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', merchantId: 'GW-1' }),
+    bankRow({ rowId: 'b2', merchantId: 'GW-1' })
+  ];
+  const recons = [reconRow({ bigAccount: 'GW-1' }), reconRow({ bigAccount: 'GW-1' })];
+  const { reviewRows } = detectFundTransferManyToMany(banks, [], recons, {
+    accountMappingMap: new Map([['GW-1', 'CLR-1']])
+  });
+  assert.deepEqual(hitRowIds({ reviewRows }), ['b1', 'b2']);
+  assert.ok(reviewRows.every((r) => /调拨/.test(r.note)));
+});

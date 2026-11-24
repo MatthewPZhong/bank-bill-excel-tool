@@ -17,6 +17,8 @@
 // 跨表字段（显式映射）：
 //   银行（驼峰）：bank.MerchantId / bank.Currency / bank.BillDate / bank._rowId
 //   网关（小写）：gw.merchantid / gw.currency / gw.Billdate
+//     v3.2.22：网关账号经 options.accountMappingMap（链接表账户号 → 清结算系统银行账号）取值，
+//     与 R5s2 网关匹配同一口径（engine-utils.resolveMappedAccount）；调拨侧 big_account 派生时已映射。
 //   调拨（RECON 常量）：rc[RECON.bigAccount] / rc[RECON.currency] / rc[RECON.billDate]
 //
 // 算法（不限 FundType、不分 in/out 方向 —— 用户已确认放宽到全部银行行）：
@@ -38,7 +40,7 @@
 //   且 银行≥2 的组，否则丢弃不建组）。另对单组 银行×对手 超 MAX_BIPARTITE_EDGES 的极端大组不建二部图，
 //   保守整组银行行命中（🔴 宁可过报，绝不静默漏报）。正常规模数据不触阈值 → 与旧实现命中集完全一致。
 
-const { normalizeCellValue } = require('./engine-utils');
+const { normalizeCellValue, resolveMappedAccount } = require('./engine-utils');
 const { dayDiffWithin } = require('./engine-date-utils');
 const { bankAmountWithExtraFee, gwAmountAbs } = require('./r5-fund-transfer-backfill');
 const { reconAmountAbs } = require('./r5-fund-transfer-recon-backfill');
@@ -52,13 +54,16 @@ const RECON = FT_RECON_FIELD_MAP.recon;
 const MAX_BIPARTITE_EDGES = 200000;
 
 // 对手方访问器（显式字段映射；account/currency 走 normalizeCellValue，amount 走引擎金额访问器，date 原值给 dayDiffWithin）。
-const GW_ACCESSORS = {
-  label: '网关',
-  account: (gw) => gw && gw.merchantid,
-  currency: (gw) => gw && gw.currency,
-  amount: (gw) => gwAmountAbs(gw),
-  date: (gw) => gw && gw.Billdate
-};
+// 网关账号按本次运行的账户映射取值（与 R5s2 网关 fieldEq 同口径），故按调用构造。
+function gwAccessorsFor(accountMappingMap) {
+  return {
+    label: '网关',
+    account: (gw) => resolveMappedAccount(accountMappingMap, gw && gw.merchantid),
+    currency: (gw) => gw && gw.currency,
+    amount: (gw) => gwAmountAbs(gw),
+    date: (gw) => gw && gw.Billdate
+  };
+}
 const RECON_ACCESSORS = {
   label: '调拨',
   account: (rc) => rc && rc[RECON.bigAccount],
@@ -217,6 +222,7 @@ function detectOneSide(bankRows, cpRows, cpAccessors, datePolicy) {
  * @param {Object} [options.fundTransferDatePolicy] 主流程解析后的不可变日期策略（{ enabled, toleranceDays }）
  * @param {boolean} [options.dateMatchEnabled] 旧直接调用兼容：是否启用日期
  * @param {number} [options.dateToleranceDays] 日期容差天数（默认 1，含同日 ±1）
+ * @param {Map<string,string>} [options.accountMappingMap] v3.2.22 账户映射，网关侧账号按此取值（缺省 = 不映射）
  * @returns {{ reviewRows: Array<{ row: Object, note: string }> }}
  *   reviewRows：命中银行行的**引用** + 中文说明；按 bankRows 原序稳定排序；空入参 → { reviewRows: [] }。
  */
@@ -230,7 +236,7 @@ function detectFundTransferManyToMany(bankRows, gwRows, reconRows, options = {})
   if (safeBankRows.length === 0) return { reviewRows: [] };
 
   const gwHits = safeGwRows.length > 0
-    ? detectOneSide(safeBankRows, safeGwRows, GW_ACCESSORS, datePolicy)
+    ? detectOneSide(safeBankRows, safeGwRows, gwAccessorsFor(options.accountMappingMap), datePolicy)
     : [];
   const reconHits =
     safeReconRows.length > 0

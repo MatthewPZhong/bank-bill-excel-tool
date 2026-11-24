@@ -121,6 +121,16 @@ function makeModificationCollector() {
   };
 }
 
+// v3.2.22（🔴 资金红线）：账户映射「链接表账户号 → 清结算系统银行账号」的唯一取值口径。
+//   调拨对账单派生 big_account（fund-transfer-recon-builder）与 R5s2 网关 merchantid（r5-fund-transfer-backfill、
+//   多对多检测器网关侧）共用：先 normalizeCellValue（与 getMappingMap 写入键同口径，幂等），命中 → 清结算账号，
+//   未命中 → 原值。用 ?? 而非 ||：只有键缺失才回退。非 Map（缺省 / 误传）按空表处理 = 原值 passthrough。
+function resolveMappedAccount(accountMappingMap, rawAccount) {
+  const account = normalizeCellValue(rawAccount);
+  if (!(accountMappingMap instanceof Map)) return account;
+  return accountMappingMap.get(account) ?? account;
+}
+
 // 比较两端值是否相等（C2 / C3 配对用）
 // 数字字段 → 比较 number；字符串字段 → 比较 normalize 后的字符串
 function valuesEqual(left, right, { numeric = false } = {}) {
@@ -141,5 +151,6 @@ module.exports = {
   normalizeCellValue,
   normalizeTransactionNo,
   parseNumber,
+  resolveMappedAccount,
   valuesEqual
 };
