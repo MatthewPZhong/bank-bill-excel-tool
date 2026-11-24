@@ -488,16 +488,18 @@ function createStatementGenerationHelpers(deps) {
         if (Array.isArray(balanceResult.confirmedBalanceSeedReplacements) && balanceResult.confirmedBalanceSeedReplacements.length) {
           warnings.push({ type: 'balance-seed-replace-confirmed', replacements: balanceResult.confirmedBalanceSeedReplacements });
         }
-        const balanceOutput = buildStatementOutputFilePath({
-          kind: 'balance',
-          templateName: statementOutputName(config),
-          merchantId: outputMerchantId,
-          outputTag: 'BALANCE',
-          dateRangeLabel: buildDateRangeLabel(balanceResult.billDates),
-          internalSuffix
-        });
-
+        let balanceOutput;
         try {
+          // 路径准备会建导出目录（ensureStorageRoot），与写出同样经下面的异常处理：分组生成时失败整批回滚，
+          //   不转成「余额生成失败」告警提交前组的种子（spec D3，Codex 第十七轮 P1）
+          balanceOutput = buildStatementOutputFilePath({
+            kind: 'balance',
+            templateName: statementOutputName(config),
+            merchantId: outputMerchantId,
+            outputTag: 'BALANCE',
+            dateRangeLabel: buildDateRangeLabel(balanceResult.billDates),
+            internalSuffix
+          });
           // 读余额模板失败按模板不可读报出（spec D3；只在账单生成这里归类，见 writers.js）
           writeThrough(balanceOutput.outputFilePath, () => writeBalanceWorkbook({
             templateFilePath: balanceTemplatePath,

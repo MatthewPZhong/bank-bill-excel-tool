@@ -395,6 +395,18 @@ test('writeErrorReport：写入失败且删除失败时不留下正式名称的�
   const root = mkTmpRoot();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const payload = { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' };
+  // 固定时钟：两份报告跨过午夜时落到不同日期的目录（Codex 第十七轮）
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 24, 10, 0, 0).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { global.Date = RealDate; });
   const ok = writeErrorReport(root, payload);
   assert.deepEqual(fs.readdirSync(path.dirname(ok.filePath)), [ok.fileName], '成功时只有正式报告');
   fs.rmSync(ok.filePath);

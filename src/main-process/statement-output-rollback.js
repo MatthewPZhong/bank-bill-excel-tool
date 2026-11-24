@@ -273,11 +273,39 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     return retried;
   }
 
+  // 本批已登记、写后解析真实路径失败（键未确认）的文件：重新解析，按确认的键补登记，之后才能按键找到经别名写入的同一文件
+  //   （否则把本批写后的内容当作批前原文再备份一次，Codex 第十七轮 P2）。路径上已没有文件的不可能是别名，跳过；
+  //   仍不能确认时返回 false
+  function reindexUnconfirmedEntries() {
+    let confirmed = true;
+    for (const entry of entries) {
+      if (!isUnconfirmedFileKey(entry.ownedFileKey)) continue;
+      let key = null;
+      try {
+        const current = lstatOrNull(fsImpl, entry.filePath);
+        if (!current) continue;
+        key = fileKeyOf(current, entry.filePath, fsImpl);
+      } catch (_error) {
+        key = null;
+      }
+      if (key && !isUnconfirmedFileKey(key)) {
+        entry.ownedFileKey = key;
+        byFile.set(key, entry);
+      } else {
+        confirmed = false;
+      }
+    }
+    return confirmed;
+  }
+
   function track(filePath) {
     const { resolved, stat } = checkTarget(filePath);
     let known = byPath.get(resolved);
     const key = known ? null : lookupFileKey(stat, resolved);
-    if (!known && key) known = byFile.get(key);
+    if (!known && key) {
+      if (!byFile.has(key) && !reindexUnconfirmedEntries()) throw unidentifiedTargetError();
+      known = byFile.get(key);
+    }
     if (known) {
       byPath.set(resolved, known);
       if (!known.paths.has(resolved)) {

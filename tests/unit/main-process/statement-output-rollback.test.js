@@ -1149,3 +1149,55 @@ for (const persistent of [false, true]) {
     assert.equal(fs.readFileSync(upper, 'utf8'), 'before');
   });
 }
+
+// v3.2.22 B45（Codex 第十七轮）：不提供文件编号、不区分大小写的卷上，本批新建的文件首次写成后解析真实路径失败（键未确认），
+//   下一组经大小写别名写入：先重新解析已登记的文件再按键查找，按同一文件合并，不把本批写后的内容当作批前原文备份；
+//   已登记的文件仍解析失败时不写。回滚都删除本批新建的文件
+for (const persistent of [false, true]) {
+  test(`ino 为 0 的卷上新建文件写后键未确认、再经别名写入：${persistent ? '仍不能确认时不写入' : '重新解析后合并'}，回滚删除新建文件`, (t) => {
+    const { root, staging } = setup(t);
+    const upper = path.join(root, 'BANK.json');
+    const lower = path.join(root, 'bank.json');
+    fs.writeFileSync(upper, 'probe');
+    const caseInsensitive = fs.existsSync(lower);
+    fs.rmSync(upper);
+    if (!caseInsensitive) {
+      t.skip('前提不满足：临时卷区分大小写');
+      return;
+    }
+    const zeroIno = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino: 0n });
+    let failUpper = 0;
+    const realpath = (filePath, ...rest) => {
+      if (path.basename(String(filePath)) === 'BANK.json' && failUpper > 0) {
+        failUpper -= 1;
+        throw Object.assign(new Error('EIO: i/o error, realpath'), { code: 'EIO' });
+      }
+      return fs.realpathSync.native(filePath, ...rest);
+    };
+    realpath.native = realpath;
+    const fsImpl = {
+      ...fs,
+      realpathSync: realpath,
+      lstatSync: (...args) => { const stat = fs.lstatSync(...args); return stat && args[1] && args[1].bigint ? zeroIno(stat) : stat; },
+      fstatSync: (...args) => { const stat = fs.fstatSync(...args); return args[1] && args[1].bigint ? zeroIno(stat) : stat; }
+    };
+    const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+    journal.write(upper, () => {
+      fs.writeFileSync(upper, 'group-1');
+      failUpper = 1;
+    });
+    failUpper = persistent ? Infinity : 0;
+    if (persistent) {
+      assert.throws(() => journal.write(lower, writeText(lower, 'group-2')), { code: 'STATEMENT_OUTPUT_TARGET_UNIDENTIFIED' });
+      assert.equal(fs.readFileSync(upper, 'utf8'), 'group-1', '不能确认时不写入');
+      failUpper = 0;
+    } else {
+      journal.write(lower, writeText(lower, 'group-2'));
+    }
+    const [batchDir] = fs.readdirSync(staging);
+    assert.deepEqual(fs.readdirSync(path.join(staging, batchDir)).filter((name) => name.endsWith('.bak')), [], '新建文件没有批前原文，不登记备份');
+    const outcome = journal.rollback();
+    assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+    assert.equal(fs.existsSync(upper), false, '本批新建的文件已删除');
+  });
+}

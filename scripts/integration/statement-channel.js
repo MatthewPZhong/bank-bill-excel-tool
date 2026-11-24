@@ -295,7 +295,9 @@ function createEnvironment(dir, label, overrides = {}) {
     buildDateRangeLabel,
     buildDetailExportRows,
     buildFieldIndexMap,
-    buildStatementOutputFilePath: fns.buildStatementOutputFilePath,
+    buildStatementOutputFilePath: overrides.buildStatementOutputFilePath
+      ? (options) => overrides.buildStatementOutputFilePath(options, fns.buildStatementOutputFilePath)
+      : fns.buildStatementOutputFilePath,
     cloneRowsWithMetadata,
     deriveBalanceRecords,
     ensureStorageRoot: () => storageRoot,
@@ -1904,7 +1906,8 @@ function verifyOutputPathConcatenationConflict(dir) {
 //    appendLog 用不抛错的桩：余额写出失败若被转成「余额生成失败」告警，批次会继续提交，本步须能识别出来。
 //    会话条目、批次与导出缓存用真实实现（realSession）。
 function verifyMultiTemplateGenerationRollback(dir) {
-  const faults = { writeCalls: 0, failWriteAt: 0, balanceCalls: 0, failBalanceAt: 0, mergeCalls: 0, failMergeAt: 0,
+  const faults = { writeCalls: 0, failWriteAt: 0, balanceCalls: 0, failBalanceAt: 0, balancePathCalls: 0, failBalancePathAt: 0,
+    mergeCalls: 0, failMergeAt: 0,
     seedCalls: 0, failSeedAt: 0, failSeedReadAt: 0, partialSeedWrites: 0, seedRecordsStored: 0, afterJournalWrite: null,
     failTemplateReadAt: 0, cleanupFailedDirectory: null };
   const activityLog = [];
@@ -1925,6 +1928,16 @@ function verifyMultiTemplateGenerationRollback(dir) {
   const loggedErrors = [];
   const env = createEnvironment(dir, 'step20', {
     realSession: true,
+    // 余额输出路径准备（建导出目录）的注入点
+    buildStatementOutputFilePath: (options, original) => {
+      if (options.kind === 'balance') {
+        faults.balancePathCalls += 1;
+        if (faults.failBalancePathAt && faults.balancePathCalls === faults.failBalancePathAt) {
+          throw Object.assign(new Error('EIO: i/o error, mkdir（注入：余额导出目录）'), { code: 'EIO' });
+        }
+      }
+      return original(options);
+    },
     appendLog: (_root, error) => {
       loggedErrors.push(error);
       return 'logs/step20.log';
@@ -2041,6 +2054,7 @@ function verifyMultiTemplateGenerationRollback(dir) {
   const run = (entries, fallbackTemplateId = templateA.id, { session = defaultSession, replacePaths = ['/old/replaced.xlsx'] } = {}) => {
     faults.writeCalls = 0;
     faults.balanceCalls = 0;
+    faults.balancePathCalls = 0;
     faults.mergeCalls = 0;
     faults.seedCalls = 0;
     try {
@@ -2093,6 +2107,15 @@ function verifyMultiTemplateGenerationRollback(dir) {
   assertEq(balanceError && balanceError.code, 'EBUSY', 'Step20.余额写出失败原样抛出');
   assertEq(snapshot(), baseline, 'Step20.余额写出失败：已覆盖的同名输出与种子还原为上次内容');
   assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.余额写出失败时不替换旧会话条目');
+
+  // （3c）第二组准备余额输出路径时建导出目录失败一次：与写出失败同样整批还原，不转成「余额生成失败」告警提交第一组的种子
+  //   （Codex 第十七轮 P1 ⚠️ 资金口径）
+  faults.failBalancePathAt = 2;
+  const balancePathError = run(writeSources('11', '21'));
+  faults.failBalancePathAt = 0;
+  assertEq(balancePathError && balancePathError.code, 'EIO', 'Step20.余额输出路径准备失败原样抛出');
+  assertEq(snapshot(), baseline, 'Step20.余额输出路径准备失败：已覆盖的同名输出与种子还原为上次内容');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.余额输出路径准备失败时不替换旧会话条目');
 
   // （4）第二组业务校验失败（收支同时有值）：写出前拦下，输出与种子不变
   const validationError = run(writeSources('11', '21', '5'));
