@@ -11,7 +11,8 @@ const { assertFilePlanFresh } = require('../../../src/main-process/archive-cente
 const { prepareIpcTaskInvocation } = require('../../../src/main-process/archive-center/ipc-task-contract');
 const { pathsAlias } = require('../../../src/main-process/toolbox-target-identity');
 const {
-  CASES, MULTI_PAYLOAD, caseOverrides, casePayload, firstColumn, loadHandlers, setup: setupFixture, generators
+  CASES, MULTI_PAYLOAD, caseOverrides, casePayload, firstColumn, loadHandlers, setup: setupFixture, generators,
+  simulateUnreliableParentIdentity
 } = require('../../helpers/toolbox-main-handlers');
 
 const setup = (t) => setupFixture((fn) => t.after(fn));
@@ -122,6 +123,11 @@ for (const kind of Object.keys(CASES)) {
       }
     }));
     const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+    // 前提：冻结时拿到可靠的目录身份；拿不到时按 D3 只核对路径（由下方受控用例验证），不在此断言拒绝
+    if (!prepared.filePlan.outputs.every((output) => output.targetParentIdentity.identityReliable)) {
+      t.skip('临时卷给不出可靠的目录身份，按 D3 退回路径核对');
+      return;
+    }
     assert.equal(calls.publication, 1);
     calls.publicationOptions.targets.forEach((target, index) => {
       assert.deepEqual(target.expectedTargetParentIdentity, prepared.filePlan.outputs[index].targetParentIdentity);
@@ -143,6 +149,63 @@ for (const kind of Object.keys(CASES)) {
     for (const [index, name] of CASES[kind].targets.entries()) {
       assert.deepEqual(await firstColumn(path.join(env.output, name)), expected[index]);
     }
+  });
+}
+
+// 父目录身份的可靠性按首次冻结为准（D2、D3）：首次采样不可靠、访问输入后恢复可靠时，目录与目标都未变即照常导出；
+//   一直不可靠时同路径替换的目录只核对路径，按 v3.2.3 兼容约定照常发布（不因文件系统能力未知误伤）
+for (const kind of Object.keys(CASES)) {
+  test(`${kind}：父目录身份首次采样不可靠、之后恢复时照常导出（B57）`, async (t) => {
+    const env = setup(t);
+    const simulated = simulateUnreliableParentIdentity(env.output, 1);
+    t.after(simulated.restore);
+    const { calls, run } = loadHandlers(env, caseOverrides(env, kind));
+    const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+    assert.equal(simulated.state.count, 1, '前置：首次采样被模拟为不可靠');
+    assert.equal(prepared.proceed, true, JSON.stringify(prepared.result));
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    assert.equal(calls.settle, 1);
+  });
+
+  // 多文件拆分的暂存目录就在目标目录里，替换目录即移走暂存产物、发布按产物缺失失败，不适用此场景
+  if (kind !== 'multiple') test(`${kind}：父目录身份一直不可靠时同路径替换的目录只核对路径、照常发布（D3）`, async (t) => {
+    const env = setup(t);
+    const simulated = simulateUnreliableParentIdentity(env.output);
+    t.after(simulated.restore);
+    const moved = path.join(env.root, 'out-moved');
+    const { calls, run } = loadHandlers(env, caseOverrides(env, kind, {
+      beforePublish: async () => {
+        fs.renameSync(env.output, moved);
+        fs.mkdirSync(env.output);
+      }
+    }));
+    const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+    assert.ok(prepared.filePlan.outputs.every((output) => output.targetParentIdentity.identityReliable === false), '前置：冻结的身份不可靠');
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    assert.equal(calls.settle, 1);
+    // 发布回执（.toolbox-publish-*.journal.json）由结算后确认清理，这里只看正式输出
+    assert.deepEqual(fs.readdirSync(env.output).filter((name) => !name.startsWith('.toolbox-publish-')).sort(), [...CASES[kind].targets].sort());
+  });
+
+  test(`${kind}：访问输入期间目标被建成文件夹时报目标变化（B57）`, async (t) => {
+    const env = setup(t);
+    const target = path.join(env.output, CASES[kind].targets[0]);
+    let touched = false;
+    const { calls, run } = loadHandlers(env, caseOverrides(env, kind, {
+      pathsAlias: (fsImpl, left, right) => {
+        if (!touched) {
+          touched = true;
+          fs.mkdirSync(target);
+        }
+        return pathsAlias(fsImpl, left, right);
+      }
+    }));
+    const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+    assert.equal(touched, true, '前置：别名检查访问了输入');
+    assert.equal(prepared.proceed, false);
+    assert.equal(result.code, 'ARCHIVE_TARGET_CHANGED', JSON.stringify(result));
+    assert.equal(calls.publication, 0);
+    assert.equal(fs.statSync(target).isDirectory(), true);
   });
 }
 

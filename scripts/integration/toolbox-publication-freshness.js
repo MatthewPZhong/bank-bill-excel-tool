@@ -56,7 +56,12 @@ for (const kind of Object.keys(CASES)) {
         fs.writeFileSync(path.join(env.output, 'new-owner.txt'), 'keep');
       }
     }));
-    const { result } = await run(CASES[kind].channel, casePayload(env, kind));
+    const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+    // 前提：冻结时拿到可靠的目录身份；拿不到时按 spec D3 只核对路径（单测用受控夹具验证），不在此断言拒绝
+    if (!prepared.filePlan.outputs.every((output) => output.targetParentIdentity.identityReliable)) {
+      console.log(`  SKIP 前提不满足：临时卷给不出可靠的目录身份（${kind}）`);
+      return;
+    }
     assert.equal(result.code, 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED', JSON.stringify(result));
     assert.equal(calls.settle, 0);
     assert.deepEqual(fs.readdirSync(env.output), ['new-owner.txt']);

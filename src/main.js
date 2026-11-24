@@ -22603,18 +22603,28 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
 }
 
 // v3.2.22 B57：保存框 / 目录选择返回后先只冻结目标（目标快照与父目录身份），再访问输入（别名检查、输入快照）；
-//   完整计划的目标须与先冻结的一致。输入多或在网络盘上时，遍历输入期间外部新建或替换的目标不被当作用户已确认覆盖的版本。
+//   完整计划规范化之后再按先冻结的证据核对当前目标（父目录身份按首次冻结的可靠性比较：首次不可靠时只核对路径）：
+//   核对通过即说明完整计划采到的目标与先冻结的一致。返回完整计划本身（契约层只沿用 Main 登记过的冻结计划）。
+//   输入多或在网络盘上时，遍历输入期间外部新建、替换（含建成文件夹）的目标不被当作用户已确认覆盖的版本，报目标变化。
 function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
   const targetsOnly = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs });
-  assertToolboxTargetsDoNotAliasSources(inputs.map((item) => item.filePath), outputs.map((item) => item.filePath));
-  const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs, outputs });
-  plan.outputs.forEach((output, index) => {
-    const frozen = targetsOnly.outputs[index];
-    if (JSON.stringify(output.targetSnapshot) !== JSON.stringify(frozen.targetSnapshot)
-        || JSON.stringify(output.targetParentIdentity) !== JSON.stringify(frozen.targetParentIdentity)) {
+  const assertTargetsUnchanged = () => {
+    try {
+      assertFilePlanFresh(targetsOnly);
+    } catch (_error) {
       throw Object.assign(new TypeError('输出目标在任务确认后已变化'), { code: 'ARCHIVE_TARGET_CHANGED' });
     }
-  });
+  };
+  assertToolboxTargetsDoNotAliasSources(inputs.map((item) => item.filePath), outputs.map((item) => item.filePath));
+  let plan;
+  try {
+    plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs, outputs });
+  } catch (error) {
+    // 先冻结时目标合法、现在规范化失败：目标变了报目标变化，否则是输入本身的问题，原样抛出
+    assertTargetsUnchanged();
+    throw error;
+  }
+  assertTargetsUnchanged();
   return plan;
 }
 

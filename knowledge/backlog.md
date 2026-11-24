@@ -854,7 +854,7 @@
 - **影响**：“覆盖全部”弹窗等待期间，外部新建原本不存在的目标或替换已列出的目标，仍被采集为合法目标并被覆盖（`main.js` 多输出拆分确认后才构造 FilePlan，`archive-center/ipc-task-contract.js` 才捕获快照）。按行拆分在确认前已冻结全部目标
 - **关闭条件**：确认前冻结全部目标（含不存在的），沿用同一 FilePlan；确认期间与 prepare 后的新建 / 替换均拒绝，原有内容不被覆盖
 - **目标版本**：v3.2.22（暂定；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
-- **关闭**：v3.2.22（暂定，分支 `fix/toolbox-publication-freshness`）。多文件拆分在目录选定后立即冻结全部目标（含不存在的），按冻结快照列冲突，确认后核对冻结计划，确认期间的新建 / 替换报 `ARCHIVE_TARGET_CHANGED` 并取消；合表、单值拆分在保存框返回即冻结；三种都先冻结目标再访问输入，遍历输入期间目标被新建 / 替换同样拒绝；同一计划经契约层与生命周期沿用（[spec](../changes/v3.2.22/fix/toolbox-publication-freshness/spec.md) D1–D2）。验证：单测 `toolbox-publication-freshness.test.js`（修复前失败）、集成 `toolbox-publication-freshness.js`
+- **关闭**：v3.2.22（暂定，分支 `fix/toolbox-publication-freshness`）。多文件拆分在目录选定后立即冻结全部目标（含不存在的），按冻结快照列冲突，确认后核对冻结计划，确认期间的新建 / 替换报 `ARCHIVE_TARGET_CHANGED` 并取消；合表、单值拆分在保存框返回即冻结；三种都先冻结目标再访问输入，遍历输入期间目标被新建 / 替换 / 建成文件夹同样拒绝，父目录身份按首次冻结的可靠性比较；同一计划经契约层与生命周期沿用（[spec](../changes/v3.2.22/fix/toolbox-publication-freshness/spec.md) D1–D2）。验证：单测 `toolbox-publication-freshness.test.js`（修复前失败）、集成 `toolbox-publication-freshness.js`
 
 ### B58（P2 · 已知问题）工具箱合表等非按行输出：输入快照失效后仍发布，父目录身份未传到发布器
 

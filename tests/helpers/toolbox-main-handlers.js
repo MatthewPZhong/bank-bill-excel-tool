@@ -120,7 +120,13 @@ function loadHandlers(env, overrides = {}) {
         await waitForReadStreamsClosed(env.root);
         await overrides.beforePublish(options);
       }
-      return dispatcher.publish({ ...options, requireArchiveHandoff: true });
+      // 与生产入口 publishToolboxPublicationAsync（toolbox-output-publication-dispatch.js）同样的发布选项
+      return dispatcher.publish({
+        ...options,
+        requireArchiveHandoff: true,
+        requireValidatedArtifacts: true,
+        allowEmptyArchiveInputs: options && options.allowEmptyArchiveInputs === true
+      });
     },
     appendActivityLogEntry: () => {},
     toolboxFinalOutputFiles: (files) => files
@@ -169,7 +175,22 @@ function casePayload(env, kind) {
   return payload && { ...payload, sourceFilePath: env.source };
 }
 
+// 受控模拟文件系统给不出可靠的目录身份（target-parent-identity.js：前后两次 lstat 与 realpath 后 stat 的 dev / ino 不一致即
+//   identityReliable: false）。times 为需要模拟的采样次数（Infinity 表示一直不可靠），返回 { restore, count }。
+//   不依赖本机临时卷的实际能力，按 spec D3 的退回路径核对单独验证
+function simulateUnreliableParentIdentity(directory, times = Infinity) {
+  const statSync = fs.statSync;
+  const state = { count: 0 };
+  fs.statSync = function unreliableParentStat(target, options, ...rest) {
+    const stat = statSync.call(this, target, options, ...rest);
+    if (state.count >= times || !(options && options.bigint) || path.resolve(String(target)) !== directory) return stat;
+    state.count += 1;
+    return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino: stat.ino + 1n });
+  };
+  return { state, restore: () => { fs.statSync = statSync; } };
+}
+
 module.exports = {
-  CASES, MULTI_PAYLOAD, caseOverrides, casePayload, firstColumn, loadHandlers, setup,
+  CASES, MULTI_PAYLOAD, caseOverrides, casePayload, firstColumn, loadHandlers, setup, simulateUnreliableParentIdentity,
   generators: { mergeToolboxFilesToXlsx, exportToolboxFilter, exportToolboxMultiFilters }
 };
