@@ -152,8 +152,11 @@ const UNIDENTIFIABLE_HARD_LINK_MESSAGE = '导出位置的同名文件另有硬�
 //   不列文件路径：内部文件名可能含完整账号，错误会写入报错文件
 function buildRollbackIncompleteError(error, { failures, backupDirectory, manifestPath }) {
   const restore = failures.filter((item) => item.existed).length;
+  const uncertain = failures.filter((item) => !item.existed && item.reason === FAILURE_REASONS.UNCERTAIN_OWNER).length;
   const changed = failures.filter((item) => item.reason === FAILURE_REASONS.CHANGED_EXTERNALLY).length;
-  const summary = `未能自动还原 ${failures.length} 个文件（原有文件 ${restore} 个、本次新建 ${failures.length - restore} 个；其中写出后被其他程序改动 ${changed} 个）`;
+  // 写前不存在、写出回调抛错后路径上出现的文件归属不明，不计入「本次新建」（Codex 第九轮）
+  const summary = `未能自动还原 ${failures.length} 个文件（原有文件 ${restore} 个、本次新建 ${failures.length - restore - uncertain} 个${
+    uncertain ? `、写前不存在且归属待核对 ${uncertain} 个` : ''}；其中写出后被其他程序改动 ${changed} 个）`;
   // 恢复清单写不出时退回写出记录：它列出本批全部写入尝试（含已还原的），不是失败清单（Codex 第八轮）
   const location = !manifestPath
     ? `原内容备份目录：${backupDirectory || '（未能创建）'}`
@@ -184,6 +187,8 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   let backupDirectory = null;
   // 写出记录的条目序号与备份文件名（撤销登记后不复用，Codex 第八轮）
   let sequence = 0;
+  // 已还原文件的备份重试后仍未能删除（部分回滚时随恢复清单列出，与需人工还原的文件分开，Codex 第九轮）
+  const leftoverBackups = [];
 
   function ensureBackupDirectory() {
     if (!backupDirectory) {
@@ -324,9 +329,10 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   function removeBackup(entry) {
     if (!entry.backupName) return;
     try {
-      fsImpl.rmSync(path.join(backupDirectory, entry.backupName), { force: true });
+      fsImpl.rmSync(path.join(backupDirectory, entry.backupName), { force: true, maxRetries: 3, retryDelay: 100 });
     } catch (_error) {
-      // 备份清理失败不影响还原结果
+      // 备份清理失败不影响还原结果；记下，部分回滚时在恢复清单中单列
+      leftoverBackups.push(entry.backupName);
     }
   }
 
@@ -390,10 +396,10 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       if (problem) return problem;
       try {
         copyIntoDescriptor(fsImpl, backupPath, fd);
-      } catch (error) {
-        // 截断后写回失败：在已核对的描述符上记下失败后的文件状态，经别名重试时仍认作本批文件，不误判为被其他程序修改（Codex 第六轮）
+      } finally {
+        // 写回成功或截断后失败，都在已核对的描述符上记下当前文件状态：之后关闭描述符失败（网络盘到关闭时才报错）或写回失败时，
+        //   经别名重试仍认作本批文件、核对内容，不误判为被其他程序修改（Codex 第六、九轮）
         noteRestoreAttempt(entry, fd);
-        throw error;
       }
       return fileKeyOf(lstatOrNull(fsImpl, targetPath), targetPath, fsImpl) === readProblem.key
         ? null
@@ -483,12 +489,31 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       ];
       failures.forEach((item, index) => {
         lines.push(`${index + 1}. ${item.filePath}`);
-        lines.push(item.existed ? `   原有文件，原内容备份：${item.backupName}` : '   本次新建的文件（导入前不存在）');
+        lines.push(item.existed
+          ? `   原有文件，原内容备份：${item.backupName}`
+          : (item.reason === FAILURE_REASONS.UNCERTAIN_OWNER
+            ? '   写前不存在，路径上现在的文件归属待核对（不一定由本批创建）'
+            : '   本次新建的文件（导入前不存在）'));
         lines.push(`   原因：${item.reason}`);
         lines.push(`   处理方式：${manualActionOf(item)}`);
       });
+      if (leftoverBackups.length) {
+        lines.push('', `以下备份对应的文件已自动还原，备份未能删除，不需人工还原，可直接删除：${leftoverBackups.join('、')}`);
+      }
+      // 先写临时文件、完整写成后再改为正式名称：写到一半失败（如临时卷写满）时不留下残缺的正式清单（Codex 第九轮）
       const manifestPath = path.join(backupDirectory, MANIFEST_FILE_NAME);
-      fsImpl.writeFileSync(manifestPath, `${lines.join('\n')}\n`, 'utf8');
+      const partialPath = `${manifestPath}.partial`;
+      try {
+        fsImpl.writeFileSync(partialPath, `${lines.join('\n')}\n`, 'utf8');
+        fsImpl.renameSync(partialPath, manifestPath);
+      } catch (error) {
+        try {
+          fsImpl.rmSync(partialPath, { force: true });
+        } catch (_cleanupError) {
+          // 尽力而为：临时文件名不是正式清单
+        }
+        throw error;
+      }
       return manifestPath;
     } catch (_error) {
       // 清单写不出（如临时卷已满）：以首次写入时记下的写出记录代替（列出本批全部写出的文件与备份；已还原文件的备份已删除）
@@ -515,6 +540,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     entries.length = 0;
     byPath.clear();
     byFile.clear();
+    leftoverBackups.length = 0;
   }
 
   // 按首次写入的逆序还原。返回 { restored, failures, backupDirectory, manifestPath }：
@@ -524,12 +550,13 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     for (const entry of [...entries].reverse()) {
       failures.push(...restore(entry).reverse());
     }
-    reset();
     if (!failures.length) {
+      reset();
       const cleanupFailedDirectory = cleanup();
       return { restored: true, failures, backupDirectory: null, manifestPath: null, cleanupFailedDirectory };
     }
     const manifestPath = writeManifest(failures.reverse());
+    reset();
     const keptDirectory = backupDirectory;
     backupDirectory = null;
     return { restored: false, failures, backupDirectory: keptDirectory, manifestPath };

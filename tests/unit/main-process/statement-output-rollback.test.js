@@ -192,7 +192,7 @@ test('恢复清单写不出时以首次写入时记下的写出记录代替', (t
   const replaced = path.join(root, 'replaced.xlsx');
   fs.writeFileSync(replaced, 'before');
   const fullFs = { ...fs, writeFileSync(filePath, ...rest) {
-    if (path.basename(String(filePath)) === MANIFEST_FILE_NAME) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+    if (path.basename(String(filePath)).startsWith(MANIFEST_FILE_NAME)) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
     return fs.writeFileSync(filePath, ...rest);
   } };
   const journal = createStatementOutputJournal({ fsImpl: fullFs, stagingRoot: staging });
@@ -681,7 +681,7 @@ test('恢复清单写不出时：写出记录说明不是失败清单、「写�
   const first = path.join(root, 'first.xlsx');
   const second = path.join(root, 'second.xlsx');
   const fullFs = { ...fs, writeFileSync(filePath, ...rest) {
-    if (path.basename(String(filePath)) === MANIFEST_FILE_NAME) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+    if (path.basename(String(filePath)).startsWith(MANIFEST_FILE_NAME)) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
     return fs.writeFileSync(filePath, ...rest);
   } };
   const journal = createStatementOutputJournal({ fsImpl: fullFs, stagingRoot: staging });
@@ -722,5 +722,112 @@ test('提交或全部还原后删除批次目录：短暂占用时重试，仍�
     const result = journal[finish]();
     assert.equal(result.cleanupFailedDirectory, path.join(staging, directory), finish);
     fs.rmSync(path.join(staging, directory), { recursive: true, force: true });
+  }
+});
+
+// ---------- 第九轮审查 ----------
+
+test('主路径写回后关闭描述符报 EIO：经别名复核内容一致，两条路径都按已还原处理', (t) => {
+  const { root, staging } = setup(t);
+  const seed = path.join(root, 'HSBC.json');
+  const alias = path.join(root, 'hsbc-alias.json');
+  fs.writeFileSync(seed, 'before');
+  fs.linkSync(seed, alias);
+  const writable = new Set();
+  let failClose = false;
+  const fsImpl = { ...fs,
+    openSync(filePath, flags, ...rest) {
+      const fd = fs.openSync(filePath, flags, ...rest);
+      if (flags === 'r+' && path.resolve(String(filePath)) === seed) writable.add(fd);
+      return fd;
+    },
+    closeSync(fd) {
+      fs.closeSync(fd);
+      if (failClose && writable.delete(fd)) {
+        failClose = false;
+        throw Object.assign(new Error('EIO'), { code: 'EIO' });
+      }
+    }
+  };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(seed, writeText(seed, 'group-1'));
+  journal.write(alias, writeText(alias, 'group-2'));
+  failClose = true;
+  const outcome = journal.rollback();
+  assert.equal(failClose, false, '前置：主路径写回后关闭描述符报 EIO');
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.deepEqual([fs.readFileSync(seed, 'utf8'), fs.readFileSync(alias, 'utf8')], ['before', 'before']);
+});
+
+test('恢复清单写到一半失败：不留下残缺的正式清单，以写出记录代替', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'detail.xlsx');
+  fs.writeFileSync(target, 'before');
+  const partialFs = { ...fs, writeFileSync(filePath, data, ...rest) {
+    if (path.basename(String(filePath)).startsWith(MANIFEST_FILE_NAME)) {
+      fs.writeFileSync(filePath, String(data).split('\n')[0], ...rest);
+      throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+    }
+    return fs.writeFileSync(filePath, data, ...rest);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl: partialFs, stagingRoot: staging });
+  journal.write(target, writeText(target, 'after'));
+  fs.appendFileSync(target, '-external');
+  const outcome = journal.rollback();
+  t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.equal(outcome.manifestPath, path.join(outcome.backupDirectory, RECORD_FILE_NAME));
+  assert.deepEqual(fs.readdirSync(outcome.backupDirectory).sort(), ['001.bak', RECORD_FILE_NAME].sort());
+});
+
+test('写前不存在、写出回调抛错后路径上出现的文件：清单与摘要标为归属待核对，不计入本次新建', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'new.xlsx');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  assert.throws(() => journal.write(target, () => {
+    fs.writeFileSync(target, 'partial');
+    throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+  }), { code: 'ENOSPC' });
+  const { error, outcome } = journal.failBatch(Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }));
+  t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.ok(error.detailLines.includes('未能自动还原 1 个文件（原有文件 0 个、本次新建 0 个、写前不存在且归属待核对 1 个；其中写出后被其他程序改动 0 个）'),
+    JSON.stringify(error.detailLines));
+  const manifest = fs.readFileSync(outcome.manifestPath, 'utf8');
+  assert.match(manifest, /new\.xlsx\n {3}写前不存在，路径上现在的文件归属待核对（不一定由本批创建）/);
+  assert.doesNotMatch(manifest, /本次新建的文件/);
+});
+
+test('部分回滚时已还原文件的备份重试后仍未能删除：恢复清单单列，与需人工还原的文件分开', (t) => {
+  const { root, staging } = setup(t);
+  const restoredTarget = path.join(root, 'a.xlsx');
+  const keptTarget = path.join(root, 'b.xlsx');
+  fs.writeFileSync(restoredTarget, 'before-a');
+  fs.writeFileSync(keptTarget, 'before-b');
+  let busyBackup = null;
+  const fsImpl = { ...fs, rmSync(filePath, options) {
+    if (busyBackup && path.basename(String(filePath)) === busyBackup && !(options && options.maxRetries > 0)) {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    }
+    if (busyBackup === 'always' && /\.bak$/.test(String(filePath))) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    return fs.rmSync(filePath, options);
+  } };
+  for (const mode of ['001.bak', 'always']) {
+    fs.writeFileSync(restoredTarget, 'before-a');
+    fs.writeFileSync(keptTarget, 'before-b');
+    busyBackup = mode;
+    const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+    journal.write(restoredTarget, writeText(restoredTarget, 'after-a'));
+    journal.write(keptTarget, writeText(keptTarget, 'after-b'));
+    fs.appendFileSync(keptTarget, '-external');
+    const outcome = journal.rollback();
+    busyBackup = null;
+    const manifest = fs.readFileSync(outcome.manifestPath, 'utf8');
+    assert.deepEqual([fs.readFileSync(restoredTarget, 'utf8'), outcome.failures.map((item) => path.basename(item.filePath))], ['before-a', ['b.xlsx']]);
+    if (mode === 'always') {
+      assert.match(manifest, /以下备份对应的文件已自动还原，备份未能删除，不需人工还原，可直接删除：001\.bak/);
+    } else {
+      assert.doesNotMatch(manifest, /备份未能删除/, '短暂占用时重试后删除');
+      assert.deepEqual(fs.readdirSync(outcome.backupDirectory).filter((name) => name.endsWith('.bak')), ['002.bak']);
+    }
+    fs.rmSync(outcome.backupDirectory, { recursive: true, force: true });
   }
 });

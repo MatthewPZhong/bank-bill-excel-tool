@@ -2383,14 +2383,28 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
   //   不写入报错文件与活动日志（Codex 第七、八轮）
   const unsafeError = failedError(new FileValidationError('STATEMENT_OUTPUT_TARGET_UNSAFE',
     '导出位置有同名的快捷方式（符号链接）或文件夹，无法安全覆盖，请移走后重新导入', { detailLines: [`所在目录：${dir}`] })).error;
-  for (const [label, thrown, expected] of [['还原不完整', incompleteError, '未能自动还原'], ['导出位置不安全', unsafeError, '无法安全覆盖']]) {
+  // 各组的业务校验错误在上下文中带该组模板的真实名称；未经回滚的系统异常走另一分支（Codex 第九轮）
+  const groupError = new FileValidationError('FILE_READ', '存在1条明细的 Credit Amount 与 Debit Amount 同时有值', {
+    detailLines: ['第2行，Credit Amount="1"，Debit Amount="2"'], context: { templateName: '中行-6222020200012345678' } });
+  for (const [label, thrown, expected] of [['还原不完整', incompleteError, '未能自动还原'], ['导出位置不安全', unsafeError, '无法安全覆盖'],
+    ['组内业务校验失败', groupError, '同时有值'], ['系统异常', Object.assign(new Error('EIO'), { code: 'EIO' }), '文件转换错误']]) {
     const captured = [];
     const named = await runSelectionExecute(thrown, { templateName: '中行-6222020200012345678', multiTemplate: true, captured });
     assertTrue(named.result.message.includes(expected), `Step20b.前置：完成大账号选择后${label}：${named.result.message}`);
-    assertTrue(captured.length >= 1 && !JSON.stringify(captured).includes('6222020200012345678')
-      && JSON.stringify(captured).includes('按文件名映射模板'),
-    `Step20b.${label}时报错文件与活动日志用固定名称，不含真实模板名：${JSON.stringify(captured).slice(0, 300)}`);
+    // 只看落盘的内容：报错文件对原始异常只写堆栈与消息（logger.writeErrorReport），不写其上下文
+    const persisted = JSON.stringify(captured.map(({ originalError, ...rest }) => ({
+      ...rest, originalError: originalError ? String(originalError.stack || originalError.message || originalError) : null
+    })));
+    assertTrue(captured.length >= 1 && !persisted.includes('6222020200012345678') && persisted.includes('按文件名映射模板'),
+      `Step20b.${label}时报错文件与活动日志用固定名称，不含真实模板名：${persisted.slice(0, 300)}`);
   }
+  // 直接导入入口（按文件名映射）：组内业务校验错误上下文中的真实模板名同样被固定名称覆盖（Codex 第九轮）
+  const directCaptured = [];
+  const direct = await runExecute(groupError, { captured: directCaptured });
+  const directPersisted = JSON.stringify(directCaptured.map(({ originalError, ...rest }) => rest));
+  assertTrue(direct.result.message.includes('同时有值') && directCaptured.length >= 1
+    && !directPersisted.includes('6222020200012345678') && directPersisted.includes('按文件名映射模板'),
+  `Step20b.直接导入时组内业务校验失败的报错文件不含真实模板名：${directPersisted.slice(0, 300)}`);
   fs.rmSync(outcome.backupDirectory, { recursive: true, force: true });
 }
 

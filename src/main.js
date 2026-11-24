@@ -16605,10 +16605,11 @@ async function handleFilenameMappingImport(prepared) {
         errorCode: error.code,
         originalError: error,
         detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+        // 按文件名映射：各组错误的上下文可能带该组模板的真实名称（可能含完整账号），最后以固定名称覆盖（Codex 第九轮）
         context: {
           templateId: FILENAME_MAPPING_TEMPLATE_ID,
-          templateName: virtualTemplateName,
-          ...(error.context || {})
+          ...(error.context || {}),
+          templateName: virtualTemplateName
         },
         templateName: virtualTemplateName
       });
@@ -18142,16 +18143,19 @@ function registerFileHandlers() {
           errorCode: error.code,
           originalError: error,
           detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+          // 多模板时各组错误的上下文可能带该组模板的真实名称（如收支同时有值），最后以固定名称覆盖（Codex 第九轮）
           context: {
             templateId: pendingContext.templateId,
             templateName: reportTemplateName,
-            ...(error.context || {})
+            ...(error.context || {}),
+            ...(multiTemplateGeneration ? { templateName: reportTemplateName } : {})
           },
           templateName: reportTemplateName
         });
       }
 
       const logPath = appendLog(ensureStorageRoot(), error);
+      const runtimeTemplateName = multiTemplateGeneration ? '按文件名映射模板' : pendingContext.template.name;
       return createErrorResult({
         step: '选择大账号',
         message: '文件转换错误，请导出报错文件查看详情',
@@ -18163,10 +18167,10 @@ function registerFileHandlers() {
         ],
         context: {
           templateId: pendingContext.templateId,
-          templateName: pendingContext.template.name
+          templateName: runtimeTemplateName
         },
         originalError: error,
-        templateName: pendingContext.template.name
+        templateName: runtimeTemplateName
       });
     }
   
