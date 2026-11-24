@@ -420,6 +420,36 @@ test('merge：输出目录与输入所在目录大小写不同（同一目录）
   assert.equal(calls.publication, 0);
 });
 
+// 输入经指向输出目录的目录链接读取（源文件本身是普通文件）；完整计划规范化期间输出目录被移走又移回，系统错误记的是链接路径：
+//   按解析后的真实路径归为目标变化（中文提示），不透传英文系统错误（Codex 第八轮）
+test('merge：输入经指向输出目录的目录链接读取、规范化期间输出目录被移走又移回：报目标变化（B57）', async (t) => {
+  const base = setup(t);
+  const alias = path.join(base.root, 'input-alias');
+  try {
+    fs.symlinkSync(base.output, alias, 'dir');
+  } catch (error) {
+    if (process.platform === 'win32' && error.code === 'EPERM') {
+      t.skip('前提不满足：无建链权限');
+      return;
+    }
+    throw error;
+  }
+  fs.copyFileSync(base.source, path.join(base.output, 'source.csv'));
+  const env = { ...base, source: path.join(alias, 'source.csv') };
+  const parked = path.join(base.root, 'out-parked');
+  const sampling = duringFullPlanSampling(() => {
+    fs.renameSync(base.output, parked);
+    return () => fs.renameSync(parked, base.output);
+  });
+  const { calls, run } = loadHandlers(env, caseOverrides(env, 'merge', { normalizeFilePlanV1: sampling.normalizeFilePlanV1 }));
+  const { prepared, result } = await run(CASES.merge.channel, casePayload(env, 'merge'));
+  assert.equal(sampling.state.calls, 1);
+  assert.equal(prepared.proceed, false);
+  assert.equal(result.code, 'ARCHIVE_TARGET_CHANGED', JSON.stringify(result));
+  assert.match(result.message, /输出目标在任务确认后已变化/);
+  assert.equal(calls.publication, 0);
+});
+
 // 合表选两份源文件、只在生成后替换第二份：发布前核对覆盖全部输入（Codex 第六轮）
 test('merge：两份源文件只有第二份在生成后、发布前被替换时不发布（B58-T3）', async (t) => {
   const env = setup(t);
@@ -585,6 +615,9 @@ test('publishToolboxArtifacts：发布目标少一个或顺序调换时在调用
   await assert.rejects(publishToolboxArtifacts('split', [], [path.resolve('/out/B.xlsx'), path.resolve('/out/A.xlsx')], {}, options),
     /工具箱发布目标与 FilePlan 输出不一致/);
   await assert.rejects(publishToolboxArtifacts('split', [], [{ targetPath: path.resolve('/out/B.xlsx') }, { targetPath: path.resolve('/out/A.xlsx') }], {}, options),
+    /工具箱发布目标与 FilePlan 输出不一致/);
+  // 数量相同但有空槽（第八轮）
+  await assert.rejects(publishToolboxArtifacts('split', [], [path.resolve('/out/A.xlsx'), ,], {}, options),
     /工具箱发布目标与 FilePlan 输出不一致/);
   assert.deepEqual(calls, { publication: 0, settle: 0, inputs: 0 });
 });

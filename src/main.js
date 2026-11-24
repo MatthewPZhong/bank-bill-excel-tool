@@ -22443,9 +22443,11 @@ async function publishToolboxArtifacts(
     if (plan.outputs.length !== targetList.length) {
       throw new Error('工具箱发布目标与 FilePlan 输出数量不一致');
     }
-    targetList.forEach((target, index) => {
+    // 按计划输出的下标逐项核对：数组空槽也拒绝（forEach 会跳过空槽，Codex 第八轮）
+    plan.outputs.forEach((output, index) => {
+      const target = targetList[index];
       const targetPath = target && typeof target === 'object' ? target.targetPath : target;
-      if (path.resolve(String(targetPath || '')) !== plan.outputs[index].filePath) {
+      if (!targetPath || path.resolve(String(targetPath)) !== output.filePath) {
         throw new Error('工具箱发布目标与 FilePlan 输出不一致');
       }
     });
@@ -22631,10 +22633,19 @@ function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
   //   Codex 第六、七轮）
   const comparable = (value) => normalizeTargetAliasKey(path.resolve(value));
   const comparableTargets = targetPaths.map(comparable);
-  const isTargetOrAncestor = (errorPath) => {
-    const resolved = comparable(errorPath);
+  const matchesTargetOrAncestor = (candidate) => {
+    const resolved = comparable(candidate);
     const prefix = resolved.endsWith(path.sep) ? resolved : resolved + path.sep;
     return comparableTargets.some((targetPath) => targetPath === resolved || targetPath.startsWith(prefix));
+  };
+  // 字面路径未命中时按解析后的真实路径再比（错误经指向输出目录的目录链接报出，目录随后已移回，Codex 第八轮）
+  const isTargetOrAncestor = (errorPath) => {
+    if (matchesTargetOrAncestor(errorPath)) return true;
+    try {
+      return matchesTargetOrAncestor(fs.realpathSync.native(errorPath));
+    } catch (_error) {
+      return false;
+    }
   };
   let plan;
   try {
