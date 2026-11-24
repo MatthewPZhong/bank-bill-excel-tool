@@ -221,6 +221,23 @@ test('writeWorkbookRows 写出后经链接表流式导入：字面 _xHHHH_ 与�
   assert.equal(raw[1][0], 'TX_x005F_x0041_', '默认不还原（既有调用方行为不变）');
 });
 
+// v3.2.22 B113（Codex 第十一轮）：本应用写出的空字符（_x0000_）经链接表导入还原后拒绝入库：SQLite 读回时在空字符处截断，
+//   两个不同的 BizId 会读成同一个键；只报行号与列名
+test('链接表：本应用写出的含空字符的值经流式导入拒绝入库，给出行号与列名', async (t) => {
+  const { assertLinkedCellStorable, streamLinkedRowsToInsert } = require('../../../../src/main-process/linked-table-stream-source');
+  const dir = createTempDir(t);
+  const outputFilePath = path.join(dir, 'nul.xlsx');
+  writeWorkbookRows({ rows: [['BizId', '备注'], ['TX1', 'ok'], ['TX\u0000A', 'n']], outputFilePath });
+  const inserted = [];
+  await assert.rejects(streamLinkedRowsToInsert(outputFilePath, { expectedHeaders: ['BizId', '备注'] }, (row) => inserted.push(row)),
+    (error) => error.code === 'FILE_READ' && error.message.startsWith('源文件第 3 行「BizId」列的文本含空字符（U+0000）')
+      && !error.message.includes('TX'));
+  assert.deepEqual(inserted.map((row) => row.BizId), ['TX1'], '只喂入了之前的行（由仓储事务整批回滚）');
+  // 非流式导入（main.js readLinkedRowsAsObjectsWithMeta）调用同一校验
+  assert.throws(() => assertLinkedCellStorable('TX\u0000B', 7, 'BizId'), /第 7 行「BizId」列的文本含空字符/);
+  assert.doesNotThrow(() => assertLinkedCellStorable('TX\u0001B', 7, 'BizId'));
+});
+
 // v3.2.22 B113（Codex 第七轮）：链接表的表头识别与流式导入按同一口径还原（写出端转义后的表头仍能识别）；还原后无法确认原值的格
 //   （转义跨富文本片段拼成、表示非 ASCII 字符、还原为未配对的代理项）拒绝导入，不让不同的原值落成同一个键或与非流式读取不同
 test('链接表：表头识别与流式导入同样还原转义；无法确认原值的转义拒绝导入并给出行号与列名', async (t) => {

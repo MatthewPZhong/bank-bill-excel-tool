@@ -334,6 +334,10 @@
         try {
           result = await api.monthlyBalance.assemble(payload);
         } catch (error) {
+          // 请求本身失败（IPC 被拒绝等）同样同步状态框、关闭上一次尝试的报错导出（主进程已清除待导出引用，Codex 第十一轮）
+          if (typeof onAssembleFailed === 'function') {
+            onAssembleFailed({ status: 'error', message: `装配月度余额账单失败：${error?.message || error}`, errorReportReady: false });
+          }
           if (!disposed && modalBridge.host.getHandle(overlay)?.isOpen()) {
             pushAlert(overlay, () => createAlertDialog(`装配月度余额账单失败：${error?.message || error}`, {
               onConfirm: null

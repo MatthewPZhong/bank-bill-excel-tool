@@ -18,6 +18,15 @@
 const { readXlsxStreamed } = require('../backend/xlsx/legacy/streaming-xlsx-reader');
 const { normalizeCell, isRowMeaningful, FileValidationError } = require('../backend/file-service/common');
 
+// v3.2.22 B113（Codex 第十一轮）：含空字符（U+0000）的值拒绝入库：SQLite 读回 TEXT 时在空字符处截断，不同的 BizId 会读成同一个键。
+//   本应用写出的明细把空字符写成 _x0000_，两条读取路径都会还原出来；流式与非流式导入共用。只给行号与列名，不带值
+function assertLinkedCellStorable(value, rowNumber, headerName) {
+  if (typeof value === 'string' && value.includes('\u0000')) {
+    throw new FileValidationError('FILE_READ',
+      `源文件第 ${rowNumber} 行「${headerName}」列的文本含空字符（U+0000），数据库读回时会在该处截断；请删除该字符后重新导入`);
+  }
+}
+
 async function streamLinkedRowsToInsert(filePath, signature, insertOne, transform) {
   const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
   if (expected.length === 0) {
@@ -67,6 +76,7 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
       if (headerName === '') continue; // 跳过中间空列占位（不入对象，与数组路径一致）
       const cell = row[colOffset + i];
       obj[headerName] = normalizeCell(cell === undefined ? '' : cell);
+      assertLinkedCellStorable(obj[headerName], textInfo.rowNumber, headerName);
     }
     insertOne(xform(obj));
     // v3.2.22 B113：与非流式读取（SheetJS）同样还原 OOXML 文本转义，同一笔交易两条路径导入得到同一个 BizId；
@@ -76,4 +86,4 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
   return { matched: colOffset >= 0 };
 }
 
-module.exports = { streamLinkedRowsToInsert };
+module.exports = { assertLinkedCellStorable, streamLinkedRowsToInsert };

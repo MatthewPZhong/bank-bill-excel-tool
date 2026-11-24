@@ -316,7 +316,7 @@ const {
 } = require('./main-process/linked-derive-rebuild');
 // v3.0.6 需求1（T3）：调拨对账单派生纯函数（mid-allocation 导入触发 → in/out 两行落 linked_fund_transfer_recon）。
 const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
-const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
+const { assertLinkedCellStorable, streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 // v3.2.18：链接表按数据日期统计 / 删除 + 派生联动的共享实现（手工删除与链接表过期清理共用，禁复制 = R-5）。
 const {
   isLinkedDeleteTable,
@@ -19894,17 +19894,20 @@ function registerNewAccountHandlers() {
     const rowNumbers = [];
     for (let ri = headerRowIdx + 1; ri < rows.length; ri += 1) {
       const row = Array.isArray(rows[ri]) ? rows[ri] : [];
+      // 物理行号：allRowNumbers 同下标取；缺失退化为 ri+1（与 readRowsWithMetadata 无表头分支口径一致）。
+      const rn = allRowNumbers[ri];
+      const rowNumber = rn === undefined || rn === null ? ri + 1 : rn;
       const obj = {};
       for (let i = 0; i < expected.length; i += 1) {
         const headerName = normalizeLinkedCell(expected[i]);
         if (headerName === '') continue; // 跳过中间空列占位（不入对象）
         const cell = row[colOffset + i];
         obj[headerName] = normalizeLinkedCell(cell === undefined ? '' : cell);
+        // 含空字符的值拒绝入库（与流式导入同口径，v3.2.22 B113，Codex 第十一轮）
+        assertLinkedCellStorable(obj[headerName], rowNumber, headerName);
       }
       objects.push(obj);
-      // 物理行号：allRowNumbers 同下标取；缺失退化为 ri+1（与 readRowsWithMetadata 无表头分支口径一致）。
-      const rn = allRowNumbers[ri];
-      rowNumbers.push(rn === undefined || rn === null ? ri + 1 : rn);
+      rowNumbers.push(rowNumber);
     }
     return { objects, rowNumbers };
   }
