@@ -162,6 +162,12 @@ function copyIntoDescriptor(fsImpl, fromPath, target, expectedSize) {
   });
 }
 
+// 真实路径解析失败、不能确认是否本批已写过的同一文件：不写，按系统异常停止本批（消息不带路径：文件名可能是完整账号）
+function unidentifiedTargetError() {
+  return Object.assign(new Error('无法解析导出文件的真实路径，不能确认是否本批已写过的同一文件，已停止生成'),
+    { code: 'STATEMENT_OUTPUT_TARGET_UNIDENTIFIED' });
+}
+
 function changedExternallyError(filePath) {
   return new FileValidationError(
     'STATEMENT_OUTPUT_CHANGED_EXTERNALLY',
@@ -256,9 +262,22 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     return { resolved, stat };
   }
 
+  // 按文件键查找本批已登记的同一文件。不提供文件编号的卷上解析真实路径失败时再解析一次；仍不能确认且本批已有登记时不写：
+  //   查不到已登记的大小写别名会把同一份文件再登记一次，第二份备份存的是本批写后的内容（Codex 第十六轮 P2 ⚠️ 余额种子）
+  function lookupFileKey(stat, resolved) {
+    if (!stat) return null;
+    const key = fileKeyOf(stat, resolved, fsImpl);
+    if (!isUnconfirmedFileKey(key)) return key;
+    const retried = fileKeyOf(stat, resolved, fsImpl);
+    if (isUnconfirmedFileKey(retried) && entries.length) throw unidentifiedTargetError();
+    return retried;
+  }
+
   function track(filePath) {
     const { resolved, stat } = checkTarget(filePath);
-    const known = byPath.get(resolved) || (stat && byFile.get(fileKeyOf(stat, resolved, fsImpl)));
+    let known = byPath.get(resolved);
+    const key = known ? null : lookupFileKey(stat, resolved);
+    if (!known && key) known = byFile.get(key);
     if (known) {
       byPath.set(resolved, known);
       if (!known.paths.has(resolved)) {
@@ -279,7 +298,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       existed: Boolean(stat),
       backupName: null,
       // 本批写过的文件对象：原有文件为原文件，新建的在首次写成后记下
-      ownedFileKey: fileKeyOf(stat, resolved, fsImpl),
+      ownedFileKey: key,
       // 备份文件的大小（字节，bigint）：回滚前与写回时核对，备份被截短时不按它写回（Codex 第十一轮）
       backupSize: null,
       writePending: false,
@@ -308,7 +327,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     }
     entries.push(entry);
     byPath.set(resolved, entry);
-    if (stat) byFile.set(fileKeyOf(stat, resolved, fsImpl), entry);
+    if (key) byFile.set(key, entry);
     return { entry, resolved, stat, created: true };
   }
 

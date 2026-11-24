@@ -437,6 +437,18 @@ test('writeErrorReport：发布后删除临时名遇到短暂占用时重试，�
     t.skip('临时目录所在的卷不支持硬链接');
     return;
   }
+  // 固定时钟：删除重试有真实等待，跨过午夜时报告与日志会落到不同日期的目录（Codex 第十六轮）
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 24, 10, 0, 0).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { global.Date = RealDate; });
   const payload = { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' };
   const rmSync = fs.rmSync;
   let failures = 0;

@@ -1102,3 +1102,50 @@ test('ino 为 0 的卷上新建文件写后解析失败、再次写出报错：�
   assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
   assert.equal(fs.existsSync(fresh), false, '本批新建的文件已删除');
 });
+
+// v3.2.22 B45（Codex 第十六轮）：不提供文件编号、不区分大小写的卷上，第二组首次经大小写别名登记时解析真实路径失败：
+//   再解析一次后按同一文件合并，不登记第二份（存本批写后内容的）备份；仍解析失败时不写，回滚照常还原
+for (const persistent of [false, true]) {
+  test(`ino 为 0 的卷上别名首次登记时解析真实路径${persistent ? '持续' : '一次'}失败：${persistent ? '不写入' : '重新解析后合并'}，回滚还原批前内容`, (t) => {
+    const { root, staging } = setup(t);
+    const upper = path.join(root, 'BANK.json');
+    const lower = path.join(root, 'bank.json');
+    fs.writeFileSync(upper, 'before');
+    if (!fs.existsSync(lower)) {
+      t.skip('前提不满足：临时卷区分大小写');
+      return;
+    }
+    const zeroIno = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino: 0n });
+    let failures = 0;
+    const realpath = (filePath, ...rest) => {
+      if (path.basename(String(filePath)) === 'bank.json' && failures > 0) {
+        failures -= 1;
+        throw Object.assign(new Error('EIO: i/o error, realpath'), { code: 'EIO' });
+      }
+      return fs.realpathSync.native(filePath, ...rest);
+    };
+    realpath.native = realpath;
+    const fsImpl = {
+      ...fs,
+      realpathSync: realpath,
+      lstatSync: (...args) => { const stat = fs.lstatSync(...args); return stat && args[1] && args[1].bigint ? zeroIno(stat) : stat; },
+      fstatSync: (...args) => { const stat = fs.fstatSync(...args); return args[1] && args[1].bigint ? zeroIno(stat) : stat; }
+    };
+    const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+    journal.write(upper, writeText(upper, 'group-1'));
+    failures = persistent ? Infinity : 1;
+    if (persistent) {
+      assert.throws(() => journal.write(lower, writeText(lower, 'group-2')), { code: 'STATEMENT_OUTPUT_TARGET_UNIDENTIFIED' });
+      assert.equal(fs.readFileSync(upper, 'utf8'), 'group-1', '不能确认时不写入');
+      failures = 0;
+    } else {
+      journal.write(lower, writeText(lower, 'group-2'));
+      journal.write(upper, writeText(upper, 'group-3'));
+    }
+    const [batchDir] = fs.readdirSync(staging);
+    assert.deepEqual(fs.readdirSync(path.join(staging, batchDir)).filter((name) => name.endsWith('.bak')), ['001.bak'], '只登记一份备份');
+    const outcome = journal.rollback();
+    assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+    assert.equal(fs.readFileSync(upper, 'utf8'), 'before');
+  });
+}
