@@ -1758,7 +1758,10 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
 //   故 detector 的 L1（连续子序列全等）/ L2（指纹命中率）/ 列宽守卫逻辑可直接复用、识别语义不变。
 //   maxColCount：流式解析每行的固定列宽上界（须 ≥ 任何候选表头可能的列数，避免宽表头被截断；detector 传足够大值）。
 //   返回 { rows, truncated }：rows 为前 N 个有意义行的 cell 数组；truncated 表示文件还有更多行（已达 maxRows 上限）。
-//   decodeTextEscapes：还原 OOXML 文本转义（与 SheetJS 读取同一口径；链接表的表头识别与预检传 true，与流式导入一致）
+//   decodeTextEscapes：还原 OOXML 文本转义（与 SheetJS 读取同一口径；链接表的表头识别与预检传 true，与流式导入一致）；
+//     无法确认原值的格读成 UNVERIFIABLE_CELL_TEXT，不与任何表头相等（流式导入同样不认这类格为表头，Codex 第八轮 P1）
+const UNVERIFIABLE_CELL_TEXT = '（无法确认原值的文本）';
+
 async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256, decodeTextEscapes = false } = {}) {
   ensureSupportedFile(filePath);
 
@@ -1770,7 +1773,8 @@ async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256, de
   // readXlsxStreamed 缺 sheet1.xml 时会 throw（如极罕见的非 sheet1 物理名/真损坏）；由调用方捕获回退/转 read-error。
   const { truncated } = await readXlsxStreamed(
     filePath,
-    (cells) => {
+    (cells, _rowIdx, textInfo) => {
+      if (textInfo) textInfo.unverifiableColumns.forEach((index) => { cells[index] = UNVERIFIABLE_CELL_TEXT; });
       const trimmed = trimTrailingEmptyCells(cells);
       if (isRowMeaningful(trimmed)) {
         rows.push(trimmed);
@@ -1938,6 +1942,7 @@ module.exports = {
   listSheetNames,
   loadEnumValues,
   readMeaningfulRowsHead,
+  UNVERIFIABLE_CELL_TEXT,
   readCsvRowsWithinBudget,
   readRows,
   readRowsWithMetadata,

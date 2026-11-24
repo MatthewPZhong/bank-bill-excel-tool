@@ -28,33 +28,43 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
 
   await readXlsxStreamed(filePath, (cells, _rowIdx, textInfo) => {
     const row = Array.isArray(cells) ? cells : [];
+    const unverifiable = textInfo && textInfo.unverifiableColumns.length ? new Set(textInfo.unverifiableColumns) : null;
     if (colOffset < 0) {
       // 流内定位表头行 + 起始列偏移（镜像 readLinkedRowsAsObjects：首个「连续位置全等」起点）。
+      //   无法确认原值的格不与任何表头相等（与表头识别、模板预检同口径，Codex 第八轮 P1）
       const maxStart = row.length - expected.length;
       for (let cs = 0; cs <= maxStart; cs += 1) {
         let matched = true;
         for (let i = 0; i < expected.length; i += 1) {
-          if (normalizeCell(expected[i]) !== normalizeCell(row[cs + i])) { matched = false; break; }
+          if ((unverifiable && unverifiable.has(cs + i)) || normalizeCell(expected[i]) !== normalizeCell(row[cs + i])) {
+            matched = false;
+            break;
+          }
         }
         if (matched) { colOffset = cs; break; }
       }
       return; // 表头行（及其之前的行）不入库
     }
+    // v3.2.22 B113：还原 OOXML 文本转义后无法确认原值的格（转义跨格式片段拼成、表示非 ASCII 或不完整的 Unicode 字符，
+    //   或文本结构不是 Excel 写出的规范形式）拒绝导入：不同的原值可能落成同一个键，也可能与非流式读取得到不同的键
+    //   （Codex 第七、八轮）。先于全空行判断：还原结果为空的格按段读取并不为空（第八轮 P2）。只给行号与列名，不带值
+    if (unverifiable) {
+      for (let i = 0; i < expected.length; i += 1) {
+        const headerName = normalizeCell(expected[i]);
+        if (headerName !== '' && unverifiable.has(colOffset + i)) {
+          throw new FileValidationError('FILE_READ',
+            `源文件第 ${textInfo.rowNumber} 行「${headerName}」列的文本含无法确认原值的 Excel 文本转义（_xHHHH_）、`
+              + '不完整的 Unicode 字符或非常规的文本结构，不同读取方式会得到不同的值；请用 Excel 打开该文件另存后重新导入');
+        }
+      }
+    }
     // 🔴 全空行跳过：与数组路径 readRowsWithMetadata `.filter(isRowMeaningful)` 对齐（防空 key 垃圾行 + row_count 虚高）。
     if (!isRowMeaningful(row)) return;
     // 表头行之后逐行 zip：obj[expectedHeaders[i]] = normalizeCell(cells[colOffset+i])；跳过空表头名占位。
     const obj = {};
-    const unverifiable = textInfo && textInfo.unverifiableColumns.length ? new Set(textInfo.unverifiableColumns) : null;
     for (let i = 0; i < expected.length; i += 1) {
       const headerName = normalizeCell(expected[i]);
       if (headerName === '') continue; // 跳过中间空列占位（不入对象，与数组路径一致）
-      // v3.2.22 B113：还原 OOXML 文本转义后无法确认原值的格（转义跨格式片段拼成、表示非 ASCII 或不完整的 Unicode 字符）
-      //   拒绝导入：不同的原值可能落成同一个键，也可能与非流式读取得到不同的键（Codex 第七轮）。只给行号与列名，不带值
-      if (unverifiable && unverifiable.has(colOffset + i)) {
-        throw new FileValidationError('FILE_READ',
-          `源文件第 ${textInfo.rowNumber} 行「${headerName}」列的文本含无法确认原值的 Excel 文本转义（_xHHHH_）或不完整的 Unicode 字符，`
-            + '不同读取方式会得到不同的值；请用 Excel 打开该文件另存后重新导入');
-      }
       const cell = row[colOffset + i];
       obj[headerName] = normalizeCell(cell === undefined ? '' : cell);
     }

@@ -82,8 +82,35 @@ function decodeCellTextRuns(runs) {
   return consistent ? value : new UnverifiableCellText(value);
 }
 
+// decode 时文本段内出现标记（CDATA、注释等）也按无法确认原值处理：此处的 XML 实体还原不区分 CDATA 与字面文本，
+//   SheetJS 对 CDATA 按字面保留、富文本段内的 CDATA 直接丢弃，不同的原值可能读成同一个值（Codex 第八轮 P1）
 function textOf(runs, decode) {
-  return decode ? decodeCellTextRuns(runs.map(xmlUnescape)) : xmlUnescape(runs.join(''));
+  if (!decode) return xmlUnescape(runs.join(''));
+  if (runs.some((run) => run.includes('<'))) return new UnverifiableCellText(decodeOoxmlTextEscapes(xmlUnescape(runs.join(''))));
+  return decodeCellTextRuns(runs.map(xmlUnescape));
+}
+
+const RPH_RE = /<rPh\b[^>]*>[\s\S]*?<\/rPh>/g;
+const PREFIXED_ELEMENT_RE = /<\/?[A-Za-z_][\w.-]*:/;
+const PLAIN_TEXT_START_RE = /^\s*<t[\s/>]/;
+const RICH_RUN_RE = /<r>/;
+
+// 共享字符串 <si> 与内联字符串 <is> 的正文。decode 时与 SheetJS（parse_si）同口径，只接受 Excel 写出的规范结构：
+//   注音（<rPh>，日文输入法生成）不计入正文（Codex 第八轮 P1）；纯文本形式只取唯一的 <t>，富文本形式拼接各段 <t>；
+//   多个纯文本 <t>、既非纯文本也非富文本却含 <t>、带命名空间前缀的元素按无法确认原值处理（两种读取方式结果不同）
+function stringItemText(inner, decode) {
+  const source = decode ? inner.replace(RPH_RE, '') : inner;
+  T_CONTENT_RE.lastIndex = 0;
+  const parts = [];
+  let m;
+  while ((m = T_CONTENT_RE.exec(source))) parts.push(m[1]);
+  if (!decode) return textOf(parts, false);
+  const plain = PLAIN_TEXT_START_RE.test(inner);
+  const canonical = !PREFIXED_ELEMENT_RE.test(inner)
+    && (plain ? parts.length <= 1 : (RICH_RUN_RE.test(inner) || parts.length === 0));
+  const text = textOf(parts, true);
+  if (canonical) return text;
+  return text instanceof UnverifiableCellText ? text : new UnverifiableCellText(text);
 }
 
 const CELL_OPEN_RE = /<c\b([^>]*?)\/>|<c\b([^>]*?)>([\s\S]*?)<\/c>/g;
@@ -131,11 +158,13 @@ function parseRowXml(rowXml, colCount, sharedStrings, decode = false) {
 // decode：还原 OOXML 文本转义（见 decodeCellTextRuns）；共享字符串在读取 sharedStrings 时已按同一选项还原
 function parseCellBody(body, type, sharedStrings, decode = false) {
   if (type === 'inlineStr') {
-    T_CONTENT_RE.lastIndex = 0;
-    const parts = [];
-    let tm;
-    while ((tm = T_CONTENT_RE.exec(body))) parts.push(tm[1]);
-    return textOf(parts, decode);
+    if (decode) {
+      // 与 SheetJS 同口径只读 <is> 内的正文；没有 <is> 却有 <t> 时两种读取方式不同
+      const is = /<is>([\s\S]*?)<\/is>/.exec(body);
+      if (is) return stringItemText(is[1], true);
+      return /<t[\s/>]/.test(body) ? new UnverifiableCellText(stringItemText(body, false)) : '';
+    }
+    return stringItemText(body, false);
   }
   if (type === 'n' || type === '') {
     const v = V_CONTENT_RE.exec(body);
@@ -237,12 +266,8 @@ async function readSharedStrings(zip, decode = false) {
 
 function siInnerToText(inner, decode = false) {
   // 单 <si> 可能：纯 <t>文本</t> | 富文本 <r>...<t>X</t>...</r><r>...<t>Y</t></r>
-  // 所有 <t>...</t> 拼接（无论嵌在 <r> 内外）
-  T_CONTENT_RE.lastIndex = 0;
-  const parts = [];
-  let m;
-  while ((m = T_CONTENT_RE.exec(inner))) parts.push(m[1]);
-  return textOf(parts, decode);
+  // 不还原时所有 <t>...</t> 拼接（无论嵌在 <r> 内外，既有行为）；还原时见 stringItemText
+  return stringItemText(inner, decode);
 }
 
 // 主入口：流式读取 xlsx 的 sheet1.xml，逐行回调
@@ -259,6 +284,7 @@ function siInnerToText(inner, decode = false) {
 //            { rowNumber, unverifiableColumns }：rowNumber 为工作表行号，unverifiableColumns 为还原后无法确认原值的列下标
 //            （见 decodeCellTextRuns；这些格按 SheetJS 的结果给出）。缺省不还原（既有调用方行为不变）。
 async function readXlsxStreamed(filePath, onRowCallback, { colCount = 31, maxRows = 0, decodeTextEscapes = false } = {}) {
+  let lastRowNumber = 0;
   const parseRow = (rowXml, rowIdx) => {
     const cells = parseRowXml(rowXml, colCount, sharedStrings, decodeTextEscapes);
     if (!decodeTextEscapes) return onRowCallback(cells, rowIdx);
@@ -268,8 +294,10 @@ async function readXlsxStreamed(filePath, onRowCallback, { colCount = 31, maxRow
       cells[index] = cell.value;
       unverifiableColumns.push(index);
     });
-    const rowNumber = /^<row\b[^>]*?\sr="(\d+)"/.exec(rowXml);
-    return onRowCallback(cells, rowIdx, { rowNumber: rowNumber ? Number(rowNumber[1]) : rowIdx, unverifiableColumns });
+    // <row> 省略可选的 r 时按上一行行号顺推（与 SheetJS 相同；Codex 第八轮 P3）
+    const explicit = /^<row\b[^>]*?\sr="(\d+)"/.exec(rowXml);
+    lastRowNumber = explicit ? Number(explicit[1]) : lastRowNumber + 1;
+    return onRowCallback(cells, rowIdx, { rowNumber: lastRowNumber, unverifiableColumns });
   };
   // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误，
   //   不再让 JSZip 抛 `uncompressed data size mismatch` 天书）；预检自身失败时 fail-open 放行。

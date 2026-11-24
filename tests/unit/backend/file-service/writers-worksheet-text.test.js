@@ -261,7 +261,7 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
     const filePath = await build(label, rowXml, sharedStrings);
     const inserted = [];
     await assert.rejects(streamLinkedRowsToInsert(filePath, linked, (row) => inserted.push(row)), (error) => (
-      error.code === 'FILE_READ' && /^源文件第 5 行「BizId」列的文本含无法确认原值的 Excel 文本转义（_xHHHH_）或不完整的 Unicode 字符/.test(error.message)
+      error.code === 'FILE_READ' && /^源文件第 5 行「BizId」列的文本含无法确认原值的 Excel 文本转义（_xHHHH_）、不完整的 Unicode 字符或非常规的文本结构/.test(error.message)
         && !error.message.includes('ID_')
     ), label);
     assert.deepEqual(inserted, [], `${label}：不入库`);
@@ -273,4 +273,71 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
   assert.deepEqual(await streamLinkedRowsToInsert(accepted, linked, (row) => inserted.push(row)), { matched: true });
   assert.deepEqual(inserted.map((row) => [row.BizId, row['备注']]), [['TX_x0041_-1', 'A\rB']]);
   assert.deepEqual(readRows(accepted)[1], ['TX_x0041_-1', 'A\rB'], '与非流式读取一致');
+});
+
+// v3.2.22 B113（Codex 第八轮）：注音不计入正文；CDATA、多段纯文本、带前缀的元素等非规范结构拒绝；表头格无法确认时不认作表头
+//   （流式导入、表头识别一致）；只有该格有内容的行同样拒绝；<row> 省略 r 时按上一行顺推行号
+test('链接表：注音不计入正文，非规范文本结构拒绝导入；无法确认的表头格不认作表头；全空判断前先拒绝；省略 r 的行顺推行号', async (t) => {
+  const JSZip = require('jszip');
+  const { streamLinkedRowsToInsert } = require('../../../../src/main-process/linked-table-stream-source');
+  const { detectTableType } = require('../../../../src/main-process/table-type-detector');
+  const { readMeaningfulRowsHead, UNVERIFIABLE_CELL_TEXT } = require('../../../../src/backend/file-service/readers');
+  const dir = createTempDir(t);
+  const build = async (name, sheetData, sharedStrings) => {
+    const filePath = path.join(dir, `${name}.xlsx`);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['BizId', '备注']]), 'S');
+    XLSX.writeFile(workbook, filePath, { bookSST: true });
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+    zip.file('xl/worksheets/sheet1.xml', (await zip.file('xl/worksheets/sheet1.xml').async('string'))
+      .replace(/<dimension ref="[^"]*"\/>/, '<dimension ref="A1:B20"/>')
+      .replace(/<sheetData>[\s\S]*<\/sheetData>|<sheetData\/>/, `<sheetData>${sheetData}</sheetData>`));
+    zip.file('xl/sharedStrings.xml', '<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + `<si><t>BizId</t></si><si><t>备注</t></si>${sharedStrings}</sst>`);
+    fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+    return filePath;
+  };
+  const header = '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>';
+  const linked = { expectedHeaders: ['BizId', '备注'] };
+  const importRows = async (filePath) => {
+    const inserted = [];
+    const result = await streamLinkedRowsToInsert(filePath, linked, (row) => inserted.push(row.BizId));
+    return { result, inserted };
+  };
+
+  // 注音：正文 ABC、注音 _x0041_ 与正文 ABCA 是两个键（与非流式读取一致）
+  const phonetic = await build('phonetic', `${header}<row r="2"><c r="A2" t="s"><v>2</v></c></row><row r="3"><c r="A3" t="s"><v>3</v></c></row>`
+    + '<row r="4"><c r="A4" t="inlineStr"><is><t>XY</t><rPh sb="0" eb="2"><t>_x0041_</t></rPh></is></c></row>',
+  '<si><t>ABC</t><rPh sb="0" eb="3"><t>_x0041_</t></rPh><phoneticPr fontId="1"/></si><si><t>ABCA</t></si>');
+  assert.deepEqual(await importRows(phonetic), { result: { matched: true }, inserted: ['ABC', 'ABCA', 'XY'] });
+  assert.deepEqual(readRows(phonetic).slice(1, 4).map((row) => row[0]), ['ABC', 'ABCA', 'XY'], '与非流式读取一致');
+
+  // 字面文本 <![CDATA[IDA]]>（以实体写出）照常导入；真正的 CDATA 与其他非规范结构拒绝
+  const literal = await build('literal', `${header}<row r="2"><c r="A2" t="s"><v>2</v></c></row>`, '<si><t>&lt;![CDATA[IDA]]&gt;</t></si>');
+  assert.deepEqual((await importRows(literal)).inserted, ['<![CDATA[IDA]]>']);
+  const rejected = [
+    ['CDATA', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t><![CDATA[ID_x0041_]]></t></si>'],
+    ['公式字符串中的 CDATA', '<row r="5"><c r="A5" t="str"><v><![CDATA[IDA]]></v></c></row>', ''],
+    ['多段纯文本', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t>ID</t><t>A</t></si>'],
+    ['带前缀的元素', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><x:t>IDA</x:t></si>'],
+    ['内联字符串缺 is', '<row r="5"><c r="A5" t="inlineStr"><t>IDA</t></c></row>', ''],
+    ['还原为空白、该行别无内容', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><r><t>_x00</t></r><r><t>20_</t></r></si>'],
+    ['省略 r 的行', '<row r="4"><c r="B4" t="str"><v></v></c></row><row spans="1:2"><c r="A5" t="str"><v>ID_xD800_</v></c></row>', '']
+  ];
+  for (const [label, rows, sharedStrings] of rejected) {
+    const filePath = await build(label, header + rows, sharedStrings);
+    const inserted = [];
+    await assert.rejects(streamLinkedRowsToInsert(filePath, linked, (row) => inserted.push(row)), (error) => (
+      error.code === 'FILE_READ' && /^源文件第 5 行「BizId」列的文本含无法确认原值的/.test(error.message) && !error.message.includes('IDA')
+    ), label);
+    assert.deepEqual(inserted, [], `${label}：不入库`);
+  }
+
+  // 表头格由富文本片段拼成 BizId：流式导入、表头识别都不认作表头
+  const splitHeader = await build('split-header', '<row r="1"><c r="A1" t="s"><v>2</v></c><c r="B1" t="s"><v>1</v></c></row>'
+    + '<row r="2"><c r="A2" t="str"><v>TX1</v></c></row>', '<si><r><t>Biz_x00</t></r><r><t>49_d</t></r></si>');
+  assert.deepEqual(await importRows(splitHeader), { result: { matched: false }, inserted: [] });
+  assert.deepEqual((await readMeaningfulRowsHead(splitHeader, 5, { decodeTextEscapes: true })).rows[0], [UNVERIFIABLE_CELL_TEXT, '备注']);
+  const signature = { tableKey: 'bank-statement', structureExact: true, expectedHeaders: ['BizId', '备注'] };
+  assert.notEqual((await detectTableType(splitHeader, [signature])).status, 'matched');
 });
