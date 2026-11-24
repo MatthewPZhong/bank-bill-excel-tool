@@ -65,6 +65,7 @@ function mainSection(startText, endText) {
 const MAIN_FRAGMENT = [
   mainSection('function sanitizeFileName(', '\n// v2.1.9 N7 (Phase 7 T29)'),
   mainSection('function buildOutputFilePath(', 'function buildStatementOutputFilePath('),
+  mainSection('function createDetailedErrorResult(', 'function createStatementChannelErrorResult('),
   mainSection("trackedIpcHandle('monthly-balance:assemble'", '// v1.5.3 R1 (T1.4)：月度余额另存为'),
   mainSection("trackedIpcHandle('new-account:generate'", "trackedIpcHandle('new-account:export'")
 ].join('\n');
@@ -92,7 +93,8 @@ function loadMainHandlers({ storageRoot, database }) {
     formatDateLabel: (value) => String(value),
     createErrorResult: (options) => {
       errorResults.push(options);
-      return { status: 'error', errorCode: options.errorCode, message: options.message };
+      // 与生产 createErrorResult 的返回形状一致：不含 errorCode / detailLines（报告里才有）
+      return { status: 'error', message: options.message, errorReportReady: true, errorReportFileName: 'report.txt' };
     }
   };
   Function(...Object.keys(scope), `${MAIN_FRAGMENT}\nreturn null;`)(...Object.values(scope));
@@ -258,6 +260,33 @@ async function run() {
       assertEq(run2.result && run2.result.status, 'error', `${label}.返回校验错误`);
       assertEq(errorResults.length, before + 1, `${label}.走入口错误结果`);
       assertNoBatch(service, { label, taskRunId, batchContext: run2.batchContext, initialPlan: run2.initialPlan });
+    }
+
+    // Step 2b（v3.2.22 B113）：新开账户一条记录的银行名称含无法写入 Excel 的字符——按位置拒绝，报错文件不含任一条完整账号
+    {
+      const label = 'Step2b.新开账户含无法写入的字符';
+      const taskRunId = 'deferred-new-account-unwritable';
+      const before = errorResults.length;
+      const opening = new Date();
+      opening.setDate(opening.getDate() - 3);
+      const openingDate = `${opening.getFullYear()}-${String(opening.getMonth() + 1).padStart(2, '0')}-${String(opening.getDate()).padStart(2, '0')}`;
+      const run = await runDeferred({
+        lifecycle, policyRegistry, contracts, taskRunId,
+        channel: 'new-account:generate',
+        payload: { accounts: [
+          { bankName: '测试银行', location: '上海', bankAccount: '622200007777', openingDate, isMultiCurrency: false, currency: 'USD', currencies: [] },
+          { bankName: '测试\uFFFF银行', location: '上海', bankAccount: '622200008888', openingDate, isMultiCurrency: false, currency: 'USD', currencies: [] }
+        ] }
+      });
+      assertEq(run.result && run.result.status, 'error', `${label}.返回错误`);
+      const errorOptions = errorResults[before] || {};
+      assertEq([errorResults.length - before, errorOptions.errorCode], [1, 'FILE_READ'], `${label}.按业务错误记录`);
+      assertTrue(/含无法写入 Excel 的字符/.test(String(errorOptions.message)), `${label}.消息说明原因`);
+      const recorded = JSON.stringify({ ...errorOptions, originalError: undefined });
+      assertTrue(!recorded.includes('622200007777') && !recorded.includes('622200008888'), `${label}.报错内容不含任一条完整账号`);
+      assertEq(errorOptions.context, { accountCount: 2, moduleName: NEW_ACCOUNT_EXPORT_NAME }, `${label}.报错文件只记账号行数`);
+      const exportDir = path.join(storageRoot, 'exports', '2026-11-10', 'new-account');
+      assertEq(fs.existsSync(exportDir) ? fs.readdirSync(exportDir).length : 0, 1, `${label}.不新增导出文件`);
     }
 
     // Step 3：月度余额「装配」——同一 deferred 注册，有种子时晋升并写出

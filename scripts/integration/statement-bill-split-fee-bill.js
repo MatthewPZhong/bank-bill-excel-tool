@@ -608,13 +608,14 @@ function verifyFeeFieldMapping(dir, database, main) {
   database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'input', value: 'FEE_X0041_' }] });
   assertEq(generateFieldMapping(main, template, crlfPlainCsv, path.join(dir, 'fm-input-escape.xlsx')).map((row) => row[4]), ['货款', 'FEE_X0041_'],
     '⑤ 固定文本含 _xHHHH_ 时照常生成并原样写出');
-  // 主映射取到的值含 XML 禁止字符：整份拒绝并列出源行与写进的列，不写出明细
+  // 主映射取到的值含 XML 禁止字符：整份拒绝并列出行与列，不写出明细。这里直接调用写出器，由写出边界按输出行列兜底；
+  //   生成时在写出前按最终明细、按源行号拒绝（generateStatementFiles，statement-balance-gap.test.js 覆盖）
   database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'input', value: '手续费' }] });
   const mainIllegalCsv = path.join(dir, 'field-mapping-main-illegal.csv');
   fs.writeFileSync(mainIllegalCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款\uFFFF,2026-11-01'].join('\n'), 'utf8');
   const mainIllegalOut = path.join(dir, 'fm-main-illegal.xlsx');
   assertThrows(() => generateFieldMapping(main, template, mainIllegalCsv, mainIllegalOut),
-    /第 2 行写进「Transaction Description」列的值含无法写入 Excel 的字符/, '⑤ 主映射取值含禁止字符时拒绝并列出源行与列');
+    /^第 2 行「Transaction Description」列的值含无法写入 Excel 的字符/, '⑤ 主映射取值含禁止字符时拒绝并列出行与列');
   assertTrue(!fs.existsSync(mainIllegalOut), '⑤ 主映射拒绝时不写出明细');
 
   // 模板表头删掉「记账日期」：生成前拦截列出位置；未勾选时标为未启用

@@ -3043,18 +3043,19 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
 //   长整数换成文件原文（readRows 的不可枚举属性 sourceText：Map<行下标, Map<列下标, 原文>>），账号按原文匹配。
 //   生成时的识别依据（buildBigAccountRecognitionBasis）在窗口内逐行取原文，口径相同。
 //   headerRowNumbers 为 findHeaderRowNumbersInRawRows 的结果（下标 + 1）。返回新数组，保留 firstRowNumber。
+//   v3.2.22（B133 审查）：没有原文、仍是读取库读成的超出安全整数范围的数字（二进制 .xls、原文无法核对的 XLSX 等）末几位
+//   可能已变，可能精确命中维护列表里的另一个账号，不作为自动识别的依据：换成空值，按未识别处理、由用户选择大账号
+//   （buildBigAccountRecognitionBasis 同一口径）
 function applyBigAccountRecognitionSourceText(rawRows, headerRowNumbers) {
   const sourceText = rawRows && rawRows.sourceText instanceof Map ? rawRows.sourceText : null;
-  if (!sourceText || !sourceText.size) return rawRows;
   const headerIndexes = new Set((headerRowNumbers || []).map((rowNumber) => rowNumber - 1));
   const rows = rawRows.map((row, index) => {
-    const rowText = headerIndexes.has(index) ? null : sourceText.get(index);
-    if (!rowText || !Array.isArray(row)) return row;
-    const next = row.slice();
-    rowText.forEach((text, columnIndex) => {
-      if (columnIndex < next.length) next[columnIndex] = text;
+    if (headerIndexes.has(index) || !Array.isArray(row)) return row;
+    const rowText = sourceText ? sourceText.get(index) : null;
+    return row.map((cell, columnIndex) => {
+      if (rowText && rowText.has(columnIndex)) return rowText.get(columnIndex);
+      return typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell) ? '' : cell;
     });
-    return next;
   });
   if (rawRows.firstRowNumber !== undefined) {
     Object.defineProperty(rows, 'firstRowNumber', { value: rawRows.firstRowNumber, enumerable: false });
@@ -3091,8 +3092,12 @@ function buildBigAccountRecognitionBasis({
         const rowText = sourceText && sourceText.get(startIndex + candidateIndex);
         return {
           sourceRow: startIndex + candidateIndex + 1 + rowNumberOffset,
+          // v3.2.22（B133 审查）：没有原文、无法核对原值的长整数不参与识别（与 applyBigAccountRecognitionSourceText 同一口径）
           cells: (Array.isArray(row) ? row : [])
-            .map((cell, columnIndex) => normalizeCell(rowText && rowText.has(columnIndex) ? rowText.get(columnIndex) : cell))
+            .map((cell, columnIndex) => {
+              if (rowText && rowText.has(columnIndex)) return normalizeCell(rowText.get(columnIndex));
+              return typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell) ? '' : normalizeCell(cell);
+            })
             .filter((cell) => cell !== '')
         };
       });
@@ -18566,17 +18571,13 @@ function registerFileHandlers() {
     } catch (error) {
       // v3.2.22 B113：业务校验错误（如余额记录含无法写入 Excel 的字符）把消息与逐处位置交给弹窗和报错文件，不改报系统错误
       if (error instanceof FileValidationError) {
-        const detailLines = Array.isArray(error.detailLines) ? error.detailLines.slice() : [];
-        return {
-          ...createErrorResult({
-            step: '装配月度余额账单',
-            message: error.message,
-            errorCode: error.code || 'BUSINESS_ERROR',
-            detailLines,
-            context: error.context || {}
-          }),
-          detailLines
-        };
+        return createDetailedErrorResult({
+          step: '装配月度余额账单',
+          message: error.message,
+          errorCode: error.code || 'BUSINESS_ERROR',
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+          context: error.context || {}
+        });
       }
       return createErrorResult({
         step: '装配月度余额账单',
@@ -18806,17 +18807,20 @@ function registerNewAccountHandlers() {
           errorCode: error.code,
           detailLines: error.detailLines,
           originalError: error,
-          context: {
-            accounts: accounts.map((account) => ({
-              bankName: account.bankName,
-              location: account.location,
-              currency: account.currency,
-              currencies: account.currencies,
-              bankAccount: account.bankAccount,
-              openingDate: account.openingDate ? formatDateLabel(account.openingDate) : account.openingDateRaw
-            })),
-            moduleName: NEW_ACCOUNT_EXPORT_NAME
-          },
+          // v3.2.22 B113：无法写入的字符的拒绝只需行列位置（positionsOnly），不把整批账号写进报错文件
+          context: error.positionsOnly
+            ? { accountCount: accounts.length, moduleName: NEW_ACCOUNT_EXPORT_NAME }
+            : {
+              accounts: accounts.map((account) => ({
+                bankName: account.bankName,
+                location: account.location,
+                currency: account.currency,
+                currencies: account.currencies,
+                bankAccount: account.bankAccount,
+                openingDate: account.openingDate ? formatDateLabel(account.openingDate) : account.openingDateRaw
+              })),
+              moduleName: NEW_ACCOUNT_EXPORT_NAME
+            },
           templateName: NEW_ACCOUNT_EXPORT_NAME
         });
       }

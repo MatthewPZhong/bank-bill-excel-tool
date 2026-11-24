@@ -293,6 +293,46 @@ async function verifyBigAccountRecognitionRead(dir) {
     { sourceRow: 1, clearingAccountId: 'ACC-CARD' },
     { sourceRow: 1, clearingAccountId: 'ACC-SUFFIX' }
   ]], '⑤ 账户映射按原文命中，精确命中排在后缀的模糊命中之前');
+
+  // v3.2.22（B133 审查）：工作表原文无法核对（如含 XML 注释）时不还原，表头上方的长账号只剩近似值：不作为自动识别的依据，
+  //   不能精确命中维护列表里与近似值相同的另一个账号（9007199254740993 读成 9007199254740992），按未识别处理
+  const UNVERIFIED_ACCOUNT = '9007199254740993';
+  const commented = await writeXlsxWithLiterals(path.join(dir, 'account-commented.xlsx'), [
+    ['账号', 2222],
+    [],
+    HEADER,
+    ['2026-11-01', 'USD', 100, 'R1', 'C1']
+  ], { 2222: UNVERIFIED_ACCOUNT });
+  const zip = await JSZip.loadAsync(fs.readFileSync(commented));
+  const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+  zip.file('xl/worksheets/sheet1.xml', sheetXml.replace('<sheetData>', '<sheetData><!-- 手工注释 -->'));
+  fs.writeFileSync(commented, await zip.generateAsync({ type: 'nodebuffer' }));
+  assertEq(readRows(commented, { blankrows: true })[0][1], Number(UNVERIFIED_ACCOUNT), '⑤ 前置：账号读成近似值');
+  assertEq(identifyAccountsFromFile({
+    filePath: commented,
+    expectedSourceHeaders: HEADER,
+    allMerchantIds: [String(Number(UNVERIFIED_ACCOUNT))],
+    allowSubstringMatch: true
+  }), { accounts: [], isSingleAccount: true }, '⑤ 导入识别：无法核对原值的长账号不精确命中近似值相同的另一个账号');
+  let commentedBasis = null;
+  buildMappedRows({
+    inputFilePath: commented,
+    orderedTargetFields: TARGETS,
+    mappingByField: MAPPING,
+    expectedSourceHeaders: HEADER,
+    readOptions: {
+      onWorkbookRows(rawRows) {
+        commentedBasis = buildBigAccountRecognitionBasis({
+          rawRows,
+          expectedSourceHeaders: HEADER,
+          accountMappingByBankId: { [String(Number(UNVERIFIED_ACCOUNT))]: { clearingAccountId: 'ACC-ROUNDED' } }
+        });
+      }
+    }
+  });
+  assertEq(commentedBasis && commentedBasis.headerWindows.map((window) => window.candidateRows), [[['账号'], []]],
+    '⑤ 生成时的识别窗口不含无法核对原值的长账号');
+  assertEq(commentedBasis && commentedBasis.bridgeCandidatesByBlock, [[]], '⑤ 账户映射不按近似值命中');
 }
 
 async function main() {

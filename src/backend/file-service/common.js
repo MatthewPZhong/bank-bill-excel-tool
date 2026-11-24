@@ -92,7 +92,8 @@ function isWorksheetWritableText(value) {
   return typeof value === 'string' && value.isWellFormed() && !/[\uFFFE\uFFFF]/.test(value);
 }
 
-// v3.2.22 B113：行数据中无法原样写入工作表的文本。rows 首行为表头（列名），rowMetas[i] 对应 rows[i + 1]（取源行号）；
+// v3.2.22 B113：行数据中无法原样写入工作表的文本。行号定位交易所在的源行；值可能取自源文件，也可能来自大账号回填、
+//   手动选择或固定值配置，提示不限定为修正源文件。rows 首行为表头（列名），rowMetas[i] 对应 rows[i + 1]（取源行号）；
 //   include(row) 为 false 的行不看（如收付金额均为空或 0、不导出的行）。只保留前 limit 处位置说明，另计总数（大批出错时不随错误数占用内存）
 const UNWRITABLE_TEXT_DETAIL_LIMIT = 20;
 function noteUnwritableRowText(found, row, fieldNames, meta) {
@@ -116,15 +117,21 @@ function collectUnwritableRowText(rows, { rowMetas = [], include = null, found =
   return found;
 }
 
+// 无法写入的字符的拒绝只需行列位置与数量：标记 positionsOnly，调用方不要把整批记录（如完整账号）放进报错文件
+function markPositionsOnly(error) {
+  Object.defineProperty(error, 'positionsOnly', { value: true, enumerable: false });
+  return error;
+}
+
 function assertNoUnwritableRowText(found) {
   if (!found.total) return;
   const detailLines = found.labels.slice();
   if (found.total > detailLines.length) detailLines.push(`另有 ${found.total - detailLines.length} 处，共 ${found.total} 处`);
-  throw new FileValidationError(
+  throw markPositionsOnly(new FileValidationError(
     'FILE_READ',
-    `源文件${found.labels[0]}含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）${found.total > 1 ? `等 ${found.total} 处` : ''}，请修正源文件后重新生成`,
+    `源文件${found.labels[0]}含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）${found.total > 1 ? `等 ${found.total} 处` : ''}，请按值的来源修正源文件或模板的大账号、固定值配置后重新生成`,
     { detailLines }
-  );
+  ));
 }
 
 module.exports = {
@@ -142,6 +149,7 @@ module.exports = {
   UNWRITABLE_TEXT_DETAIL_LIMIT,
   assertNoUnwritableRowText,
   collectUnwritableRowText,
+  markPositionsOnly,
   noteUnwritableRowText,
   normalizeCell,
   trimTrailingEmptyCells

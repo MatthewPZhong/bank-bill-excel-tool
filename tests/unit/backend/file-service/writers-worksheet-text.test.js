@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const XLSX = require('xlsx');
 
-const { assertWorkbookFileTextWritable, prepareWorkbookTextForWrite } = require('../../../../src/backend/file-service/writers');
+const { prepareWorkbookTextForWrite } = require('../../../../src/backend/file-service/writers');
 const { writeBalanceWorkbook, writeWorkbookRows } = require('../../../../src/backend/file-service');
 
 const ESCAPE_LIKE = [
@@ -107,16 +107,37 @@ test('报错的列名取表头原文（转义前）；超过 20 处时按行列�
   assert.equal(fs.existsSync(outputFilePath), false);
 });
 
-test('assertWorkbookFileTextWritable：模板文件任一工作表含无法写入的文字时拒绝，位置带表名', (t) => {
-  const dir = createTempDir(t);
-  const templateFilePath = path.join(dir, 'template.xlsx');
-  const template = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(template, XLSX.utils.aoa_to_sheet([['MerchantId', 'Balance']]), 'Sheet1');
-  XLSX.utils.book_append_sheet(template, XLSX.utils.aoa_to_sheet([['说明'], ['附注\uFFFF']]), '附表');
-  XLSX.writeFile(template, templateFilePath);
-  assert.throws(() => assertWorkbookFileTextWritable(templateFilePath, '余额账单模板'), (error) => {
-    assert.equal(error.code, 'FILE_READ');
-    assert.deepEqual(error.detailLines, ['余额账单模板工作表「附表」第 2 行「说明」列']);
+test('多张工作表时位置带表名', () => {
+  const workbook = { SheetNames: ['Sheet1', '附表'], Sheets: {
+    Sheet1: { '!ref': 'A1:B1', A1: { t: 's', v: 'MerchantId' }, B1: { t: 's', v: 'Balance' } },
+    附表: { '!ref': 'A1:A2', A1: { t: 's', v: '说明' }, A2: { t: 's', v: '附注\uFFFF' } }
+  } };
+  assert.throws(() => prepareWorkbookTextForWrite(workbook), (error) => {
+    assert.deepEqual(error.detailLines, ['工作表「附表」第 2 行「说明」列']);
     return true;
+  });
+});
+
+// 余额账单模板随程序发布（assets），原有文字随余额账单写出，生成时不在运行时读取核对（spec D3）：这里确认它能原样写出、读回。
+//   读取库只能正确还原 U+0080 以下的 _xHHHH_ 转义（_x00E9_ 读成「�」），模板 XML 里不能有更高的转义
+test('随程序发布的余额账单模板：文字可原样写出读回，没有读取时会被改写的转义', (t) => {
+  const templatePath = path.join(__dirname, '../../../../assets/余额账单模版.xlsx');
+  const container = XLSX.CFB.read(fs.readFileSync(templatePath), { type: 'buffer' });
+  container.FullPaths.forEach((fullPath, index) => {
+    if (!/xl\/(sharedStrings\.xml|worksheets\/[^/]+\.xml)$/i.test(fullPath)) return;
+    const xml = Buffer.from(container.FileIndex[index].content || []).toString('utf8');
+    const lossy = [...xml.matchAll(/_x([0-9A-Fa-f]{4})_/g)].filter((match) => parseInt(match[1], 16) >= 0x80);
+    assert.deepEqual(lossy.map((match) => match[0]), [], fullPath);
+  });
+  const dir = createTempDir(t);
+  const template = XLSX.readFile(templatePath);
+  const fields = readRows(templatePath)[0];
+  const outputFilePath = path.join(dir, 'balance.xlsx');
+  writeBalanceWorkbook({ templateFilePath: templatePath, records: [fields.map(() => 'v')], templateFields: fields, outputFilePath });
+  const written = XLSX.readFile(outputFilePath);
+  assert.deepEqual(written.SheetNames, template.SheetNames);
+  template.SheetNames.forEach((name) => {
+    const rows = XLSX.utils.sheet_to_json(written.Sheets[name], { header: 1, defval: '' });
+    assert.deepEqual(rows[0], XLSX.utils.sheet_to_json(template.Sheets[name], { header: 1, defval: '' })[0], name);
   });
 });

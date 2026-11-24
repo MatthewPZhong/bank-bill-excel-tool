@@ -3,7 +3,9 @@ const path = require('node:path');
 // v1.5.3 R3：切换到 xlsx-js-style 以支持写入单元格样式（cell.s.font 等）
 // 仅 writers.js 内部切换，其它文件仍用 xlsx（减少打包体积）
 const XLSX = require('xlsx-js-style');
-const { FileValidationError, UNWRITABLE_TEXT_DETAIL_LIMIT, isWorksheetWritableText, normalizeCell } = require('./common');
+const {
+  FileValidationError, UNWRITABLE_TEXT_DETAIL_LIMIT, isWorksheetWritableText, markPositionsOnly, normalizeCell
+} = require('./common');
 const { applyWatermark } = require('../../main-process/workbook-watermark');
 
 // v1.5.3 R3：给表头行（第 1 行）每个单元格注入 Courier New 字体
@@ -74,15 +76,15 @@ function collectUnwritableWorkbookText(workbook) {
   return { total, labels: found.map((item) => item.label) };
 }
 
-function assertWorkbookTextWritable({ total, labels }, prefix = '') {
+function assertWorkbookTextWritable({ total, labels }) {
   if (!total) return;
-  const detailLines = labels.map((label) => `${prefix}${label}`);
+  const detailLines = labels.slice();
   if (total > labels.length) detailLines.push(`另有 ${total - labels.length} 处，共 ${total} 处`);
-  throw new FileValidationError(
+  throw markPositionsOnly(new FileValidationError(
     'FILE_READ',
     `${detailLines[0]}的值含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）${total > 1 ? `等 ${total} 处` : ''}，请修正后重新生成`,
     { detailLines }
-  );
+  ));
 }
 
 // 写出前的文本处理（见上方 B113 说明）
@@ -100,11 +102,6 @@ function prepareWorkbookTextForWrite(workbook) {
       }
     });
   });
-}
-
-// v3.2.22 B113：模板文件（如余额账单模板）原有的文字会随输出写出，同批要写的文件落盘前先核对，不留下半份结果
-function assertWorkbookFileTextWritable(filePath, displayName) {
-  assertWorkbookTextWritable(collectUnwritableWorkbookText(XLSX.readFile(filePath)), displayName);
 }
 
 function countSignificantDigitsFromString(str) {
@@ -379,7 +376,6 @@ function writeBalanceWorkbook({
 module.exports = {
   applyBalanceFieldFormats,
   applyExportFieldFormats,
-  assertWorkbookFileTextWritable,
   buildNumericCellValue,
   prepareWorkbookTextForWrite,
   writeBalanceWorkbook,

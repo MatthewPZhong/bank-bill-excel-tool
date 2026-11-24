@@ -11,7 +11,6 @@ const {
   noteUnwritableRowText,
   normalizeCell: normalizeBillDateCell
 } = require('../backend/file-service/common');
-const { assertWorkbookFileTextWritable } = require('../backend/file-service/writers');
 
 // 账单日期的必填口径（parseRequiredBillDates 与写出前的只读校验共用）：表头须有 BillDate 列；
 //   单元格为空时跳过，有值但无法解析时报错；整批没有任何有效日期时报错。
@@ -217,11 +216,13 @@ function createStatementGenerationHelpers(deps) {
       metaSegments.push({ start: metaOffset, metas: rows.rowMetas });
       metaOffset += rows.rowMetas.length;
     }
+    // 调用方按递增的合并下标查询（下方逐行遍历），沿段游标前进，不必每行从第一段找起（每条导出行都要取行号核对字符）
+    let metaCursor = 0;
     const mergedRowMeta = (mergedIndex) => {
-      for (const { start, metas } of metaSegments) {
-        if (mergedIndex < start + metas.length) return mergedIndex >= start ? metas[mergedIndex - start] : undefined;
-      }
-      return undefined;
+      while (metaCursor < metaSegments.length
+        && mergedIndex >= metaSegments[metaCursor].start + metaSegments[metaCursor].metas.length) metaCursor += 1;
+      const segment = metaSegments[metaCursor];
+      return segment && mergedIndex >= segment.start ? segment.metas[mergedIndex - segment.start] : undefined;
     };
     const exported = { hasRow: false, hasValidDate: false, dateError: null };
     // v3.2.22 B113：导出行里无法原样写入工作表的文本（按最终明细，含回填的大账号），与 generateStatementFiles 写出前同口径
@@ -360,13 +361,9 @@ function createStatementGenerationHelpers(deps) {
       ? Boolean(preparedBatch.balanceRequested)
       : Boolean(includeBalance) && Boolean(preparedBatch.balanceRequested);
 
-    // v3.2.22 B113：写出任何文件前按最终明细（已回填大账号）核对文本能否原样写入，报源行号；明细与余额一起生成时，
-    //   一并核对余额模板原有的文字，不留下「明细已写出、余额因无法写入的字符改报告警」的半份结果（余额记录的取值来自明细行）
+    // v3.2.22 B113：写出任何文件前按最终明细（已回填或选择的大账号）核对文本能否原样写入，报源行号。余额记录的取值来自明细行；
+    //   余额账单模板随程序发布（assets），其文字可原样写出由单测确认，不在运行时读取核对
     assertNoUnwritableRowText(collectUnwritableRowText(effectiveDetailRows, { rowMetas: effectiveDetailRows.rowMetas || [] }));
-    if (includeDetail && shouldGenerateBalance) {
-      const balanceTemplatePath = getBalanceTemplatePath();
-      if (fs.existsSync(balanceTemplatePath)) assertWorkbookFileTextWritable(balanceTemplatePath, '余额账单模板');
-    }
 
     if (includeDetail) {
       const detailOutput = buildStatementOutputFilePath({

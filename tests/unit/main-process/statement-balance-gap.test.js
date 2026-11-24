@@ -541,7 +541,7 @@ function writeSourceWorkbook(root, fileName, rows) {
   return filePath;
 }
 
-function createGenerationSeam(storageRoot, { acknowledgedKeys = new Set(), gapResults = [], balanceTemplatePath = path.join(ROOT, 'assets', '余额账单模版.xlsx') } = {}) {
+function createGenerationSeam(storageRoot, { acknowledgedKeys = new Set(), gapResults = [] } = {}) {
   const ensureStorageRoot = () => {
     fs.mkdirSync(storageRoot, { recursive: true });
     return storageRoot;
@@ -583,7 +583,7 @@ function createGenerationSeam(storageRoot, { acknowledgedKeys = new Set(), gapRe
     FileValidationError,
     findPreviousBalanceSeed,
     getAcknowledgedBalanceGapKeys: () => acknowledgedKeys,
-    getBalanceTemplatePath: () => balanceTemplatePath,
+    getBalanceTemplatePath: () => path.join(ROOT, 'assets', '余额账单模版.xlsx'),
     getStatementSessionEntries,
     mergeMappedDetailRows,
     normalizeCell,
@@ -1705,7 +1705,7 @@ test('写出前的只读校验与生成时的检查同口径：收支同时有�
     ['收支同时有值（前一段无行元数据）', '存在2条明细的 Credit Amount 与 Debit Amount 同时有值',
       ['第4行，Credit Amount="5"，Debit Amount="6"', '第5行，Credit Amount="7"，Debit Amount="8"']],
     ['回填的大账号含无法写入的字符',
-      '源文件第 7 行写进「MerchantId」列的值含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）等 2 处，请修正源文件后重新生成',
+      '源文件第 7 行写进「MerchantId」列的值含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）等 2 处，请按值的来源修正源文件或模板的大账号、固定值配置后重新生成',
       ['第 7 行写进「MerchantId」列的值', '第 8 行写进「MerchantId」列的值']],
     ['只有收支都为 0 的行、没有日期', '导入文件中未找到有效的 BillDate', []],
     ['出余额未映射 MerchantId', '当前模板启用 Balance 时必须映射 MerchantId 字段', []]
@@ -1715,28 +1715,6 @@ test('写出前的只读校验与生成时的检查同口径：收支同时有�
   const config = { ...baseConfig, mappingByTargetField: {} };
   assert.equal(errorOf(() => generation.assertStatementEntriesWritable({ config, fileEntries, includeBalance: false })), null);
   assert.match(errorOf(() => generation.assertStatementEntriesWritable({ config, fileEntries, includeBalance: true })).message, /必须映射 MerchantId/);
-});
-
-// v3.2.22 B113：余额账单模板原有的文字无法写入时，明细与余额一起生成在写出明细之前拒绝，不留下只有明细的半份结果
-test('生成层：余额账单模板含无法写入 Excel 的文字时不写出明细，也不写种子', (t) => {
-  const root = createTempRoot(t);
-  const storageRoot = path.join(root, 'storage');
-  const template = XLSX.readFile(path.join(ROOT, 'assets', '余额账单模版.xlsx'));
-  XLSX.utils.book_append_sheet(template, XLSX.utils.aoa_to_sheet([['说明'], ['附注\uFFFF']]), '附表');
-  const balanceTemplatePath = path.join(root, 'balance-template.xlsx');
-  XLSX.writeFile(template, balanceTemplatePath);
-  const generation = createGenerationSeam(storageRoot, { balanceTemplatePath });
-  const { config, preparedBatch } = prepareGapBatch(root, generation);
-  assert.throws(
-    () => generation.generateStatementFiles({ config, preparedBatch, scope: 'current' }),
-    (error) => {
-      assert.equal(error.code, 'FILE_READ');
-      assert.deepEqual(error.detailLines, ['余额账单模板工作表「附表」第 2 行「说明」列']);
-      return true;
-    }
-  );
-  assert.deepEqual(findFileNames(path.join(storageRoot, 'exports'), /\.xlsx$/), []);
-  assert.equal(fs.existsSync(path.join(storageRoot, 'balance-seeds')), false);
 });
 
 function findFileNames(root, pattern) {

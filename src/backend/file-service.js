@@ -6,8 +6,6 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,
-  assertNoUnwritableRowText,
-  collectUnwritableRowText,
   isUnverifiedLongNumber,
   normalizeCell
 } = require('./file-service/common');
@@ -203,14 +201,6 @@ function assertNoInvalidBillDateRows({ mappedRows, rowMetas, orderedTargetFields
     `账单日期存在无效值：第 ${firstRow.sourceRowNumber} 行「${firstRow.rawValue}」${invalidRows.length > 1 ? `等 ${invalidRows.length} 行` : ''}，请修正后重新导入`,
     { detailLines }
   );
-}
-
-// v3.2.22 B113：写进明细的文本须能原样写入工作表。含 U+FFFE、U+FFFF（XML 1.0 禁止，工作表无法解析）或未配对代理项
-//   （写出后变成「�」）时整份拒绝，列出源行与写进的列，不交付无法打开或被改写的明细。只看会导出为明细的行
-//   （收付金额均为空或 0 的行不写出，不因其值拒绝），在按币种回填大账号之后检查（含回填的 MerchantId）。手动选择的大账号
-//   在生成前由 statement-generation.js 按最终明细再核对一次。费用账单取自源列的覆盖值已按源列在展开时拒绝（assertFeeFieldOutputWritable）
-function assertExportedRowsWritable({ mappedRows, rowMetas, isExportedRow }) {
-  assertNoUnwritableRowText(collectUnwritableRowText(mappedRows, { rowMetas, include: isExportedRow }));
 }
 
 // 主映射 Balance 选「通过发生额计算」时生成配置保留的映射值（与 main.js BALANCE_CALCULATED_OPTION 相同；「无」不进入生成配置）
@@ -1769,12 +1759,6 @@ function buildMappedRows({
       maskDiagnosticValue: maskRestoredLongIntegers
     });
   }
-
-  assertExportedRowsWritable({
-    mappedRows,
-    rowMetas,
-    isExportedRow: isExportedDetailRow
-  });
 
   mappedRows.issues = issues;
   mappedRows.rowMetas = rowMetas;
