@@ -45,6 +45,36 @@ function appendLog(logRoot, error) {
   return targetFile;
 }
 
+// v3.2.22 B45（Codex 第五轮）：同一秒、同一模板与步骤的报告不覆盖已有的那份（覆盖写到一半失败时，上一份报告会变成半份
+//   新报告）：只新建文件，重名时依次加 -2、-3……；本次写入失败时删掉写了一半的新文件，已有的报告不受影响
+function writeNewReportFile(targetDir, baseName, content) {
+  for (let attempt = 1; ; attempt += 1) {
+    const targetFile = path.join(targetDir, `${baseName}${attempt > 1 ? `-${attempt}` : ''}.txt`);
+    let fd;
+    try {
+      fd = fs.openSync(targetFile, 'wx');
+    } catch (error) {
+      if (error && error.code === 'EEXIST' && attempt < 1000) continue;
+      throw error;
+    }
+    try {
+      fs.writeFileSync(fd, content, 'utf8');
+    } catch (error) {
+      try {
+        fs.closeSync(fd);
+        fd = null;
+        fs.rmSync(targetFile, { force: true });
+      } catch (_cleanupError) {
+        // 尽力而为
+      }
+      throw error;
+    } finally {
+      if (fd !== null && fd !== undefined) fs.closeSync(fd);
+    }
+    return targetFile;
+  }
+}
+
 function writeErrorReport(reportRoot, payload = {}) {
   const now = new Date();
   const date = formatLocalDate(now);
@@ -57,10 +87,7 @@ function writeErrorReport(reportRoot, payload = {}) {
       'APP'
   );
   const targetDir = path.join(reportRoot, 'error-reports', date);
-  const targetFile = path.join(
-    targetDir,
-    `${formatCompactLocalTimestamp(now)}-${safeTemplateName}-${safeStep}.txt`
-  );
+  const baseName = `${formatCompactLocalTimestamp(now)}-${safeTemplateName}-${safeStep}`;
   const detailLines = Array.isArray(payload.detailLines)
     ? payload.detailLines.filter((line) => String(line || '').trim() !== '')
     : [];
@@ -88,7 +115,7 @@ function writeErrorReport(reportRoot, payload = {}) {
   }
 
   fs.mkdirSync(targetDir, { recursive: true });
-  fs.writeFileSync(targetFile, `${sections.join('\n')}\n`, 'utf8');
+  const targetFile = writeNewReportFile(targetDir, baseName, `${sections.join('\n')}\n`);
 
   return {
     filePath: targetFile,

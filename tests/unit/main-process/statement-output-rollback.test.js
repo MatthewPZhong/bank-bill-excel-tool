@@ -348,6 +348,29 @@ test('文件系统不提供文件编号（ino 为 0）时按路径区分，不�
   assert.deepEqual([fs.readFileSync(first, 'utf8'), fs.readFileSync(second, 'utf8')], ['A-before', 'B-before']);
 });
 
+test('ino 为 0 且卷不区分大小写时，大小写不同的两个路径按同一文件记一份备份，回滚还原批前内容（Codex 第五轮）', (t) => {
+  const { root, staging } = setup(t);
+  const upper = path.join(root, 'HSBC.json');
+  const lower = path.join(root, 'hsbc.json');
+  fs.writeFileSync(upper, 'before');
+  if (!fs.existsSync(lower)) {
+    t.skip('前提不满足：临时卷区分大小写');
+    return;
+  }
+  const zeroIno = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino: 0n });
+  const fsImpl = {
+    ...fs,
+    lstatSync: (...args) => { const stat = fs.lstatSync(...args); return stat && args[1] && args[1].bigint ? zeroIno(stat) : stat; },
+    fstatSync: (...args) => { const stat = fs.fstatSync(...args); return args[1] && args[1].bigint ? zeroIno(stat) : stat; }
+  };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(upper, writeText(upper, 'group-1'));
+  journal.write(lower, writeText(lower, 'group-2'));
+  const outcome = journal.rollback();
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.equal(fs.readFileSync(upper, 'utf8'), 'before', '还原批前内容，不是第一组写后的内容');
+});
+
 // ---------- 第四轮审查 ----------
 
 test('主路径在回滚前被另存替换、硬链接别名仍指向原文件：经别名写回原内容，主路径列入恢复清单', (t) => {

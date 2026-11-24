@@ -53,11 +53,23 @@ function identityOf(stat) {
 }
 
 // 文件对象（不含内容）：同一文件经不同路径写入时据此合并，写出回调抛错时据此判断路径上是否还是本批写过的文件。
-//   文件系统不提供文件编号（ino 为 0，与 balance-seed-store.js getBalanceSeedFileIdentity 同一回退）时按路径区分，
-//   不把同卷所有文件当成同一个
-function fileKeyOf(stat, filePath) {
+//   文件系统不提供文件编号（ino 为 0，与 balance-seed-store.js getBalanceSeedFileIdentity 同一回退）时按系统解析出的
+//   真实路径区分（realpathSync.native：不区分大小写的卷上还原磁盘上的实际大小写、Windows 短文件名还原为长文件名、
+//   解析链接），不把同卷所有文件当成同一个，也不把同一文件的大小写别名当成两个（Codex 第五轮）；解析失败时退回字面路径
+function canonicalPathOf(fsImpl, filePath) {
+  const resolved = path.resolve(String(filePath));
+  const realpath = fsImpl.realpathSync && (fsImpl.realpathSync.native || fsImpl.realpathSync);
+  if (typeof realpath !== 'function') return resolved;
+  try {
+    return path.resolve(realpath(resolved));
+  } catch (_error) {
+    return resolved;
+  }
+}
+
+function fileKeyOf(stat, filePath, fsImpl) {
   if (!stat) return null;
-  return stat.ino ? `${stat.dev}:${stat.ino}` : `path:${path.resolve(String(filePath))}`;
+  return stat.ino ? `${stat.dev}:${stat.ino}` : `path:${canonicalPathOf(fsImpl, filePath)}`;
 }
 
 function withOpenFile(fsImpl, filePath, flags, use) {
@@ -173,7 +185,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
 
   function track(filePath) {
     const { resolved, stat } = checkTarget(filePath);
-    const known = byPath.get(resolved) || (stat && byFile.get(fileKeyOf(stat, resolved)));
+    const known = byPath.get(resolved) || (stat && byFile.get(fileKeyOf(stat, resolved, fsImpl)));
     if (known) {
       byPath.set(resolved, known);
       if (!known.paths.has(resolved)) {
@@ -193,7 +205,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       existed: Boolean(stat),
       backupName: null,
       // 本批写过的文件对象：原有文件为原文件，新建的在首次写成后记下
-      ownedFileKey: fileKeyOf(stat, resolved),
+      ownedFileKey: fileKeyOf(stat, resolved, fsImpl),
       writePending: false,
       writtenIdentity: null,
       replacedWhileWriting: false
@@ -219,7 +231,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     }
     entries.push(entry);
     byPath.set(resolved, entry);
-    if (stat) byFile.set(fileKeyOf(stat, resolved), entry);
+    if (stat) byFile.set(fileKeyOf(stat, resolved, fsImpl), entry);
     return { entry, resolved, stat };
   }
 
@@ -229,18 +241,18 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   //   被替换无法识别，见 spec §3）
   function write(filePath, writeFn) {
     const { entry, resolved, stat } = track(filePath);
-    const keyBefore = fileKeyOf(stat, resolved);
+    const keyBefore = fileKeyOf(stat, resolved, fsImpl);
     entry.writePending = true;
     const result = writeFn();
     const written = lstatOrNull(fsImpl, resolved);
-    if (keyBefore && fileKeyOf(written, resolved) !== keyBefore) {
+    if (keyBefore && fileKeyOf(written, resolved, fsImpl) !== keyBefore) {
       entry.replacedWhileWriting = true;
       throw changedExternallyError(resolved);
     }
     // 写完后路径上没有普通文件（被其他程序移走等）：本批没有可交付的输出（后续合并会跳过缺失的分组文件），停止生成
     if (!written || !written.isFile()) throw changedExternallyError(resolved);
     entry.writtenIdentity = identityOf(written);
-    if (!entry.ownedFileKey) entry.ownedFileKey = fileKeyOf(written, resolved);
+    if (!entry.ownedFileKey) entry.ownedFileKey = fileKeyOf(written, resolved, fsImpl);
     if (written) byFile.set(entry.ownedFileKey, entry);
     entry.writePending = false;
     return result;
@@ -267,7 +279,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     // 写出回调抛错：本批只原地改写文件，路径上换成另一个文件说明是其他程序替换的；
     //   导入前不存在、本批也没写成过的路径上出现的文件，无法确认是本批写到一半还是其他程序新建的
     if (!entry.ownedFileKey) return FAILURE_REASONS.UNCERTAIN_OWNER;
-    return fileKeyOf(current, entry.filePath) === entry.ownedFileKey ? null : FAILURE_REASONS.CHANGED_EXTERNALLY;
+    return fileKeyOf(current, entry.filePath, fsImpl) === entry.ownedFileKey ? null : FAILURE_REASONS.CHANGED_EXTERNALLY;
   }
 
   // 原有文件写回：先只读打开比较内容（一致时不写回：被 Excel 占用、写出时根本没打开的文件，写回会再次撞上占用）；
@@ -281,17 +293,17 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       if (!current.isFile()) return { reason: FAILURE_REASONS.NOT_REGULAR_FILE };
       const problem = ownershipProblem(entry, current);
       if (problem) return { reason: problem };
-      return sameContent(fsImpl, fd, backupPath) ? { done: true } : { key: fileKeyOf(current, targetPath) };
+      return sameContent(fsImpl, fd, backupPath) ? { done: true } : { key: fileKeyOf(current, targetPath, fsImpl) };
     });
     if (readProblem.reason || readProblem.done) return readProblem.reason || null;
     return withOpenFile(fsImpl, targetPath, 'r+', (fd) => {
       const current = fsImpl.fstatSync(fd, { bigint: true });
       if (!current.isFile()) return FAILURE_REASONS.NOT_REGULAR_FILE;
-      if (fileKeyOf(current, targetPath) !== readProblem.key) return FAILURE_REASONS.CHANGED_EXTERNALLY;
+      if (fileKeyOf(current, targetPath, fsImpl) !== readProblem.key) return FAILURE_REASONS.CHANGED_EXTERNALLY;
       const problem = ownershipProblem(entry, current);
       if (problem) return problem;
       copyIntoDescriptor(fsImpl, backupPath, fd);
-      return fileKeyOf(lstatOrNull(fsImpl, targetPath), targetPath) === readProblem.key
+      return fileKeyOf(lstatOrNull(fsImpl, targetPath), targetPath, fsImpl) === readProblem.key
         ? null
         : FAILURE_REASONS.CHANGED_EXTERNALLY;
     });
@@ -327,7 +339,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       if (aliasPath === entry.filePath) continue;
       try {
         const aliased = lstatOrNull(fsImpl, aliasPath);
-        const stillOwned = aliased ? fileKeyOf(aliased, aliasPath) === entry.ownedFileKey : !entry.existed;
+        const stillOwned = aliased ? fileKeyOf(aliased, aliasPath, fsImpl) === entry.ownedFileKey : !entry.existed;
         if (!stillOwned) {
           failures.push(failure(aliased ? FAILURE_REASONS.CHANGED_EXTERNALLY : FAILURE_REASONS.MISSING, aliasPath));
         } else if (!originalRestored && aliased) {

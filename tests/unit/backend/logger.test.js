@@ -284,3 +284,44 @@ test('writeErrorReport：15 万行明细照常写出报告', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// v3.2.22 B45（Codex 第五轮）：同一秒、同名的报告不覆盖上一份；写到一半失败时删掉新文件，上一份的字节不变
+test('writeErrorReport：同一秒同名时另建 -2 文件；写入失败时不留下半份、上一份报告不变', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 23, 10, 20, 30).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { global.Date = RealDate; });
+  const payload = { step: '生成网银账单', templateName: '模板A', message: '第一份', errorCode: 'TEST' };
+  const first = writeErrorReport(root, payload);
+  const firstBytes = fs.readFileSync(first.filePath);
+  const second = writeErrorReport(root, { ...payload, message: '第二份' });
+  assert.notEqual(second.filePath, first.filePath);
+  assert.match(second.fileName, /-2\.txt$/);
+  assert.match(fs.readFileSync(second.filePath, 'utf8'), /第二份/);
+  assert.deepEqual(fs.readFileSync(first.filePath), firstBytes, '上一份报告不被覆盖');
+
+  const writeFileSync = fs.writeFileSync;
+  fs.writeFileSync = (target, ...rest) => {
+    if (typeof target === 'number') {
+      writeFileSync(target, '半份');
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    }
+    return writeFileSync(target, ...rest);
+  };
+  t.after(() => { fs.writeFileSync = writeFileSync; });
+  const before = fs.readdirSync(path.dirname(first.filePath)).sort();
+  assert.throws(() => writeErrorReport(root, { ...payload, message: '第三份' }), { code: 'ENOSPC' });
+  fs.writeFileSync = writeFileSync;
+  assert.deepEqual(fs.readdirSync(path.dirname(first.filePath)).sort(), before, '不留下写了一半的新报告');
+  assert.deepEqual(fs.readFileSync(first.filePath), firstBytes);
+});

@@ -402,7 +402,8 @@ function createEnvironment(dir, label, overrides = {}) {
     resolveAccountBalanceModes,
     isZeroOrBlankAmount: require('../../src/backend/file-service/normalizers').isZeroOrBlankAmount,
     mergeMappedDetailRows,
-    createStatementOutputJournal: require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
+    createStatementOutputJournal: overrides.createStatementOutputJournal
+      || require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
     removeStatementSessionEntriesByFilePath: (session, filePath) => {
       removedSessionPaths.push(filePath);
       if (overrides.realSession) removeStatementSessionEntriesByFilePath(session, filePath);
@@ -1902,11 +1903,24 @@ function verifyOutputPathConcatenationConflict(dir) {
 //    会话条目、批次与导出缓存用真实实现（realSession）。
 function verifyMultiTemplateGenerationRollback(dir) {
   const faults = { writeCalls: 0, failWriteAt: 0, balanceCalls: 0, failBalanceAt: 0, mergeCalls: 0, failMergeAt: 0,
-    seedCalls: 0, failSeedAt: 0, replaceSeedAfter: 0 };
+    seedCalls: 0, failSeedAt: 0, seedRecordsStored: 0, replaceSeedAfterRecords: 0, afterJournalWrite: null };
+  const { createStatementOutputJournal: realJournal } = require('../../src/main-process/statement-output-rollback');
   const busy = (what) => Object.assign(new Error(`EBUSY: resource busy or locked（注入：${what}被占用）`), { code: 'EBUSY' });
   const env = createEnvironment(dir, 'step20', {
     realSession: true,
     appendLog: () => 'logs/step20.log',
+    // 写出记录的 write 返回后（本笔已核对、已记下写后身份）、下一笔开始前的注入点
+    createStatementOutputJournal: (...args) => {
+      const journal = realJournal(...args);
+      return {
+        ...journal,
+        write: (filePath, writeFn) => {
+          const result = journal.write(filePath, writeFn);
+          if (faults.afterJournalWrite) faults.afterJournalWrite(path.resolve(filePath));
+          return result;
+        }
+      };
+    },
     storeGeneratedBalanceSeeds: (input, realStore) => {
       faults.seedCalls += 1;
       if (faults.failSeedAt && faults.seedCalls === faults.failSeedAt) {
@@ -1915,7 +1929,7 @@ function verifyMultiTemplateGenerationRollback(dir) {
         throw Object.assign(new Error('ENOSPC: no space left on device（注入：种子写入）'), { code: 'ENOSPC' });
       }
       const stored = realStore(input);
-      if (faults.replaceSeedAfter && faults.seedCalls === faults.replaceSeedAfter) faults.onSeedReplaced();
+      faults.seedRecordsStored += input.seedRecords.length;
       return stored;
     },
     writeWorkbookRows: (options, write) => {
@@ -2060,16 +2074,19 @@ function verifyMultiTemplateGenerationRollback(dir) {
   const beforeSeedReplace = snapshot();
   const seedBytesBeforeReplace = fs.readFileSync(seedFile);
   const externalSeed = '{"external":"sync-client"}\n';
-  faults.seedCalls = 0;
-  faults.replaceSeedAfter = 2; // 第一组 M001 一笔、第二组 M002 第一笔之后
-  faults.onSeedReplaced = () => {
+  faults.seedRecordsStored = 0;
+  // 第一组 M001 一笔、第二组 M002 第一笔写完且写出记录已记下身份之后、第二笔开始之前替换（命中下一笔的写前核对）
+  let replaced = false;
+  faults.afterJournalWrite = (filePath) => {
+    if (replaced || filePath !== path.resolve(seedFile) || faults.seedRecordsStored < 2) return;
+    replaced = true;
     fs.writeFileSync(`${seedFile}.sync`, externalSeed);
     fs.renameSync(`${seedFile}.sync`, seedFile);
   };
   const replacedError = run(seedFaultSources());
-  faults.replaceSeedAfter = 0;
+  faults.afterJournalWrite = null;
   assertEq(replacedError && replacedError.code, 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE', 'Step20.逐笔写种子期间种子被替换：停止并报还原不完整');
-  assertEq(faults.seedCalls, 2, 'Step20.种子被替换后不再写下一笔');
+  assertEq([replaced, faults.seedRecordsStored], [true, 2], 'Step20.种子在两笔之间被替换后不再写下一笔（实际只写入 2 笔）');
   assertEq(fs.readFileSync(seedFile, 'utf8'), externalSeed, 'Step20.不覆盖其他程序替换后的种子');
   const { [path.relative(env.storageRoot, seedFile)]: _replacedSeed, ...restAfterReplace } = snapshot();
   const { [path.relative(env.storageRoot, seedFile)]: _seedBefore, ...restBeforeReplace } = beforeSeedReplace;
