@@ -493,11 +493,13 @@ function createStatementGenerationHelpers(deps) {
         });
 
         try {
+          // 读余额模板失败按模板不可读报出（spec D3；只在账单生成这里归类，见 writers.js）
           writeThrough(balanceOutput.outputFilePath, () => writeBalanceWorkbook({
             templateFilePath: balanceTemplatePath,
             records: balanceResult.records,
             templateFields: balanceTemplateFields,
-            outputFilePath: balanceOutput.outputFilePath
+            outputFilePath: balanceOutput.outputFilePath,
+            reportTemplateReadFailure: true
           }));
           const seedRecords = Array.isArray(balanceResult.seedRecords) ? balanceResult.seedRecords : [];
           if (journaled && seedRecords.length) {

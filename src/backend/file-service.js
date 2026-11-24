@@ -1930,10 +1930,11 @@ function writeBalanceWorkbook({
   templateFilePath,
   records,
   templateFields = [],
-  outputFilePath
+  outputFilePath,
+  reportTemplateReadFailure = false
 }) {
   return writeBalanceWorkbookInternal(
-    { templateFilePath, records, templateFields, outputFilePath },
+    { templateFilePath, records, templateFields, outputFilePath, reportTemplateReadFailure },
     { inferDateCellFormat, parseDateValue, parseNumericValue, toExcelSerial }
   );
 }

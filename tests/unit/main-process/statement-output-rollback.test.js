@@ -831,3 +831,46 @@ test('部分回滚时已还原文件的备份重试后仍未能删除：恢复�
     fs.rmSync(outcome.backupDirectory, { recursive: true, force: true });
   }
 });
+
+// v3.2.22 B45（Codex 第十轮）：写前不存在、写出回调抛错、回滚时又无法检查该路径（EIO）：没有本批写成的证据，不计为「本次新建」
+test('写前不存在且本批未写成、回滚时检查路径报 EIO：按归属待核对处理，不给出删除指引，保留错误码', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'new.xlsx');
+  let failLstat = false;
+  const fsImpl = { ...fs, lstatSync(filePath, options) {
+    if (failLstat && path.resolve(String(filePath)) === target) throw Object.assign(new Error('EIO: i/o error, lstat'), { code: 'EIO' });
+    return fs.lstatSync(filePath, options);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  assert.throws(() => journal.write(target, () => {
+    throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+  }), { code: 'ENOSPC' });
+  failLstat = true;
+  const { error, outcome } = journal.failBatch(Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }));
+  failLstat = false;
+  t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.deepEqual(outcome.failures.map((item) => [item.reason, item.createdByBatch]), [['系统错误 EIO', false]]);
+  assert.ok(error.detailLines.includes('未能自动还原 1 个文件（原有文件 0 个、本次新建 0 个、写前不存在且归属待核对 1 个；其中写出后被其他程序改动 0 个）'),
+    JSON.stringify(error.detailLines));
+  const manifest = fs.readFileSync(outcome.manifestPath, 'utf8');
+  assert.match(manifest, /归属待核对/);
+  assert.doesNotMatch(manifest, /本次新建的文件|确认路径上仍是本次写出的文件后删除/);
+});
+
+// v3.2.22 B45（Codex 第十轮）：备份被删除或移走、目标仍在：不报「原有文件被移走」、不指引用不存在的备份重建
+test('原有文件的备份不可用、目标仍是本批写出的内容：单独标注，不提示寻找原文件', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'detail.xlsx');
+  fs.writeFileSync(target, 'before');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  journal.write(target, writeText(target, 'after'));
+  const backupDirectory = path.join(staging, fs.readdirSync(staging)[0]);
+  fs.rmSync(path.join(backupDirectory, '001.bak'));
+  const outcome = journal.rollback();
+  t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.equal(fs.readFileSync(target, 'utf8'), 'after', '目标不改动');
+  assert.deepEqual(outcome.failures.map((item) => item.reason), ['原内容备份已不可用（被删除或移走），路径上仍是本批写出的内容，未自动处理']);
+  const manifest = fs.readFileSync(outcome.manifestPath, 'utf8');
+  assert.match(manifest, /原内容备份已不可用，无法据此还原；路径上仍是本批写出的内容/);
+  assert.doesNotMatch(manifest, /移走或删除|用本目录的备份 001\.bak 覆盖/);
+});

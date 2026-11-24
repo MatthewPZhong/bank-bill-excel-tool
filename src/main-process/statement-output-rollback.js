@@ -37,7 +37,8 @@ const FAILURE_REASONS = Object.freeze({
   CHANGED_EXTERNALLY: '写出后已被其他程序修改或替换，未自动处理',
   NOT_REGULAR_FILE: '路径上已不是普通文件，未自动处理',
   MISSING: '原有文件已被其他程序移走或删除，未自动重建',
-  UNCERTAIN_OWNER: '写出失败时路径上出现的文件，无法确认是否本批写出，未自动删除'
+  UNCERTAIN_OWNER: '写出失败时路径上出现的文件，无法确认是否本批写出，未自动删除',
+  BACKUP_MISSING: '原内容备份已不可用（被删除或移走），路径上仍是本批写出的内容，未自动处理'
 });
 
 function lstatOrNull(fsImpl, filePath) {
@@ -152,7 +153,8 @@ const UNIDENTIFIABLE_HARD_LINK_MESSAGE = '导出位置的同名文件另有硬�
 //   不列文件路径：内部文件名可能含完整账号，错误会写入报错文件
 function buildRollbackIncompleteError(error, { failures, backupDirectory, manifestPath }) {
   const restore = failures.filter((item) => item.existed).length;
-  const uncertain = failures.filter((item) => !item.existed && item.reason === FAILURE_REASONS.UNCERTAIN_OWNER).length;
+  // 写前不存在的路径只在本批曾写成该文件（记下过文件身份）时计为「本次新建」（Codex 第九、十轮）
+  const uncertain = failures.filter((item) => !item.existed && !item.createdByBatch).length;
   const changed = failures.filter((item) => item.reason === FAILURE_REASONS.CHANGED_EXTERNALLY).length;
   // 写前不存在、写出回调抛错后路径上出现的文件归属不明，不计入「本次新建」（Codex 第九轮）
   const summary = `未能自动还原 ${failures.length} 个文件（原有文件 ${restore} 个、本次新建 ${failures.length - restore - uncertain} 个${
@@ -409,7 +411,11 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
 
   // 还原一项；返回未能还原的说明列表（主路径与已脱离原文件的别名路径）
   function restore(entry) {
-    const failure = (reason, filePath = entry.filePath) => ({ filePath, existed: entry.existed, backupName: entry.backupName, reason });
+    // createdByBatch：写前不存在、本批曾写成该文件（有文件身份为证）；否则路径上的文件归属待核对
+    const failure = (reason, filePath = entry.filePath) => ({
+      filePath, existed: entry.existed, backupName: entry.backupName, reason,
+      createdByBatch: !entry.existed && Boolean(entry.ownedFileKey)
+    });
     const failures = [];
     // 原有文件的内容是否已写回（经主路径或仍指向原文件的别名）
     let originalRestored = !entry.existed;
@@ -417,6 +423,9 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       const current = lstatOrNull(fsImpl, entry.filePath);
       if (current && !current.isFile()) {
         failures.push(failure(FAILURE_REASONS.NOT_REGULAR_FILE));
+      } else if (entry.existed && current && !lstatOrNull(fsImpl, path.join(backupDirectory, entry.backupName))) {
+        // 备份不可用（被删除或移走）：目标仍是本批写出的内容，与原文件被移走区分（Codex 第十轮）
+        failures.push(failure(FAILURE_REASONS.BACKUP_MISSING));
       } else if (entry.existed && current) {
         const reason = restoreExisting(entry);
         if (reason) failures.push(failure(reason));
@@ -475,8 +484,11 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
         return `原有文件已被其他程序移走或删除，确认去向后再决定是否用${backup}在原路径重建`;
       case FAILURE_REASONS.UNCERTAIN_OWNER:
         return '无法确认是否本批写出，核对内容后再决定是否删除';
+      case FAILURE_REASONS.BACKUP_MISSING:
+        return '原内容备份已不可用，无法据此还原；路径上仍是本批写出的内容，从导入前的其他来源（如上一次导出、同步盘历史版本）恢复';
       default:
-        return item.existed ? `确认路径上仍是原文件后，用${backup}覆盖原路径` : '确认路径上仍是本次写出的文件后删除';
+        if (item.existed) return `确认路径上仍是原文件后，用${backup}覆盖原路径`;
+        return item.createdByBatch ? '确认路径上仍是本次写出的文件后删除' : '无法确认路径上的文件是否本批写出，核对内容后再决定是否删除';
     }
   }
 
@@ -491,9 +503,9 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
         lines.push(`${index + 1}. ${item.filePath}`);
         lines.push(item.existed
           ? `   原有文件，原内容备份：${item.backupName}`
-          : (item.reason === FAILURE_REASONS.UNCERTAIN_OWNER
-            ? '   写前不存在，路径上现在的文件归属待核对（不一定由本批创建）'
-            : '   本次新建的文件（导入前不存在）'));
+          : (item.createdByBatch
+            ? '   本次新建的文件（导入前不存在）'
+            : '   写前不存在，路径上现在的文件归属待核对（不一定由本批创建）'));
         lines.push(`   原因：${item.reason}`);
         lines.push(`   处理方式：${manualActionOf(item)}`);
       });

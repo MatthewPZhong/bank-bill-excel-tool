@@ -1925,8 +1925,9 @@ function verifyMultiTemplateGenerationRollback(dir) {
     realSession: true,
     appendLog: () => 'logs/step20.log',
     // 写出记录的 write 返回后（本笔已核对、已记下写后身份）、下一笔开始前的注入点
-    createStatementOutputJournal: (...args) => {
-      const journal = realJournal(...args);
+    // 备份放进测试自有目录（随 dir 统一清理），不依赖提示文案反解析备份位置（Codex 第十轮）
+    createStatementOutputJournal: (options = {}) => {
+      const journal = realJournal({ ...options, stagingRoot: dir });
       return {
         ...journal,
         write: (filePath, writeFn) => {
@@ -2143,8 +2144,6 @@ function verifyMultiTemplateGenerationRollback(dir) {
   const { [path.relative(env.storageRoot, seedFile)]: _seedBefore, ...restBeforeReplace } = beforeSeedReplace;
   assertEq(restAfterReplace, restBeforeReplace, 'Step20.种子被替换时其余输出照常还原');
   assertEq(env.removedSessionPaths.length, 3, 'Step20.种子被替换时不替换旧会话条目（仍为 5b 重试成功后的 3 次）');
-  const replacedLocation = String(replacedError && replacedError.context && replacedError.context.rollbackLocation || '');
-  if (replacedLocation.startsWith('恢复清单：')) fs.rmSync(path.dirname(replacedLocation.slice('恢复清单：'.length)), { recursive: true, force: true });
   fs.writeFileSync(seedFile, seedBytesBeforeReplace); // 人工按恢复清单处理后的状态，供后续步骤使用
 
   // （5e）逐笔写种子前重读种子失败（FILE_READ，本笔尚未写入）：与初次读取失败一样按「余额生成失败」告警提交，不整批回滚、

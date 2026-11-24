@@ -45,39 +45,77 @@ function appendLog(logRoot, error) {
   return targetFile;
 }
 
-// v3.2.22 B45（Codex 第五轮）：同一秒、同一模板与步骤的报告不覆盖已有的那份（覆盖写到一半失败时，上一份报告会变成半份
-//   新报告）：只新建文件，重名时依次加 -2、-3……；本次写入失败时删掉写了一半的新文件，已有的报告不受影响
-function writeNewReportFile(targetDir, baseName, content) {
-  for (let attempt = 1; ; attempt += 1) {
-    const targetFile = path.join(targetDir, `${baseName}${attempt > 1 ? `-${attempt}` : ''}.txt`);
-    let fd;
+function removeQuietly(filePath) {
+  try {
+    fs.rmSync(filePath, { force: true });
+  } catch (_cleanupError) {
+    // 尽力而为：临时文件不带 .txt，不是正式报告
+  }
+}
+
+// 以正式名称发布写好的临时文件，不覆盖已有的报告：硬链接在目标已存在时失败；不支持硬链接的卷改为确认目标不存在后改名
+//   （报告只由主进程同步写出，确认与改名之间不会插入本应用的同名报告）
+function publishReportFile(sourceFile, targetFile) {
+  try {
+    fs.linkSync(sourceFile, targetFile);
+  } catch (error) {
+    if (error && error.code === 'EEXIST') return false;
     try {
-      fd = fs.openSync(targetFile, 'wx');
+      fs.lstatSync(targetFile);
+      return false;
+    } catch (statError) {
+      if (!statError || statError.code !== 'ENOENT') throw statError;
+    }
+    fs.renameSync(sourceFile, targetFile);
+    return true;
+  }
+  removeQuietly(sourceFile);
+  return true;
+}
+
+// v3.2.22 B45：同一秒、同一模板与步骤的报告不覆盖已有的那份（覆盖写到一半失败时，上一份报告会变成半份新报告）：
+//   重名时依次加 -2、-3……（Codex 第五轮）。先写不带 .txt 的临时文件，写入与关闭都成功后才以正式名称发布：写到一半失败、
+//   临时文件又删不掉（如 Windows 上被占用）时，不留下外观正常的残缺报告（Codex 第六、十轮）
+let partialReportSequence = 0;
+function writeNewReportFile(targetDir, baseName, content) {
+  let partialFile;
+  let fd;
+  for (let attempt = 1; ; attempt += 1) {
+    partialReportSequence += 1;
+    partialFile = path.join(targetDir, `${baseName}.${process.pid}-${partialReportSequence}.partial`);
+    try {
+      fd = fs.openSync(partialFile, 'wx');
+      break;
     } catch (error) {
       if (error && error.code === 'EEXIST' && attempt < 1000) continue;
       throw error;
     }
-    let failure = null;
-    try {
-      fs.writeFileSync(fd, content, 'utf8');
-    } catch (error) {
-      failure = error;
+  }
+  let failure = null;
+  try {
+    fs.writeFileSync(fd, content, 'utf8');
+  } catch (error) {
+    failure = error;
+  }
+  // 只关闭一次；网络文件系统可能到关闭时才报告延迟写入的错误，同样按写入失败处理（Codex 第六轮）
+  try {
+    fs.closeSync(fd);
+  } catch (error) {
+    failure = failure || error;
+  }
+  if (failure) {
+    removeQuietly(partialFile);
+    throw failure;
+  }
+  try {
+    for (let attempt = 1; ; attempt += 1) {
+      const targetFile = path.join(targetDir, `${baseName}${attempt > 1 ? `-${attempt}` : ''}.txt`);
+      if (publishReportFile(partialFile, targetFile)) return targetFile;
+      if (attempt >= 1000) throw Object.assign(new Error(`EEXIST: file already exists, ${targetFile}`), { code: 'EEXIST' });
     }
-    // 只关闭一次；网络文件系统可能到关闭时才报告延迟写入的错误，同样按写入失败处理（Codex 第六轮）
-    try {
-      fs.closeSync(fd);
-    } catch (error) {
-      failure = failure || error;
-    }
-    if (failure) {
-      try {
-        fs.rmSync(targetFile, { force: true });
-      } catch (_cleanupError) {
-        // 尽力而为
-      }
-      throw failure;
-    }
-    return targetFile;
+  } catch (error) {
+    removeQuietly(partialFile);
+    throw error;
   }
 }
 

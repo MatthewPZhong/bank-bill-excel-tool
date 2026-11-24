@@ -238,10 +238,11 @@ function writeBalanceWorkbook({
   templateFilePath,
   records,
   templateFields = [],
-  outputFilePath
+  outputFilePath,
+  reportTemplateReadFailure = false
 }, formatters) {
-  // 读余额模板失败（发生在写出目标文件之前）按模板不可读报出：多模板批次据此按「余额生成失败」告警，不当作写出失败整批回滚
-  //   （v3.2.22 B45 D3，Codex 第七轮）
+  // v3.2.22 B45（spec D3）：账单生成传 reportTemplateReadFailure，读余额模板失败（发生在写出目标文件之前）按模板不可读报出，
+  //   据此按「余额生成失败」告警、多模板批次不整批回滚；新开账户、月度余额等其他调用方保留原生错误（Codex 第七、十轮）
   let workbook;
   try {
     workbook = XLSX.readFile(templateFilePath, {
@@ -250,6 +251,7 @@ function writeBalanceWorkbook({
       raw: true
     });
   } catch (error) {
+    if (!reportTemplateReadFailure) throw error;
     throw new FileValidationError('FILE_READ', '余额账单模板不可读，请重新确认', {
       context: { systemErrorCode: error && error.code ? String(error.code) : '' }
     });

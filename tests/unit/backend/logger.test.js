@@ -345,3 +345,35 @@ test('writeErrorReport：关闭报告文件失败时删掉本次新建的文件�
   const reportFiles = fs.readdirSync(root, { recursive: true }).filter((name) => String(name).endsWith('.txt'));
   assert.deepEqual(reportFiles, [], '不留下内容不完整的新报告');
 });
+
+// v3.2.22 B45（Codex 第十轮）：写到一半失败、删除又因占用失败时，留下的只是不带 .txt 的临时文件，不是外观正常的残缺报告
+test('writeErrorReport：写入失败且删除失败时不留下正式名称的残缺报告；成功时不留临时文件', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const payload = { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' };
+  const ok = writeErrorReport(root, payload);
+  assert.deepEqual(fs.readdirSync(path.dirname(ok.filePath)), [ok.fileName], '成功时只有正式报告');
+  fs.rmSync(ok.filePath);
+
+  const writeFileSync = fs.writeFileSync;
+  const rmSync = fs.rmSync;
+  fs.writeFileSync = (target, ...rest) => {
+    if (typeof target === 'number') {
+      writeFileSync(target, '半份');
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    }
+    return writeFileSync(target, ...rest);
+  };
+  fs.rmSync = (target, ...rest) => {
+    if (String(target).startsWith(root)) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    return rmSync(target, ...rest);
+  };
+  t.after(() => { fs.writeFileSync = writeFileSync; fs.rmSync = rmSync; });
+  assert.throws(() => writeErrorReport(root, payload), { code: 'ENOSPC' });
+  fs.writeFileSync = writeFileSync;
+  fs.rmSync = rmSync;
+  const names = fs.readdirSync(path.dirname(ok.filePath));
+  assert.deepEqual(names.filter((name) => name.endsWith('.txt')), [], '不留下正式名称的残缺报告');
+  assert.equal(names.length, 1, '只留下删不掉的临时文件');
+});
