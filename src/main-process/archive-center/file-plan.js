@@ -222,6 +222,25 @@ function assertNoAliasConflict(inputs, outputs, options) {
   }
 }
 
+// v3.2.22 B57：先只冻结目标、再访问输入的流程（工具箱合表 / 拆分）用：完整计划沿用先冻结的输出证据（目标快照与父目录身份），
+//   不重新采样，计划携带的就是用户确认时的目标版本。只接受本进程登记过的冻结计划，输出须逐项同路径、同角色、同来源操作
+function reuseFrozenOutputs(frozenPlan, rawOutputs) {
+  if (!frozenPlan || !normalizedFilePlans.has(frozenPlan) || frozenPlan.outputs.length !== rawOutputs.length) {
+    throw planError('ARCHIVE_FILE_PLAN_INVALID', '沿用的输出证据必须来自本进程冻结的同一组输出');
+  }
+  rawOutputs.forEach((raw, index) => {
+    const frozen = frozenPlan.outputs[index];
+    if (!raw || typeof raw !== 'object'
+        || absolutePath(raw.filePath, 'output.filePath') !== frozen.filePath
+        || requiredText(raw.role, 'role') !== frozen.role
+        || requiredText(raw.sourceOperation, 'sourceOperation') !== frozen.sourceOperation
+        || raw.preGeneratedOutput !== undefined) {
+      throw planError('ARCHIVE_FILE_PLAN_INVALID', '沿用的输出证据必须来自本进程冻结的同一组输出');
+    }
+  });
+  return frozenPlan.outputs;
+}
+
 function normalizeFilePlanV1(value, options = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1) {
     throw planError('ARCHIVE_FILE_PLAN_INVALID', 'filePlan 必须是 version 1 对象');
@@ -264,7 +283,9 @@ function normalizeFilePlanV1(value, options = {}) {
     throw planError('ARCHIVE_FILE_MANIFEST_EMPTY', 'eager filePlan 必须至少包含一个文件');
   }
   const inputs = Object.freeze(rawInputs.map((item) => normalizeItem(item, 'input', normalizedOptions)));
-  const outputs = Object.freeze(rawOutputs.map((item) => normalizeItem(item, 'output', normalizedOptions)));
+  const outputs = options.reuseFrozenOutputsOf === undefined
+    ? Object.freeze(rawOutputs.map((item) => normalizeItem(item, 'output', normalizedOptions)))
+    : reuseFrozenOutputs(options.reuseFrozenOutputsOf, rawOutputs);
   assertNoAliasConflict(inputs, outputs, normalizedOptions);
   const plan = Object.freeze({ version: 1, allocation, inputs, outputs });
   normalizedFilePlans.add(plan);

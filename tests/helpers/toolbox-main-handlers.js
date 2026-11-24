@@ -12,7 +12,6 @@ const { randomUUID } = require('node:crypto');
 const ExcelJS = require('exceljs');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
 const { assertFilePlanFresh, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
-const { targetParentIdentitiesMatch } = require('../../src/main-process/archive-center/target-parent-identity');
 const { prepareIpcTaskInvocation } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { mergeToolboxFilesToXlsx } = require('../../src/main-process/toolbox-merge-io');
 const { exportToolboxFilter, exportToolboxMultiFilters } = require('../../src/main-process/toolbox-format-operations');
@@ -91,7 +90,7 @@ function loadHandlers(env, overrides = {}) {
     snapshot: sourceSnapshotFromStat(fs.statSync(env.source, { bigint: true })) };
   const scope = {
     fs, os, path, randomUUID, pathsAlias: overrides.pathsAlias || pathsAlias, assertFilePlanFresh,
-    normalizeFilePlanV1: overrides.normalizeFilePlanV1 || normalizeFilePlanV1, targetParentIdentitiesMatch,
+    normalizeFilePlanV1: overrides.normalizeFilePlanV1 || normalizeFilePlanV1,
     sourceSnapshotMatchesStat,
     TOOLBOX_GENERATION_ACTIONS,
     trackedIpcHandle: (channel, _scope, _name, contract) => { contracts.set(channel, contract); },
@@ -134,10 +133,11 @@ function loadHandlers(env, overrides = {}) {
     toolboxFinalOutputFiles: (files) => files
   };
   Function(...Object.keys(scope), mainFunctions)(...Object.values(scope));
-  const run = (channel, payload) => withReadStreamTracking(async () => {
+  // prepareOnly：只做 prepare（含契约层冻结），不执行
+  const run = (channel, payload, { prepareOnly = false } = {}) => withReadStreamTracking(async () => {
     const contract = contracts.get(channel);
     const prepared = await prepareIpcTaskInvocation(contract, {}, payload === undefined ? [] : [payload]);
-    if (!prepared.proceed) return { prepared, result: prepared.result };
+    if (!prepared.proceed || prepareOnly) return { prepared, result: prepared.result };
     return { prepared, result: await executePrepared(contract, prepared, calls) };
   });
   return { contracts, calls, run,
@@ -192,12 +192,15 @@ function simulateUnreliableParentIdentity(directory, times = Infinity) {
   return { state, restore: () => { fs.statSync = statSync; } };
 }
 
-// 包装真实的 normalizeFilePlanV1：只在含输入的完整计划采样（先冻结目标之后的第二次采样）期间执行 during，返回真实结果
-//   （仍是 Main 登记过的冻结计划）。用来模拟「只有第二次采样看到不同的目标」
-function duringFullPlanSampling(during) {
+// 包装真实的 normalizeFilePlanV1：只在含输入的完整计划规范化（先冻结目标之后的第二次）期间执行 during，返回真实结果
+//   （仍是 Main 登记过的冻结计划）。用来模拟「只有第二次看到不同的目标」。targetsOnly 为 true 时改为只在首次
+//   「只冻结目标」（不含输入）的规范化期间执行
+function duringFullPlanSampling(during, { targetsOnly = false } = {}) {
   const state = { calls: 0 };
   const wrapped = (value, ...rest) => {
-    if (!value || !Array.isArray(value.inputs) || !value.inputs.length || !value.outputs.length) {
+    const matches = value && Array.isArray(value.inputs) && Array.isArray(value.outputs) && value.outputs.length
+      && (targetsOnly ? !value.inputs.length : value.inputs.length > 0);
+    if (!matches || (targetsOnly && state.calls > 0)) {
       return normalizeFilePlanV1(value, ...rest);
     }
     state.calls += 1;

@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { assertFilePlanFresh } = require('../../../src/main-process/archive-center/file-plan');
+const { captureTargetParentIdentity } = require('../../../src/main-process/archive-center/target-parent-identity');
 const { prepareIpcTaskInvocation } = require('../../../src/main-process/archive-center/ipc-task-contract');
 const { pathsAlias } = require('../../../src/main-process/toolbox-target-identity');
 const {
@@ -209,14 +210,16 @@ for (const kind of Object.keys(CASES)) {
   });
 }
 
-// 完整计划会重新采样目标：返回的计划须携带用户确认时（先冻结）的目标证据（Codex 第三轮 P1、P3）
+// 完整计划沿用先冻结的输出证据、不重新采样：返回的计划携带用户确认时的目标版本（Codex 第三轮 P1、P3，第四轮 P2 ×2、P3）
+const captureParentIdentity = (directory) => captureTargetParentIdentity(fs, path.join(directory, 'probe.xlsx'));
 for (const kind of Object.keys(CASES)) {
-  test(`${kind}：完整计划采样时目标目录被临时换成有同名文件的另一处、随后换回：报目标变化，不带着另一处的证据执行（B57）`, async (t) => {
+  test(`${kind}：完整计划采样时目标目录被临时换成有同名文件的另一处、随后换回：计划仍是确认时的目标版本，之后再换过去时核对拒绝（B57）`, async (t) => {
     const env = setup(t);
     const other = path.join(env.root, 'out-other');
     const parked = path.join(env.root, 'out-parked');
     fs.mkdirSync(other);
     for (const name of CASES[kind].targets) fs.writeFileSync(path.join(other, name), 'unconfirmed');
+    const confirmedParent = captureParentIdentity(env.output);
     const sampling = duringFullPlanSampling(() => {
       fs.renameSync(env.output, parked);
       fs.renameSync(other, env.output);
@@ -225,17 +228,24 @@ for (const kind of Object.keys(CASES)) {
         fs.renameSync(parked, env.output);
       };
     });
-    const { calls, run } = loadHandlers(env, caseOverrides(env, kind, { normalizeFilePlanV1: sampling.normalizeFilePlanV1 }));
-    const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+    const { run } = loadHandlers(env, caseOverrides(env, kind, { normalizeFilePlanV1: sampling.normalizeFilePlanV1 }));
+    const { prepared } = await run(CASES[kind].channel, casePayload(env, kind), { prepareOnly: true });
     assert.equal(sampling.state.calls, 1, '前置：完整计划采样期间目录被换过');
-    assert.equal(prepared.proceed, false);
-    assert.equal(result.code, 'ARCHIVE_TARGET_CHANGED', JSON.stringify(result));
-    assert.equal(calls.publication, 0);
-    for (const name of CASES[kind].targets) assert.equal(fs.readFileSync(path.join(other, name), 'utf8'), 'unconfirmed');
+    assert.equal(prepared.proceed, true, JSON.stringify(prepared.result));
+    assert.ok(prepared.filePlan.outputs.every((output) => output.targetSnapshot.exists === false
+      && JSON.stringify(output.targetParentIdentity) === JSON.stringify(confirmedParent)), '计划携带确认时的目标证据');
+    fs.renameSync(env.output, parked);
+    fs.renameSync(other, env.output);
+    assert.throws(() => assertFilePlanFresh(prepared.filePlan), { code: /^ARCHIVE_TARGET_(PARENT_)?CHANGED$/ });
+    for (const name of CASES[kind].targets) assert.equal(fs.readFileSync(path.join(env.output, name), 'utf8'), 'unconfirmed');
   });
 
-  test(`${kind}：只有完整计划采样时父目录身份暂时不可靠：不丢掉先冻结的可靠身份，报目标变化（B57）`, async (t) => {
+  test(`${kind}：只有完整计划采样时父目录身份暂时不可靠：计划仍带先冻结的可靠身份，照常导出（B57）`, async (t) => {
     const env = setup(t);
+    if (!captureParentIdentity(env.output).identityReliable) {
+      t.skip('前提不满足：临时卷给不出可靠的目录身份');
+      return;
+    }
     let simulated = null;
     const sampling = duringFullPlanSampling(() => {
       simulated = simulateUnreliableParentIdentity(env.output);
@@ -244,9 +254,49 @@ for (const kind of Object.keys(CASES)) {
     t.after(() => simulated && simulated.restore());
     const { calls, run } = loadHandlers(env, caseOverrides(env, kind, { normalizeFilePlanV1: sampling.normalizeFilePlanV1 }));
     const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
-    assert.ok(simulated && simulated.state.count > 0, '前置：完整计划采样的身份被模拟为不可靠');
+    assert.equal(sampling.state.calls, 1, '前置：完整计划采样期间身份被模拟为不可靠');
+    assert.ok(prepared.filePlan.outputs.every((output) => output.targetParentIdentity.identityReliable), '沿用首次冻结的可靠身份');
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    assert.equal(calls.settle, 1);
+  });
+
+  test(`${kind}：父目录身份首次不可靠、完整计划采样时可靠、发布时又不可靠：按首次冻结只核对路径，照常导出（B57）`, async (t) => {
+    const env = setup(t);
+    let first = null;
+    const freezing = duringFullPlanSampling(() => {
+      first = simulateUnreliableParentIdentity(env.output);
+      return () => first.restore();
+    }, { targetsOnly: true });
+    t.after(() => first && first.restore());
+    let later = null;
+    t.after(() => later && later.restore());
+    const { calls, run } = loadHandlers(env, caseOverrides(env, kind, {
+      normalizeFilePlanV1: freezing.normalizeFilePlanV1,
+      beforePublish: async () => {
+        later = simulateUnreliableParentIdentity(env.output);
+      }
+    }));
+    const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+    assert.ok(freezing.state.calls === 1 && first.state.count > 0, '前置：首次冻结的身份不可靠');
+    assert.ok(later, '前置：发布前已把目录身份模拟为不可靠（按首次冻结的不可靠身份只核对路径，不再按 dev/ino 比较）');
+    assert.ok(prepared.filePlan.outputs.every((output) => output.targetParentIdentity.identityReliable === false), '沿用首次冻结的不可靠身份');
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    assert.equal(calls.settle, 1);
+  });
+
+  test(`${kind}：完整计划规范化时目标目录被移走、之后又移回：报目标变化（中文提示），不透传系统错误（B57）`, async (t) => {
+    const env = setup(t);
+    const parked = path.join(env.root, 'out-parked');
+    const sampling = duringFullPlanSampling(() => {
+      fs.renameSync(env.output, parked);
+      return () => fs.renameSync(parked, env.output);
+    });
+    const { calls, run } = loadHandlers(env, caseOverrides(env, kind, { normalizeFilePlanV1: sampling.normalizeFilePlanV1 }));
+    const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+    assert.equal(sampling.state.calls, 1);
     assert.equal(prepared.proceed, false);
     assert.equal(result.code, 'ARCHIVE_TARGET_CHANGED', JSON.stringify(result));
+    assert.match(result.message, /输出目标在任务确认后已变化/);
     assert.equal(calls.publication, 0);
   });
 
@@ -306,3 +356,24 @@ for (const kind of Object.keys(CASES)) {
     });
   }
 }
+
+test('normalizeFilePlanV1 reuseFrozenOutputsOf：沿用本进程冻结的同一组输出证据，来源不明或输出不一致时拒绝', (t) => {
+  const env = setup(t);
+  const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+  const output = { filePath: path.join(env.output, 'result.xlsx'), role: 'output', sourceOperation: 'toolbox:merge:output' };
+  const input = { filePath: env.source, role: 'input', sourceOperation: 'toolbox:merge:input' };
+  const frozen = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs: [output] });
+  fs.writeFileSync(output.filePath, 'created-after-freeze');
+  const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [input], outputs: [output] }, { reuseFrozenOutputsOf: frozen });
+  assert.equal(plan.outputs, frozen.outputs, '不重新采样');
+  assert.throws(() => assertFilePlanFresh(plan), { code: 'ARCHIVE_TARGET_CHANGED' });
+  for (const [label, outputs, source] of [
+    ['来源不是冻结计划', [output], { ...frozen }],
+    ['输出数量不同', [output, { ...output, filePath: path.join(env.output, 'other.xlsx') }], frozen],
+    ['路径不同', [{ ...output, filePath: path.join(env.output, 'other.xlsx') }], frozen],
+    ['来源操作不同', [{ ...output, sourceOperation: 'toolbox:split:output' }], frozen]
+  ]) {
+    assert.throws(() => normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [input], outputs }, { reuseFrozenOutputsOf: source }),
+      { code: 'ARCHIVE_FILE_PLAN_INVALID' }, label);
+  }
+});
