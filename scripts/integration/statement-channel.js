@@ -1935,6 +1935,12 @@ function verifyMultiTemplateGenerationRollback(dir) {
           if (faults.afterJournalWrite) faults.afterJournalWrite(path.resolve(filePath));
           return result;
         },
+        // 首次读取种子前的路径检查本身失败（如目录没有遍历权限）
+        checkTarget: (filePath) => {
+          const injected = faults.checkTargetError && faults.checkTargetError(path.resolve(filePath));
+          if (injected) throw injected;
+          return journal.checkTarget(filePath);
+        },
         // 批次目录重试后仍未能删除（如被扫描程序长时间占用）
         commit: () => {
           const result = journal.commit();
@@ -2202,6 +2208,22 @@ function verifyMultiTemplateGenerationRollback(dir) {
   assertEq(snapshot(), beforeDirectorySeed, 'Step20.种子路径是文件夹：第一组的输出与新种子还原');
   assertEq(env.removedSessionPaths.length, sessionsBeforeCleanupFault + 1, 'Step20.种子路径是文件夹时不替换旧会话条目');
   fs.rmSync(directorySeed, { recursive: true, force: true });
+
+  // （5c2）检查第二组的种子路径本身失败（目录没有遍历权限 EACCES，尚未写种子）：不当作已确认的不安全目标整批回滚，
+  //   按「余额生成失败」处理本组余额、保留明细（spec D3，Codex 第十一轮）
+  const sessionsBeforeCheckFault = env.removedSessionPaths.length;
+  faults.checkTargetError = (filePath) => (path.basename(filePath) === '目录种子.json'
+    ? Object.assign(new Error('EACCES: permission denied, lstat'), { code: 'EACCES' })
+    : null);
+  writeSource(fileE, 'B', [['2026-09-01', 'M005', 'USD', '7', '']]);
+  const checkFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateE, fileE)]);
+  faults.checkTargetError = null;
+  assertEq(checkFaultError && { code: checkFaultError.code }, null, 'Step20.种子路径检查失败（EACCES）：不整批回滚');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeCheckFault + 1, 'Step20.种子路径检查失败：本批照常提交');
+  assertEq((env.imported[env.imported.length - 1].warnings || [])
+    .filter((warning) => warning.type === 'balance-generate-failed').map((warning) => warning.message),
+  ['余额账单生成失败，系统异常已写入日志文件'], 'Step20.种子路径检查失败：按「余额生成失败」告警');
+  assertEq(fs.existsSync(directorySeed), false, 'Step20.种子路径检查失败：本组不写种子');
 
   // （6）同一账户跨组的余额链：C 组 09-01、D 组 09-02 同为 M009/USD，D 组的上期余额取 C 组本批写入的种子。
   //   D 组余额写出失败后整批还原（种子只剩期初），重试后两天余额与种子按链计算

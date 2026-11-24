@@ -869,8 +869,49 @@ test('原有文件的备份不可用、目标仍是本批写出的内容：单�
   const outcome = journal.rollback();
   t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
   assert.equal(fs.readFileSync(target, 'utf8'), 'after', '目标不改动');
-  assert.deepEqual(outcome.failures.map((item) => item.reason), ['原内容备份已不可用（被删除或移走），路径上仍是本批写出的内容，未自动处理']);
+  assert.deepEqual(outcome.failures.map((item) => item.reason), ['原内容备份已不可用（被删除、移走或大小与备份时不符），路径上仍是本批写出的内容，未自动处理']);
   const manifest = fs.readFileSync(outcome.manifestPath, 'utf8');
   assert.match(manifest, /原内容备份已不可用，无法据此还原；路径上仍是本批写出的内容/);
   assert.doesNotMatch(manifest, /移走或删除|用本目录的备份 001\.bak 覆盖/);
+});
+
+// v3.2.22 B45（Codex 第十一轮）：备份仍在但被截短：不截断目标、不报已还原，保留备份目录交给人工；回滚前核对通过后才被截短时，
+//   写回前核对已打开的备份同样拦下
+for (const when of ['before-rollback', 'after-check']) {
+  test(`原有文件的备份被截短（${when === 'before-rollback' ? '回滚前' : '核对之后、写回之前'}）：不清空目标，不报已还原`, (t) => {
+    const { root, staging } = setup(t);
+    const target = path.join(root, 'seed.json');
+    fs.writeFileSync(target, 'before-seed');
+    let backupPath = null;
+    let staleBackupStat = null;
+    const fsImpl = { ...fs, lstatSync(filePath, options) {
+      if (staleBackupStat && path.resolve(String(filePath)) === backupPath) return staleBackupStat;
+      return fs.lstatSync(filePath, options);
+    } };
+    const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+    journal.write(target, writeText(target, 'after-seed'));
+    backupPath = path.join(staging, fs.readdirSync(staging)[0], '001.bak');
+    if (when === 'after-check') staleBackupStat = fs.lstatSync(backupPath, { bigint: true });
+    fs.truncateSync(backupPath, 0);
+    const outcome = journal.rollback();
+    t.after(() => outcome.backupDirectory && fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+    assert.equal(outcome.restored, false);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'after-seed', '目标不被清空');
+    assert.deepEqual(outcome.failures.map((item) => item.reason), ['原内容备份已不可用（被删除、移走或大小与备份时不符），路径上仍是本批写出的内容，未自动处理']);
+    assert.equal(fs.existsSync(outcome.backupDirectory), true, '保留备份目录');
+  });
+}
+
+// 备份被截短后恰好与目标内容相同（本批写成空文件、备份截为 0 字节）：比较内容一致也不报已还原（Codex 第十一轮）
+test('备份被截短后与目标内容恰好相同：不按内容一致报已还原', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'seed.json');
+  fs.writeFileSync(target, 'before-seed');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  journal.write(target, writeText(target, ''));
+  fs.truncateSync(path.join(staging, fs.readdirSync(staging)[0], '001.bak'), 0);
+  const outcome = journal.rollback();
+  t.after(() => outcome.backupDirectory && fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.equal(outcome.restored, false);
+  assert.deepEqual(outcome.failures.map((item) => item.reason), ['原内容备份已不可用（被删除、移走或大小与备份时不符），路径上仍是本批写出的内容，未自动处理']);
 });

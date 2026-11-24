@@ -429,7 +429,10 @@ function createStatementGenerationHelpers(deps) {
           try {
             checkOutputTarget(getBalanceSeedFilePath(ensureStorageRoot(), templateBankName));
           } catch (targetError) {
-            throw new StatementOutputWriteFailure(targetError);
+            // 已确认的不安全目标（文件夹、快捷方式等）才整批回滚；检查本身失败（如目录没有遍历权限 EACCES，此时尚未写种子）
+            //   与原流程一样按「余额生成失败」处理本组余额、保留明细（Codex 第十一轮）
+            if (targetError && targetError.code === 'STATEMENT_OUTPUT_TARGET_UNSAFE') throw new StatementOutputWriteFailure(targetError);
+            throw targetError;
           }
         }
 

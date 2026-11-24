@@ -82,7 +82,8 @@ function writeNewReportFile(targetDir, baseName, content) {
   let fd;
   for (let attempt = 1; ; attempt += 1) {
     partialReportSequence += 1;
-    partialFile = path.join(targetDir, `${baseName}.${process.pid}-${partialReportSequence}.partial`);
+    // 临时名只需在目录内唯一，不含模板名与步骤名：正式名恰在文件名长度上限时临时名不会超长（Codex 第十一轮）
+    partialFile = path.join(targetDir, `.report-${process.pid}-${partialReportSequence}.partial`);
     try {
       fd = fs.openSync(partialFile, 'wx');
       break;

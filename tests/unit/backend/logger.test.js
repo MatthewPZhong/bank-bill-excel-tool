@@ -346,6 +346,31 @@ test('writeErrorReport：关闭报告文件失败时删掉本次新建的文件�
   assert.deepEqual(reportFiles, [], '不留下内容不完整的新报告');
 });
 
+// v3.2.22 B45（Codex 第十一轮）：按字节限制文件名的卷（上限 255 个 UTF-8 字节）上，正式名恰在上限时照常写出，临时名不随之超长。
+//   macOS 与 Windows 按字符计，这里模拟按字节计的卷
+test('writeErrorReport：正式名恰在文件名长度上限（255 字节）时照常写出', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const originals = {};
+  for (const method of ['openSync', 'linkSync', 'renameSync']) {
+    originals[method] = fs[method];
+    fs[method] = (...args) => {
+      for (const arg of method === 'openSync' ? [args[0]] : [args[1]]) {
+        if (Buffer.byteLength(path.basename(String(arg))) > 255) {
+          throw Object.assign(new Error(`ENAMETOOLONG: name too long, ${method}`), { code: 'ENAMETOOLONG' });
+        }
+      }
+      return originals[method](...args);
+    };
+  }
+  t.after(() => Object.assign(fs, originals));
+  const report = writeErrorReport(root, { step: '导入网银明细文件', templateName: '账'.repeat(70), message: '报告', errorCode: 'TEST' });
+  Object.assign(fs, originals);
+  assert.equal(Buffer.byteLength(report.fileName), 255);
+  assert.deepEqual(fs.readdirSync(path.dirname(report.filePath)), [report.fileName]);
+});
+
 // v3.2.22 B45（Codex 第十轮）：写到一半失败、删除又因占用失败时，留下的只是不带 .txt 的临时文件，不是外观正常的残缺报告
 test('writeErrorReport：写入失败且删除失败时不留下正式名称的残缺报告；成功时不留临时文件', (t) => {
   const { writeErrorReport } = require('../../../src/backend/logger');
