@@ -71,13 +71,16 @@ class UnverifiableCellText {
 //   - 转义由相邻 <t> 段拼成：Excel 按段还原（原样显示），SheetJS 与此处先拼接再还原，不同的原值会读成同一个值；
 //   - 转义表示非 ASCII 字符：SheetJS 对公式字符串（t="str"）还原后再按 UTF-8 解码，读成「�」等，与此处不同
 //     （Excel 写出时不把非 ASCII 字符写成转义，只有手工生成的文件会这样）；
-//   - 还原后含未配对的代理项：写入数据库时被替换为同一个字符，不同的值落成同一个键。
+//   - 还原后含未配对的代理项：写入数据库时被替换为同一个字符，不同的值落成同一个键；
+//   - 大写 X 的转义（_XHHHH_）：SheetJS 与此处还原，XlsxWriter、openpyxl 等按字面保存与读取，「TX_X0041_」与「TXA」
+//     会读成同一个键（Codex 第十四轮 P1）。按从左到右的还原顺序判断，被 _x005F_ 保护的字面「_X0041_」不受影响。
 function decodeCellTextRuns(runs) {
   const joined = runs.join('');
   const value = decodeOoxmlTextEscapes(joined);
-  const consistent = value.isWellFormed() && (value === joined || (
+  const escapes = Array.from(joined.matchAll(TEXT_ESCAPE_RE));
+  const consistent = value.isWellFormed() && (escapes.length === 0 || (
     runs.map(decodeOoxmlTextEscapes).join('') === value
-    && Array.from(joined.matchAll(TEXT_ESCAPE_RE)).every((match) => parseInt(match[1], 16) < 0x80)
+    && escapes.every((match) => match[0][1] === 'x' && parseInt(match[1], 16) < 0x80)
   ));
   return consistent ? value : new UnverifiableCellText(value);
 }

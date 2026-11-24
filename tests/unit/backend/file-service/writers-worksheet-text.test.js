@@ -329,7 +329,10 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
     ['内联富文本拼成转义', '<row r="5"><c r="A5" t="inlineStr"><is><r><t>ID_x00</t></r><r><t>41_</t></r></is></c></row>', ''],
     ['公式字符串的非 ASCII 转义', '<row r="5"><c r="A5" t="str"><v>ID_x00E9_</v></c></row>', ''],
     ['未配对的代理项', '<row r="5"><c r="A5" t="str"><v>ID_xD800_</v></c></row>', ''],
-    ['字符引用的未配对代理项', '<row r="5"><c r="A5" t="str"><v>ID&#xD800;</v></c></row>', '']
+    ['字符引用的未配对代理项', '<row r="5"><c r="A5" t="str"><v>ID&#xD800;</v></c></row>', ''],
+    // XlsxWriter、openpyxl 按字面保存的大写 X（Codex 第十四轮 P1）
+    ['共享字符串里大写 X 的转义', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t>ID_X0041_</t></si>'],
+    ['内联字符串里大写 X 的转义', '<row r="5"><c r="A5" t="inlineStr"><is><t>ID_X0041_</t></is></c></row>', '']
   ];
   for (const [label, rowXml, sharedStrings] of rejected) {
     const filePath = await build(label, rowXml, sharedStrings);
@@ -347,6 +350,17 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
   assert.deepEqual(await streamLinkedRowsToInsert(accepted, linked, (row) => inserted.push(row)), { matched: true });
   assert.deepEqual(inserted.map((row) => [row.BizId, row['备注']]), [['TX_x0041_-1', 'A\rB']]);
   assert.deepEqual(readRows(accepted)[1], ['TX_x0041_-1', 'A\rB'], '与非流式读取一致');
+  // 被 _x005F_ 保护的字面「_X0041_」（本应用写出端的写法）照常导入，与非流式读取一致
+  const protectedUpper = await build('protected-upper', '<row r="2"><c r="A2" t="s"><v>2</v></c></row>', '<si><t>TX_x005F_X0041_</t></si>');
+  const protectedRows = [];
+  assert.deepEqual(await streamLinkedRowsToInsert(protectedUpper, linked, (row) => protectedRows.push(row)), { matched: true });
+  assert.deepEqual(protectedRows.map((row) => row.BizId), ['TX_X0041_']);
+  assert.deepEqual(readRows(protectedUpper)[1][0], 'TX_X0041_');
+  const writtenUpper = path.join(dir, 'written-upper.xlsx');
+  writeWorkbookRows({ rows: [['BizId', '备注'], ['TX_X0041_', 'n'], ['TXA', 'm']], outputFilePath: writtenUpper });
+  const writtenRows = [];
+  await streamLinkedRowsToInsert(writtenUpper, linked, (row) => writtenRows.push(row));
+  assert.deepEqual(writtenRows.map((row) => row.BizId), ['TX_X0041_', 'TXA'], '本应用写出的字面大写转义读回原文，不与 TXA 合并');
 });
 
 // v3.2.22 B113（Codex 第八轮）：注音不计入正文；CDATA、多段纯文本、带前缀的元素等非规范结构拒绝；表头格无法确认时不认作表头

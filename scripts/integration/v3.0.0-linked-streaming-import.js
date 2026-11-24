@@ -20,6 +20,7 @@ const linkedRepo = require('../../src/backend/database/linked-table-repository')
 const { streamLinkedRowsToInsert } = require('../../src/main-process/linked-table-stream-source');
 const { writeWorkbookRows } = require('../../src/backend/file-service');
 const { CHANNEL_VALUE, ADM_FUND_TYPES } = require('../../src/constants/adm-bank-deposit-fields');
+const JSZip = require('jszip');
 
 let passed = 0;
 let failed = 0;
@@ -149,12 +150,13 @@ async function run() {
     //   （按 BizId 幂等更新的入金表流式导入）：
     //   7a 先按 BizId 建一条记录；7b 首行以同一 BizId 更新金额、次行落库列 ReconciliationId 含空字符 → 整批拒绝，
     //   报物理行与列，该 BizId 仍是旧金额、全部记录不变；7c 只有不落库的列（Transaction Description）含空字符时照常入库
+    const importDepositFile = (filePath) => appDb.upsertLinkedBankDepositStreaming(async (writeOne) => {
+      await streamLinkedRowsToInsert(filePath, SIG, writeOne, linkedRepo.pickBankDepositFields);
+    }, { sourceFileName: path.basename(filePath) });
     const upsertDepositFile = (fileName, rows) => {
       const filePath = path.join(tmpDir, fileName);
       writeWorkbookRows({ rows: [HEADERS, ...rows.map(rowAoa)], outputFilePath: filePath });
-      return appDb.upsertLinkedBankDepositStreaming(async (writeOne) => {
-        await streamLinkedRowsToInsert(filePath, SIG, writeOne, linkedRepo.pickBankDepositFields);
-      }, { sourceFileName: fileName });
+      return importDepositFile(filePath);
     };
     const depositAmount = (bizId) => {
       const row = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit').find((item) => item.BizId === bizId);
@@ -178,6 +180,36 @@ async function run() {
     assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeNul, 'Step7b.全部记录与行数不变');
     await upsertDepositFile('nul-unstored.xlsx', [{ ...DATA[1], BizId: 'BZ-NUL-3', 'Transaction Description': 'memo\u0000x' }]);
     assertEq(depositAmount('BZ-NUL-3'), '2.5', 'Step7c.只有不落库的列含空字符：照常入库');
+
+    // Step8（v3.2.22 B113，Codex 第十四轮 P1 ⚠️ 资金口径）：XlsxWriter 等按字面保存的大写「_X0041_」：
+    //   SheetJS 口径会读成「A」，与另一笔 BizId「TXA」合并、覆盖其金额。流式导入按无法确认原值整批拒绝，报物理行与列
+    await upsertDepositFile('upper-base.xlsx', [{ ...DATA[0], BizId: 'TXA', 'Credit Amount': '9.9' }]);
+    const upperFile = path.join(tmpDir, 'upper-escape.xlsx');
+    writeWorkbookRows({
+      rows: [HEADERS, rowAoa({ ...DATA[0], BizId: 'TXA', 'Credit Amount': '9.9' }), rowAoa({ ...DATA[1], BizId: 'TXUPPERPLACEHOLDER', 'Credit Amount': '1.2' })],
+      outputFilePath: upperFile
+    });
+    const zip = await JSZip.loadAsync(fs.readFileSync(upperFile));
+    let replaced = 0;
+    for (const name of Object.keys(zip.files).filter((item) => item.endsWith('.xml'))) {
+      const xml = await zip.file(name).async('string');
+      if (!xml.includes('TXUPPERPLACEHOLDER')) continue;
+      replaced += 1;
+      zip.file(name, xml.replace('TXUPPERPLACEHOLDER', 'TX_X0041_'));
+    }
+    assertEq(replaced, 1, 'Step8.构造文件：字面大写转义按其他写出端的写法保存');
+    fs.writeFileSync(upperFile, await zip.generateAsync({ type: 'nodebuffer' }));
+    const rowsBeforeUpper = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let upperError = null;
+    try {
+      await importDepositFile(upperFile);
+    } catch (error) {
+      upperError = error;
+    }
+    assertEq(Boolean(upperError) && upperError.message.startsWith('源文件第 3 行「BizId」列的文本含无法确认原值的 Excel 文本转义'), true,
+      `Step8.大写转义拒绝并报物理行与列：${upperError && upperError.message}`);
+    assertEq(depositAmount('TXA'), '9.9', 'Step8.TXA 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeUpper, 'Step8.全部记录与行数不变');
   } finally {
     try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }
