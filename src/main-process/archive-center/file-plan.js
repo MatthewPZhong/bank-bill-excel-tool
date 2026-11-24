@@ -223,21 +223,26 @@ function assertNoAliasConflict(inputs, outputs, options) {
 }
 
 // v3.2.22 B57：先只冻结目标、再访问输入的流程（工具箱合表 / 拆分）用：完整计划沿用先冻结的输出证据（目标快照与父目录身份），
-//   不重新采样，计划携带的就是用户确认时的目标版本。只接受本进程登记过的冻结计划，输出须逐项同路径、同角色、同来源操作
+//   不重新采样，计划携带的就是用户确认时的目标版本。只接受本进程登记过的冻结计划；按冻结输出的下标逐项核对声明（拒绝空槽），
+//   路径、角色、来源操作、显式给出的文件名与 artifactKey 须与冻结值一致（与普通规范化同样的约束），不支持预先生成的输出
 function reuseFrozenOutputs(frozenPlan, rawOutputs) {
-  if (!frozenPlan || !normalizedFilePlans.has(frozenPlan) || frozenPlan.outputs.length !== rawOutputs.length) {
-    throw planError('ARCHIVE_FILE_PLAN_INVALID', '沿用的输出证据必须来自本进程冻结的同一组输出');
-  }
-  rawOutputs.forEach((raw, index) => {
+  const mismatch = () => planError('ARCHIVE_FILE_PLAN_INVALID', '沿用的输出证据必须来自本进程冻结的同一组输出');
+  if (!frozenPlan || !normalizedFilePlans.has(frozenPlan) || frozenPlan.outputs.length !== rawOutputs.length) throw mismatch();
+  for (let index = 0; index < frozenPlan.outputs.length; index += 1) {
+    if (!Object.hasOwn(rawOutputs, index)) throw mismatch();
+    const raw = rawOutputs[index];
     const frozen = frozenPlan.outputs[index];
-    if (!raw || typeof raw !== 'object'
-        || absolutePath(raw.filePath, 'output.filePath') !== frozen.filePath
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw mismatch();
+    const filePath = absolutePath(raw.filePath, 'output.filePath');
+    if (filePath !== frozen.filePath
+        || path.basename(requiredText(raw.originalName || filePath, 'originalName')) !== frozen.originalName
         || requiredText(raw.role, 'role') !== frozen.role
         || requiredText(raw.sourceOperation, 'sourceOperation') !== frozen.sourceOperation
+        || (raw.artifactKey !== undefined && requiredText(raw.artifactKey, 'artifactKey') !== frozen.artifactKey)
         || raw.preGeneratedOutput !== undefined) {
-      throw planError('ARCHIVE_FILE_PLAN_INVALID', '沿用的输出证据必须来自本进程冻结的同一组输出');
+      throw mismatch();
     }
-  });
+  }
   return frozenPlan.outputs;
 }
 

@@ -194,22 +194,26 @@ function simulateUnreliableParentIdentity(directory, times = Infinity) {
 
 // 包装真实的 normalizeFilePlanV1：只在含输入的完整计划规范化（先冻结目标之后的第二次）期间执行 during，返回真实结果
 //   （仍是 Main 登记过的冻结计划）。用来模拟「只有第二次看到不同的目标」。targetsOnly 为 true 时改为只在首次
-//   「只冻结目标」（不含输入）的规范化期间执行
+//   「只冻结目标」（不含输入）的规范化期间执行。state.frozenTargets 记下首次只冻结目标的真实结果（本次确认时的目标证据）
 function duringFullPlanSampling(during, { targetsOnly = false } = {}) {
-  const state = { calls: 0 };
+  const state = { calls: 0, frozenTargets: null };
   const wrapped = (value, ...rest) => {
-    const matches = value && Array.isArray(value.inputs) && Array.isArray(value.outputs) && value.outputs.length
-      && (targetsOnly ? !value.inputs.length : value.inputs.length > 0);
-    if (!matches || (targetsOnly && state.calls > 0)) {
-      return normalizeFilePlanV1(value, ...rest);
+    const hasOutputs = value && Array.isArray(value.inputs) && Array.isArray(value.outputs) && value.outputs.length > 0;
+    const isTargetsOnly = hasOutputs && value.inputs.length === 0;
+    const inject = targetsOnly ? isTargetsOnly && state.calls === 0 : hasOutputs && value.inputs.length > 0;
+    let after = null;
+    if (inject) {
+      state.calls += 1;
+      after = during();
     }
-    state.calls += 1;
-    const after = during();
+    let result;
     try {
-      return normalizeFilePlanV1(value, ...rest);
+      result = normalizeFilePlanV1(value, ...rest);
     } finally {
       if (typeof after === 'function') after();
     }
+    if (isTargetsOnly && !state.frozenTargets) state.frozenTargets = result;
+    return result;
   };
   return { state, normalizeFilePlanV1: wrapped };
 }

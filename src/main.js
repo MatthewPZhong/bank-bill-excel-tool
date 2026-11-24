@@ -22606,7 +22606,7 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
 //   完整计划沿用先冻结的输出证据、不重新采样（normalizeFilePlanV1 的 reuseFrozenOutputsOf），返回给执行阶段的计划携带的
 //   就是用户确认时的目标版本（父目录身份的可靠性也按首次冻结：首次不可靠时之后只核对路径）；之后再按冻结的证据核对当前
 //   磁盘。输入多或在网络盘上时，遍历输入期间外部新建、替换（含建成文件夹）的目标报目标变化。
-//   别名检查或完整计划规范化失败时先核对目标：目标变了、或系统错误指向输出路径与其所在目录（目录被移走后又移回等），
+//   别名检查或完整计划规范化失败时先核对目标：目标变了、或系统错误指向输出路径与其任一级上级目录（目录被移走后又移回等），
 //   报目标变化（中文提示）；否则是输入本身的问题（或真的别名到输入），原样抛出
 function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
   const targetsOnly = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs });
@@ -22618,19 +22618,24 @@ function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
       throw targetChanged();
     }
   };
-  const targetPaths = new Set(targetsOnly.outputs.flatMap((output) => [
+  // 系统错误的路径是输出路径本身或其任一级上级目录（字面路径与冻结时解析出的真实路径）时，按目标变化处理：
+  //   输出所在目录的上级被移走又移回时，解析报的是第一个缺失的上级（Codex 第五轮 P3）
+  const targetPaths = targetsOnly.outputs.flatMap((output) => [
     path.resolve(output.filePath),
-    path.dirname(path.resolve(output.filePath)),
-    output.targetParentIdentity.canonicalRealPath,
     path.join(output.targetParentIdentity.canonicalRealPath, path.basename(output.filePath))
-  ]));
+  ]);
+  const isTargetOrAncestor = (errorPath) => {
+    const resolved = path.resolve(errorPath);
+    return targetPaths.some((targetPath) => targetPath === resolved
+      || targetPath.startsWith(resolved.endsWith(path.sep) ? resolved : resolved + path.sep));
+  };
   let plan;
   try {
     assertToolboxTargetsDoNotAliasSources(inputs.map((item) => item.filePath), outputs.map((item) => item.filePath));
     plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs, outputs }, { reuseFrozenOutputsOf: targetsOnly });
   } catch (error) {
     assertTargetsUnchanged();
-    if (error && typeof error.path === 'string' && targetPaths.has(path.resolve(error.path))) throw targetChanged();
+    if (error && typeof error.path === 'string' && isTargetOrAncestor(error.path)) throw targetChanged();
     throw error;
   }
   assertTargetsUnchanged();
