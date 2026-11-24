@@ -670,7 +670,7 @@ const {
   createStatementGenerationHelpers,
   selectBalanceAccountRows
 } = require('./main-process/statement-generation');
-const { createStatementOutputJournal } = require('./main-process/statement-output-rollback');
+const { createStatementOutputJournal, isStatementOutputsRestored } = require('./main-process/statement-output-rollback');
 const {
   DUPLICATE_REVIEW_STATUS,
   createStatementDuplicateReview,
@@ -13588,6 +13588,43 @@ function regenerateVirtualTemplateBalanceFromSession(
   };
 }
 
+// v3.2.22 B45：多模板写出期间的系统异常（如导出文件被占用）且本批写出的文件都已还原：导入入口只提示原因
+//   （preservesSession，上一批的会话、导出与补录入口不变），不按失败的导入清空上一批。业务校验失败仍走普通失败处理
+//   （界面列出明细、可导出报错文件）；预检、新鲜度失败不经此处。
+function isRestoredStatementRuntimeFailure(error) {
+  return isStatementOutputsRestored(error)
+    && !(error instanceof FileValidationError)
+    && error.code !== STATEMENT_SOURCE_FRESHNESS_FAILURE.code;
+}
+
+// 不调用 createErrorResult：上一批的状态框与可导出的报错文件保持不变（不替换 lastErrorReport），异常堆栈可能含内部文件名
+//   （含账号），不写入可导出的报告。诊断尽力写入日志文件与活动日志（不含路径），写不出不影响返回（导出盘已满或只读时）。
+function createRestoredStatementRuntimeFailureResult(error, { step, errorCode }) {
+  try {
+    appendLog(ensureStorageRoot(), error);
+  } catch (_logError) {
+    // 诊断落盘尽力而为
+  }
+  try {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'statement',
+      message: `${step}失败，已还原为导入前的状态`,
+      details: [`错误代码：${errorCode}`, `系统错误：${error && error.code ? error.code : '未知'}`]
+    });
+  } catch (_logError) {
+    // 同上
+  }
+  return {
+    status: 'error',
+    message: '生成失败（可能是导出文件正被其他程序占用），已还原为导入前的状态，请关闭占用的文件后重新导入',
+    errorCode,
+    errorReportReady: false,
+    preservesSession: true
+  };
+}
+
 function generateMultiTemplateGroupFiles({
   fileEntries,
   fallbackTemplateConfig,
@@ -13767,7 +13804,8 @@ function generateMultiTemplateGroupFiles({
           config: groupConfig,
           preparedBatch: groupPreparedBatch,
           scope: 'current',
-          beforeOutputWrite: outputJournal.record
+          writeOutput: outputJournal.write,
+          checkOutputTarget: outputJournal.checkTarget
         }),
         fileEntries: effectiveEntries,
         preparedBatch: groupPreparedBatch
@@ -13793,8 +13831,7 @@ function generateMultiTemplateGroupFiles({
       ? (() => {
           const mergedFileName = `${templateCount}-COMMON-${dateRangeLabel || getToday()}.xlsx`;
           const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'detail', outputFileName: mergedFileName });
-          outputJournal.record(mergedPath);
-          mergeGeneratedXlsxFiles(allDetailPaths, mergedPath);
+          outputJournal.write(mergedPath, () => mergeGeneratedXlsxFiles(allDetailPaths, mergedPath));
           return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
         })()
       : allDetailPaths.length === 1
@@ -13812,30 +13849,37 @@ function generateMultiTemplateGroupFiles({
       ? (() => {
           const mergedFileName = `${templateCount}-BALANCE-${buildDateRangeLabel(allBalanceDates) || getToday()}.xlsx`;
           const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
-          outputJournal.record(mergedPath);
-          mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath);
+          outputJournal.write(mergedPath, () => mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath));
           return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
         })()
       : mergeableBalancePaths.length === 1
         ? { filePath: mergeableBalancePaths[0], fileName: path.basename(mergeableBalancePaths[0]), templateName: '按文件名映射模板' }
         : null;
   } catch (error) {
-    const { failures, backupDirectory } = outputJournal.rollback();
-    if (failures.length) {
-      // 还原失败不覆盖原错误：附在原错误的明细后，并记日志保留备份位置便于人工恢复
-      const lines = failures.map((item) => `未能还原：${item.filePath}（${item.message}）`);
-      if (error && typeof error === 'object') {
-        error.detailLines = [...(Array.isArray(error.detailLines) ? error.detailLines : []), ...lines];
+    const { error: failure, outcome } = outputJournal.failBatch(error);
+    if (!outcome.restored) {
+      // 还原不完整：系统异常的堆栈照常写入日志；活动日志只记数量与恢复清单位置，不写含账号的文件路径
+      //   诊断落盘尽力而为：导出盘已满或只读时写日志可能再次失败，不能掩盖回滚结果与恢复清单位置
+      if (!(error instanceof FileValidationError)) {
+        try {
+          failure.detailLines.push(`系统异常已额外写入日志文件：${appendLog(ensureStorageRoot(), error)}`);
+        } catch (_logError) {
+          failure.detailLines.push('系统异常未能写入日志文件');
+        }
       }
-      appendActivityLogEntry({
-        level: 'error',
-        source: 'main',
-        domain: 'statement',
-        message: '多模板生成失败后部分输出未能还原',
-        details: [...lines, ...(backupDirectory ? [`原内容备份：${backupDirectory}`] : [])]
-      });
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'statement',
+          message: '网银多模板生成失败后部分文件未能自动还原',
+          details: [failure.context.rollbackSummary, failure.context.rollbackLocation]
+        });
+      } catch (_logError) {
+        // 同上
+      }
     }
-    throw error;
+    throw failure;
   }
   outputJournal.commit();
 
@@ -16461,6 +16505,12 @@ async function handleFilenameMappingImport(prepared) {
     }
     return executeFilenameMappingImportPlan(statementImportPlan, prepared);
   } catch (error) {
+    if (!prepared.previewOnly && isRestoredStatementRuntimeFailure(error)) {
+      return createRestoredStatementRuntimeFailureResult(error, {
+        step: '导入网银明细文件',
+        errorCode: 'FILE_IMPORT_RUNTIME'
+      });
+    }
     if (!prepared.previewOnly) {
       clearGeneratedExports();
       clearPendingManualBalancePrompt();
@@ -17995,6 +18045,12 @@ function registerFileHandlers() {
         result
       });
     } catch (error) {
+      if (isRestoredStatementRuntimeFailure(error)) {
+        return createRestoredStatementRuntimeFailureResult(error, {
+          step: '选择大账号',
+          errorCode: 'BIG_ACCOUNT_SELECTION_RUNTIME'
+        });
+      }
       clearGeneratedExports();
       clearPendingManualBalancePrompt();
 

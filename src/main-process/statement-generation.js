@@ -98,6 +98,13 @@ function dateRangeBounds(dates) {
   return first === last ? [first] : [first, last];
 }
 
+// v3.2.22 B45：分组生成（传 writeOutput）时包住余额文件 / 种子的写出异常，穿过余额的业务告警分支原样抛给调用方
+class StatementOutputWriteFailure {
+  constructor(cause) {
+    this.cause = cause;
+  }
+}
+
 function createStatementGenerationHelpers(deps) {
   const {
     appendActivityLogEntry,
@@ -288,19 +295,21 @@ function createStatementGenerationHelpers(deps) {
     });
   }
 
-  // beforeOutputWrite(filePath)：v3.2.22 B45，每次写出明细 / 余额文件、写余额种子文件之前调用（多模板分组生成据此
-  //   记下原状态，失败时回滚）
+  // writeOutput(filePath, write)：v3.2.22 B45，写出明细 / 余额文件、写余额种子文件都经它执行（多模板分组生成据此记下
+  //   原状态与写后身份，失败时回滚）。传入时，余额文件与种子的写出失败原样抛出、由调用方整批回滚，不再转成
+  //   「余额生成失败」告警（否则前组已写的种子留在盘上、余额汇总缺组）；补录、断档等待确认等业务告警不变。
+  //   checkOutputTarget(filePath)：同时传入，首次读取余额种子前检查种子路径是否为普通文件。
   function generateStatementFiles({
     config,
     preparedBatch,
     scope = 'current',
     includeDetail = true,
     includeBalance = null,
-    beforeOutputWrite = null
+    writeOutput = null,
+    checkOutputTarget = null
   }) {
-    const noteOutputWrite = (filePath) => {
-      if (typeof beforeOutputWrite === 'function') beforeOutputWrite(filePath);
-    };
+    const journaled = typeof writeOutput === 'function';
+    const writeThrough = (filePath, write) => (journaled ? writeOutput(filePath, write) : write());
     const warnings = Array.isArray(preparedBatch.warnings) ? preparedBatch.warnings.slice() : [];
     const detailRows = cloneRowsWithMetadata(preparedBatch.detailRows);
     const detailExportRows = buildDetailExportRows(detailRows);
@@ -361,11 +370,10 @@ function createStatementGenerationHelpers(deps) {
         internalSuffix
       });
 
-      noteOutputWrite(detailOutput.outputFilePath);
-      writeWorkbookRows({
+      writeThrough(detailOutput.outputFilePath, () => writeWorkbookRows({
         rows: detailExportRows,
         outputFilePath: detailOutput.outputFilePath
-      });
+      }));
 
       result.detail = {
         filePath: detailOutput.outputFilePath,
@@ -414,12 +422,22 @@ function createStatementGenerationHelpers(deps) {
           balanceDetailRows = selectBalanceAccountRows(effectiveDetailRows, preparedBatch.balanceModeByAccount);
         }
 
+        const templateBankName = splitTemplateName(statementOutputName(config)).bankName;
+        // v3.2.22 B45：分组生成时先检查本组的余额种子路径（下面首次读取种子）：是文件夹等非普通文件时整批回滚，
+        //   不转成「余额生成失败」告警（否则前组的新种子与缺组的余额汇总会提交）
+        if (journaled && typeof checkOutputTarget === 'function') {
+          try {
+            checkOutputTarget(getBalanceSeedFilePath(ensureStorageRoot(), templateBankName));
+          } catch (targetError) {
+            throw new StatementOutputWriteFailure(targetError);
+          }
+        }
+
         balanceSeedStatus = scanBalanceSeedStatus({
           detailRows: balanceDetailRows,
           templateName: statementOutputName(config)
         });
 
-        const templateBankName = splitTemplateName(statementOutputName(config)).bankName;
         const balanceAdjustments = readBalanceAdjustments(
           ensureStorageRoot(),
           templateBankName
@@ -474,20 +492,26 @@ function createStatementGenerationHelpers(deps) {
           internalSuffix
         });
 
-        noteOutputWrite(balanceOutput.outputFilePath);
-        writeBalanceWorkbook({
-          templateFilePath: balanceTemplatePath,
-          records: balanceResult.records,
-          templateFields: balanceTemplateFields,
-          outputFilePath: balanceOutput.outputFilePath
-        });
-        if (Array.isArray(balanceResult.seedRecords) && balanceResult.seedRecords.length) {
-          noteOutputWrite(getBalanceSeedFilePath(seedStorageRoot, templateBankName));
+        try {
+          writeThrough(balanceOutput.outputFilePath, () => writeBalanceWorkbook({
+            templateFilePath: balanceTemplatePath,
+            records: balanceResult.records,
+            templateFields: balanceTemplateFields,
+            outputFilePath: balanceOutput.outputFilePath
+          }));
+          const storeSeeds = () => storeGeneratedBalanceSeeds({
+            templateName: statementOutputName(config),
+            seedRecords: balanceResult.seedRecords
+          });
+          if (Array.isArray(balanceResult.seedRecords) && balanceResult.seedRecords.length) {
+            writeThrough(getBalanceSeedFilePath(seedStorageRoot, templateBankName), storeSeeds);
+          } else {
+            storeSeeds();
+          }
+        } catch (writeError) {
+          if (journaled) throw new StatementOutputWriteFailure(writeError);
+          throw writeError;
         }
-        storeGeneratedBalanceSeeds({
-          templateName: statementOutputName(config),
-          seedRecords: balanceResult.seedRecords
-        });
         // 已确认替换的人工补录写入后不再按它比对：用户已同意替换（D11）。
         (balanceResult.confirmedBalanceSeedReplacementKeys || []).forEach((key) => seenManualBalanceSeeds.delete(key));
 
@@ -500,6 +524,7 @@ function createStatementGenerationHelpers(deps) {
         };
         result.message = includeDetail ? '明细账单可导出，余额账单可导出' : '余额账单可导出';
       } catch (error) {
+        if (error instanceof StatementOutputWriteFailure) throw error.cause;
         if (error instanceof FileValidationError) {
           if (error.code === 'BALANCE_SEED_REQUIRED') {
             const promptMerchantId = normalizeCell(error.context?.merchantId);
