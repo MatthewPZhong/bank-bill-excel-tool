@@ -427,6 +427,16 @@ test('writeErrorReport：发布后删除临时名遇到短暂占用时重试，�
   const { writeErrorReport, getLogFilePath } = require('../../../src/backend/logger');
   const root = mkTmpRoot();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 只适用于硬链接发布：临时卷不支持硬链接时按设计改名发布，不留临时名（改名分支见下一例，Codex 第十四轮）
+  try {
+    fs.writeFileSync(path.join(root, 'probe'), '');
+    fs.linkSync(path.join(root, 'probe'), path.join(root, 'probe-link'));
+    fs.rmSync(path.join(root, 'probe'));
+    fs.rmSync(path.join(root, 'probe-link'));
+  } catch (_error) {
+    t.skip('临时目录所在的卷不支持硬链接');
+    return;
+  }
   const payload = { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' };
   const rmSync = fs.rmSync;
   let failures = 0;
@@ -460,4 +470,36 @@ test('writeErrorReport：发布后删除临时名遇到短暂占用时重试，�
   const third = writeErrorReport(root, { ...payload, message: '第三份' });
   assert.deepEqual(fs.readdirSync(dir).filter((name) => name.endsWith('.partial')), [], '下次写报告时删除待清理的临时名');
   assert.equal(third.pendingCleanupFiles, undefined);
+});
+
+// v3.2.22 B45（Codex 第十四轮）：不支持硬链接的卷按改名发布：同一秒同名的第二份报告不覆盖第一份，不留临时名、不产生待清理记录
+test('writeErrorReport：不支持硬链接时改名发布，同秒同名的报告互不覆盖、不留待清理的临时名', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const linkSync = fs.linkSync;
+  fs.linkSync = () => { throw Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' }); };
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 24, 10, 0, 0).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { fs.linkSync = linkSync; global.Date = RealDate; });
+  const payload = { step: '生成网银账单', templateName: '模板A', errorCode: 'TEST' };
+  const first = writeErrorReport(root, { ...payload, message: '第一份' });
+  const second = writeErrorReport(root, { ...payload, message: '第二份' });
+  fs.linkSync = linkSync;
+  global.Date = RealDate;
+  assert.notEqual(first.filePath, second.filePath);
+  assert.match(second.fileName, /-2\.txt$/);
+  assert.deepEqual(fs.readdirSync(path.dirname(first.filePath)).sort(), [first.fileName, second.fileName].sort(), '不留临时名');
+  assert.match(fs.readFileSync(first.filePath, 'utf8'), /第一份/);
+  assert.match(fs.readFileSync(second.filePath, 'utf8'), /第二份/);
+  assert.equal(first.pendingCleanupFiles, undefined);
+  assert.equal(second.pendingCleanupFiles, undefined);
 });

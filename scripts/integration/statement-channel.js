@@ -2306,9 +2306,10 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     return journal.failBatch(error);
   };
   const previousReport = { fileName: '上一批的报错文件.txt' };
-  const createScope = (sideEffects, thrown, { logFails = false, reportFails = false, captured = null, extra = {} } = {}) => {
+  // realPersistence：报错文件、诊断日志与活动日志都用 main.js 的真实写出函数（logger 落盘），由用例回读落盘内容（Codex 第十四轮）
+  const createScope = (sideEffects, thrown, { logFails = false, reportFails = false, captured = null, realPersistence = false, extra = {} } = {}) => {
     const record = (name) => () => { sideEffects.push(name); };
-    return createMainScope({
+    const scopeValues = {
       ...env.mainDeps,
       ...env.fns,
       fileImportInProgress: false,
@@ -2338,8 +2339,31 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
       },
       lastErrorReport: previousReport,
       ...extra
-    });
+    };
+    if (realPersistence) {
+      delete scopeValues.appendLog;
+      delete scopeValues.appendActivityLogEntry;
+      delete scopeValues.createErrorReport;
+      scopeValues.activityLogFilePath = path.join(env.storageRoot, 'app_activity_log.txt');
+    }
+    return createMainScope(scopeValues);
   };
+  // 落盘内容：报错文件目录与日志目录下的全部文件（文件名与正文）
+  const persistedDirs = ['error-reports', 'logs'].map((name) => path.join(env.storageRoot, name));
+  const readPersisted = () => {
+    const files = [];
+    const walk = (current) => {
+      if (!fs.existsSync(current)) return;
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const full = path.join(current, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else files.push({ relative: path.relative(env.storageRoot, full), text: fs.readFileSync(full, 'utf8') });
+      }
+    };
+    persistedDirs.forEach(walk);
+    return files;
+  };
+  const resetPersisted = () => persistedDirs.forEach((dirPath) => fs.rmSync(dirPath, { recursive: true, force: true }));
   const runExecute = async (thrown, options = {}) => {
     const sideEffects = [];
     const scope = createScope(sideEffects, thrown, options);
@@ -2397,7 +2421,7 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
   const incomplete = await runExecute(incompleteError);
   assertEq([incomplete.result.status, incomplete.result.preservesSession, incomplete.cleared], ['error', undefined, true],
     'Step20b.还原不完整：按失败的导入处理');
-  assertTrue(incomplete.result.message.includes('有 1 个已写出的文件未能自动还原')
+  assertTrue(incomplete.result.message.includes('有 1 处输出未能自动还原')
     && incomplete.result.message.includes(`恢复清单：${outcome.manifestPath}`),
   `Step20b.还原不完整时界面消息给出数量与恢复清单位置：${incomplete.result.message}`);
   // 报错文件也写不出（数据目录已满，正是还原失败的常见原因）：仍返回恢复指引，不被写报错文件的异常盖掉
@@ -2416,25 +2440,28 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
   // 各组的业务校验错误在上下文中带该组模板的真实名称；未经回滚的系统异常走另一分支（Codex 第九轮）
   const groupError = new FileValidationError('FILE_READ', '存在1条明细的 Credit Amount 与 Debit Amount 同时有值', {
     detailLines: ['第2行，Credit Amount="1"，Debit Amount="2"'], context: { templateName: '中行-6222020200012345678' } });
+  // 回读真实写出的报错文件（文件名与正文）和日志：都不含完整账号，报错文件用固定名称
+  const assertPersistedMasked = (label) => {
+    const files = readPersisted();
+    const reports = files.filter((file) => file.relative.startsWith('error-reports') && file.relative.endsWith('.txt'));
+    const logs = files.filter((file) => file.relative.startsWith('logs'));
+    const leaked = files.filter((file) => file.relative.includes('6222020200012345678') || file.text.includes('6222020200012345678'));
+    assertTrue(reports.length === 1 && logs.length >= 1 && leaked.length === 0
+      && reports.every((file) => `${file.relative}\n${file.text}`.includes('按文件名映射模板')),
+    `Step20b.${label}：落盘的报错文件与日志不含真实模板名，报错文件用固定名称：${JSON.stringify(files.map((file) => [file.relative, file.text.slice(0, 160)]))}`);
+  };
   for (const [label, thrown, expected] of [['还原不完整', incompleteError, '未能自动还原'], ['导出位置不安全', unsafeError, '无法安全覆盖'],
     ['组内业务校验失败', groupError, '同时有值'], ['系统异常', Object.assign(new Error('EIO'), { code: 'EIO' }), '文件转换错误']]) {
-    const captured = [];
-    const named = await runSelectionExecute(thrown, { templateName: '中行-6222020200012345678', multiTemplate: true, captured });
+    resetPersisted();
+    const named = await runSelectionExecute(thrown, { templateName: '中行-6222020200012345678', multiTemplate: true, realPersistence: true });
     assertTrue(named.result.message.includes(expected), `Step20b.前置：完成大账号选择后${label}：${named.result.message}`);
-    // 只看落盘的内容：报错文件对原始异常只写堆栈与消息（logger.writeErrorReport），不写其上下文
-    const persisted = JSON.stringify(captured.map(({ originalError, ...rest }) => ({
-      ...rest, originalError: originalError ? String(originalError.stack || originalError.message || originalError) : null
-    })));
-    assertTrue(captured.length >= 1 && !persisted.includes('6222020200012345678') && persisted.includes('按文件名映射模板'),
-      `Step20b.${label}时报错文件与活动日志用固定名称，不含真实模板名：${persisted.slice(0, 300)}`);
+    assertPersistedMasked(`完成大账号选择后${label}`);
   }
   // 直接导入入口（按文件名映射）：组内业务校验错误上下文中的真实模板名同样被固定名称覆盖（Codex 第九轮）
-  const directCaptured = [];
-  const direct = await runExecute(groupError, { captured: directCaptured });
-  const directPersisted = JSON.stringify(directCaptured.map(({ originalError, ...rest }) => rest));
-  assertTrue(direct.result.message.includes('同时有值') && directCaptured.length >= 1
-    && !directPersisted.includes('6222020200012345678') && directPersisted.includes('按文件名映射模板'),
-  `Step20b.直接导入时组内业务校验失败的报错文件不含真实模板名：${directPersisted.slice(0, 300)}`);
+  resetPersisted();
+  const direct = await runExecute(groupError, { realPersistence: true });
+  assertTrue(direct.result.message.includes('同时有值'), `Step20b.前置：直接导入时组内业务校验失败：${direct.result.message}`);
+  assertPersistedMasked('直接导入时组内业务校验失败');
   fs.rmSync(outcome.backupDirectory, { recursive: true, force: true });
 }
 

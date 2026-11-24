@@ -252,7 +252,7 @@ test('failBatch：全部还原时原错误打上标记；还原不完整时改�
   assert.equal(isStatementOutputsRestored(business), false);
   assert.ok(error instanceof FileValidationError);
   assert.equal(error.code, 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE');
-  assert.equal(error.message, `生成失败，且有 1 个已写出的文件未能自动还原，请按恢复清单人工处理后再重新导入（恢复清单：${outcome.manifestPath}）`);
+  assert.equal(error.message, `生成失败，且有 1 处输出未能自动还原，请按恢复清单逐项核对、人工处理后再重新导入（恢复清单：${outcome.manifestPath}）`);
   assert.deepEqual(error.detailLines, [
     '生成失败原因：合并失败',
     '第 2 个文件表头不一致',
@@ -941,4 +941,22 @@ test('经硬链接别名写过的文件、备份被截短：别名路径同样�
   assert.ok(outcome.failures.length >= 1);
   assert.ok(outcome.failures.every((item) => item.reason === '原内容备份已不可用（被删除、移走或大小与备份时不符），路径上仍是本批写出的内容，未自动处理'),
     JSON.stringify(outcome.failures));
+});
+
+// v3.2.22 B45（Codex 第十四轮）：写前不存在的路径首次写出即失败、留下半份文件：清单标「归属待核对」，界面消息只给数量与清单位置，
+//   不称其为本批已写出的文件
+test('首次写出即失败留下半份文件：界面消息不推断归属，只给未能还原的数量与恢复清单', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'fresh.xlsx');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  assert.throws(() => journal.write(target, () => {
+    fs.writeFileSync(target, 'half');
+    throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+  }), { code: 'ENOSPC' });
+  const { error, outcome } = journal.failBatch(Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }));
+  t.after(() => outcome.backupDirectory && fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.equal(error.code, 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE');
+  assert.equal(error.message, `生成失败，且有 1 处输出未能自动还原，请按恢复清单逐项核对、人工处理后再重新导入（恢复清单：${outcome.manifestPath}）`);
+  assert.doesNotMatch(error.message, /已写出/);
+  assert.match(error.detailLines.join('\n'), /本次新建 0 个、写前不存在且归属待核对 1 个/);
 });

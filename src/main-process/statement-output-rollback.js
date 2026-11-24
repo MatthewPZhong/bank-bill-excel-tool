@@ -180,10 +180,11 @@ function buildRollbackIncompleteError(error, { failures, backupDirectory, manife
       ? `恢复清单未能写出，请按写出记录逐个核对（记录列出本批全部写入尝试，不是失败清单）：${manifestPath}`
       : `恢复清单：${manifestPath}`);
   const business = error instanceof FileValidationError;
-  // 数量与清单位置同时放进消息：界面状态框只显示消息（清单在系统临时目录，路径不含账号）
+  // 数量与清单位置同时放进消息：界面状态框只显示消息（清单在系统临时目录，路径不含账号）。只说未能自动还原的位置数，
+  //   不说「已写出」：归属待核对的路径不一定是本批写出的，由清单逐项说明（spec D5、D7，Codex 第十四轮）
   return new FileValidationError(
     'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE',
-    `生成失败，且有 ${failures.length} 个已写出的文件未能自动还原，请按恢复清单人工处理后再重新导入（${location}）`,
+    `生成失败，且有 ${failures.length} 处输出未能自动还原，请按恢复清单逐项核对、人工处理后再重新导入（${location}）`,
     {
       detailLines: [
         `生成失败原因：${business ? error.message : `系统异常${error && error.code ? `（${error.code}）` : ''}`}`,
