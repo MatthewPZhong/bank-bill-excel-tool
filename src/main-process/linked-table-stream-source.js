@@ -72,13 +72,17 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
     const row = Array.isArray(cells) ? cells : [];
     const unverifiable = textInfo && textInfo.unverifiableColumns.length ? new Set(textInfo.unverifiableColumns) : null;
     if (colOffset < 0) {
+      // 还原出的首尾空白去掉后才与表头相等的格同样不认作表头：ExcelJS 写出、读回的字面「BizId_x000d_」不是「BizId」列，
+      //   认作表头会把其他列的值当作交易标识（Codex 第十八轮 P1 ⚠️ 资金口径）
+      const trimSensitive = textInfo && textInfo.trimSensitiveColumns.length ? new Set(textInfo.trimSensitiveColumns) : null;
       // 流内定位表头行 + 起始列偏移（镜像 readLinkedRowsAsObjects：首个「连续位置全等」起点）。
       //   无法确认原值的格不与任何表头相等（与表头识别、模板预检同口径，Codex 第八轮 P1）
       const maxStart = row.length - expected.length;
       for (let cs = 0; cs <= maxStart; cs += 1) {
         let matched = true;
         for (let i = 0; i < expected.length; i += 1) {
-          if ((unverifiable && unverifiable.has(cs + i)) || normalizeCell(expected[i]) !== normalizeCell(row[cs + i])) {
+          if ((unverifiable && unverifiable.has(cs + i)) || (trimSensitive && trimSensitive.has(cs + i))
+            || normalizeCell(expected[i]) !== normalizeCell(row[cs + i])) {
             matched = false;
             break;
           }
@@ -102,14 +106,14 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
         }
       }
     }
-    // v3.2.22 B113（Codex 第十七轮 P1 ⚠️ 资金口径）：幂等键列的文本还原出的空白落在首尾（如 ExcelJS 原样写出的字面
-    //   「TX_x000D_」读成「TX」加回车），入库前去掉首尾空白后与另一笔「TX」同键而覆盖其金额，按字面读取的写出端认为两者不同。
-    //   拒绝整批，只给行号与列名；其余列与 SheetJS 读取同样还原后去首尾空白。先于全空行判断（同上）
-    if (keyIndex >= 0 && textInfo.trimSensitiveColumns.includes(colOffset + keyIndex)) {
+    // v3.2.22 B113（Codex 第十七、十八轮 P1 ⚠️ 资金口径）：幂等键列含 Excel 文本转义（_xHHHH_，含本应用写出的 _x005F_ 保护
+    //   形式）时整批拒绝：Excel、SheetJS 还原，ExcelJS 等按字面读写，同一段原文在不同写出端表示不同的交易标识——ExcelJS 写出的
+    //   字面「TX_x000D_」还原并去首尾空白后与「TX」同键，「J_x000a_K」与含换行的「J↵K」同键，入库时覆盖另一笔的金额。
+    //   只给行号与列名；其余列照常还原。先于全空行判断（同上）
+    if (keyIndex >= 0 && textInfo.escapedColumns.includes(colOffset + keyIndex)) {
       throw new FileValidationError('FILE_READ',
-        `源文件第 ${textInfo.rowNumber} 行「${keySource}」列（交易标识）的首尾含由 Excel 文本转义（_xHHHH_）还原出的空白字符，`
-          + '去掉首尾空白后可能与另一笔交易的标识相同；'
-          + '请到源系统核对该行的原始值并重新导出，不要按打开后显示的值修改或另存该文件');
+        `源文件第 ${textInfo.rowNumber} 行「${keySource}」列（交易标识）含 Excel 文本转义（_xHHHH_），不同软件对同一段原文的`
+          + '读法不同，不能确认交易标识；请到源系统核对该行的原始值并重新导出，不要按打开后显示的值修改或另存该文件');
     }
     // 🔴 全空行跳过：与数组路径 readRowsWithMetadata `.filter(isRowMeaningful)` 对齐（防空 key 垃圾行 + row_count 虚高）。
     if (!isRowMeaningful(row)) return;

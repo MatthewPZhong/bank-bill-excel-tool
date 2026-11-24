@@ -239,3 +239,25 @@ test('两份预检都通过后依次“导入并启用”：提交时复核同�
   const { resource } = await env.service.get('position-gateway-raw-out');
   assert.deepEqual(resource.versions.map((version) => version.id), ['v1'], '被拒的提交不留下版本文件与记录');
 });
+
+// v3.2.22 B113（Codex 第十八轮 P2）：单表 .xlsx 的链接表导入走流式读取。唯一的工作表不在 sheet1.xml（ExcelJS 新建两张表、
+//   删掉第一张后保存）时导入读不出，预检读表头同样报错、不通过；多工作表文件导入时不走流式，读法照旧
+test('链接表预检：单表 .xlsx 的工作表不在 sheet1.xml 时读表头报错，与流式导入一致', async (t) => {
+  const ExcelJS = require('exceljs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-runtime-headers-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const headers = INPUT_STRUCTURES['transfer-order'].sheets[0].builtinHeaders();
+  const write = async (name, extraSheet) => {
+    const book = new ExcelJS.Workbook();
+    const scratch = book.addWorksheet('临时');
+    scratch.addRow(headers);
+    book.addWorksheet('Sheet1').addRow(headers);
+    if (!extraSheet) book.removeWorksheet(scratch.id);
+    const filePath = path.join(dir, name);
+    await book.xlsx.writeFile(filePath);
+    return filePath;
+  };
+  await assert.rejects(INPUT_STRUCTURES['transfer-order'].runtimeHeaders(await write('moved.xlsx', false)), /sheet1\.xml/);
+  assert.deepEqual(await INPUT_STRUCTURES['transfer-order'].runtimeHeaders(await write('two-sheets.xlsx', true)), [headers],
+    '多工作表文件：读法照旧');
+});

@@ -385,8 +385,8 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
   await streamLinkedRowsToInsert(delFile, linked, (row) => delRows.push(row));
   assert.deepEqual(delRows.map((row) => row.BizId), ['TX\u007fA']);
 
-  // 幂等键列还原出的空白落在首尾：去掉首尾空白后与「TX」同键，拒绝整批并报行号与列名（Codex 第十七轮 P1）；
-  //   键列经落库投影改名时按源列核对；非键列与未指定键列时照常还原后去首尾空白；转义在中间、原始空白在首尾的不受影响
+  // 幂等键列含转义：拒绝整批并报行号与列名（首尾还原空白，Codex 第十七轮 P1；任何转义，第十八轮 P1）；
+  //   键列经落库投影改名时按源列核对；非键列与未指定键列时照常还原后去首尾空白
   const edgeFile = await build('edge-escape', '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c></row>'
     + '<row r="3"><c r="A3" t="s"><v>4</v></c><c r="B3" t="s"><v>5</v></c></row>',
   '<si><t>TX_x000D_</t></si><si><t>note_x0009_</t></si><si><t xml:space="preserve"> TX_x0001_ </t></si><si><t>a_x000D_\nb</t></si>');
@@ -397,15 +397,35 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
   ]) {
     await assert.rejects(streamLinkedRowsToInsert(edgeFile, linked, (row) => edgeInserted.push(row), keyed.transform, { keyField: keyed.keyField }), (error) => (
       error.code === 'FILE_READ'
-        && error.message.startsWith('源文件第 2 行「BizId」列（交易标识）的首尾含由 Excel 文本转义（_xHHHH_）还原出的空白字符')
+        && error.message.startsWith('源文件第 2 行「BizId」列（交易标识）含 Excel 文本转义（_xHHHH_），不同软件对同一段原文的读法不同')
         && !error.message.includes('TX')
         && error.message.endsWith('请到源系统核对该行的原始值并重新导出，不要按打开后显示的值修改或另存该文件')
     ), keyed.keyField);
   }
   assert.deepEqual(edgeInserted, [], '拒绝前未写入任何行');
-  const keyedLower = [];
-  await streamLinkedRowsToInsert(writtenLower, linked, (row) => keyedLower.push(row.BizId), undefined, { keyField: 'BizId' });
-  assert.deepEqual(keyedLower, ['TX_x004a_', 'TXJ', 'TX\u007fA'], '转义不在首尾的键照常导入');
+  // 转义在中间、本应用写出的 _x005F_ 保护形式同样拒绝：ExcelJS 写出的「J_x000a_K」与含换行的「J↵K」、ExcelJS 写出的字面
+  //   「TX_x005F_x004a_」与本应用写出的「TX_x004a_」各自同键（第十八轮 P1）
+  await assert.rejects(streamLinkedRowsToInsert(writtenLower, linked, () => {}, undefined, { keyField: 'BizId' }),
+    (error) => error.message.startsWith('源文件第 2 行「BizId」列（交易标识）含 Excel 文本转义'), '本应用写出的保护形式');
+  const middle = await build('middle-escape', '<row r="2"><c r="A2" t="s"><v>2</v></c></row><row r="3"><c r="A3" t="s"><v>3</v></c></row>',
+    '<si><t>J\nK</t></si><si><t>J_x000a_K</t></si>');
+  await assert.rejects(streamLinkedRowsToInsert(middle, linked, () => {}, undefined, { keyField: 'BizId' }),
+    (error) => error.message.startsWith('源文件第 3 行「BizId」列（交易标识）含 Excel 文本转义'), '转义在中间');
+  const plainKeys = [];
+  const keyFree = await build('key-free', '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c></row>',
+    '<si><t>J\nK</t></si><si><t>note_x000D_</t></si>');
+  await streamLinkedRowsToInsert(keyFree, linked, (row) => plainKeys.push([row.BizId, row['备注']]), undefined, { keyField: 'BizId' });
+  assert.deepEqual(plainKeys, [['J\nK', 'note']], '键列不含转义时照常导入，其余列照常还原');
+
+  // 表头格还原出的空白落在首尾：不认作表头（流式导入、表头识别一致），ExcelJS 写出的字面「BizId_x000d_」不是「BizId」列（第十八轮 P1）
+  const { readMeaningfulRowsHead, UNVERIFIABLE_CELL_TEXT } = require('../../../../src/backend/file-service/readers');
+  const edgeHeader = await build('edge-header', '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c></row>',
+    '<si><t>ROW1</t></si><si><t>n</t></si>');
+  const edgeHeaderZip = await JSZip.loadAsync(fs.readFileSync(edgeHeader));
+  edgeHeaderZip.file('xl/sharedStrings.xml', (await edgeHeaderZip.file('xl/sharedStrings.xml').async('string')).replace('<si><t>BizId</t></si>', '<si><t>BizId_x000d_</t></si>'));
+  fs.writeFileSync(edgeHeader, await edgeHeaderZip.generateAsync({ type: 'nodebuffer' }));
+  assert.deepEqual(await streamLinkedRowsToInsert(edgeHeader, linked, () => {}, undefined, { keyField: 'BizId' }), { matched: false });
+  assert.deepEqual((await readMeaningfulRowsHead(edgeHeader, 5, { decodeTextEscapes: true })).rows[0], [UNVERIFIABLE_CELL_TEXT, '备注']);
   const unkeyed = [];
   await streamLinkedRowsToInsert(edgeFile, linked, (row) => unkeyed.push(row));
   assert.deepEqual(unkeyed.map((row) => [row.BizId, row['备注']]), [['TX', 'note'], ['TX\u0001', 'a\r\nb']]);

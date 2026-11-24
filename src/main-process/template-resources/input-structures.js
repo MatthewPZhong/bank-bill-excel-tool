@@ -92,6 +92,17 @@ async function reconIdFixRuntimeHeaders(filePath) {
 
 // 银行账单处理链接表：与导入相同的两种读法——单表 .xlsx 走流式头部读取，其余走 SheetJS 全量读取。
 //   两种读法对布尔等表头读出的文本不同，任一与快照不一致都会在预检中被拒。返回第 headerRow 个有内容的行。
+// 物理单表的 .xlsx：链接表导入时走流式读取（与识别器 streamingEligible 同口径）；元数据读不出时识别器回退非流式读取
+async function isStreamingImportXlsx(filePath) {
+  const { readXlsxSheetMetaLite } = require('../../backend/file-service/readers');
+  try {
+    const meta = await readXlsxSheetMetaLite(filePath);
+    return meta.worksheetEntryCount === 1 && meta.sheetNames.length === 1;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function linkedRuntimeHeaders(headerRow) {
   return async (filePath) => {
     const { readRowsWithMetadata, readMeaningfulRowsHead, UNVERIFIABLE_CELL_TEXT } = require('../../backend/file-service/readers');
@@ -105,7 +116,11 @@ function linkedRuntimeHeaders(headerRow) {
     let streamed = sheetJs;
     try {
       streamed = pick((await readMeaningfulRowsHead(filePath, headerRow + 20, { decodeTextEscapes: true })).rows);
-    } catch (_error) { /* 非单表 xlsx：导入时不走流式读取 */ }
+    } catch (error) {
+      // 非单表 xlsx：导入时不走流式读取。单表 .xlsx 导入时走流式读取，读取失败（如唯一的工作表不在 sheet1.xml）时导入同样
+      //   失败，预检不通过（Codex 第十八轮 P2）
+      if (await isStreamingImportXlsx(filePath)) throw error;
+    }
     if (JSON.stringify(streamed) === JSON.stringify(sheetJs)) return [sheetJs];
     // 两种读法结果不同：导入文件格式不同时读出的列名不同，不一致的列标出两种结果（必与快照不同，预检不通过）。
     const width = Math.max(sheetJs.length, streamed.length);
@@ -177,18 +192,14 @@ function vccRuntimeHeaders(sourceType) {
 // 同一结构供入金链接表导入：单表 .xlsx 导入时走流式读取（还原 OOXML 文本转义，无法确认原值的格不认作表头，见
 //   linked-table-stream-source），读出首个有内容的行（去首尾空格）；多工作表等导入时不走流式的文件返回 null（Codex 第十七轮 P2）
 async function bankDepositStreamHeaderRow(filePath) {
-  const { readXlsxSheetMetaLite, readMeaningfulRowsHead } = require('../../backend/file-service/readers');
+  const { readMeaningfulRowsHead } = require('../../backend/file-service/readers');
   const { normalizeCell } = require('../../backend/file-service/common');
-  try {
-    const meta = await readXlsxSheetMetaLite(filePath);
-    if (meta.worksheetEntryCount !== 1 || meta.sheetNames.length !== 1) return null;
-    const { rows } = await readMeaningfulRowsHead(filePath, 21, { decodeTextEscapes: true });
-    const row = (rows[0] || []).map((cell) => normalizeCell(cell));
-    while (row.length && row[row.length - 1] === '') row.pop();
-    return row;
-  } catch (_error) {
-    return null;
-  }
+  if (!(await isStreamingImportXlsx(filePath))) return null;
+  // 导入时按单表走流式读取：读取失败（如唯一的工作表不在 sheet1.xml）时导入同样失败，原样抛出、预检不通过（Codex 第十八轮 P2）
+  const { rows } = await readMeaningfulRowsHead(filePath, 21, { decodeTextEscapes: true });
+  const row = (rows[0] || []).map((cell) => normalizeCell(cell));
+  while (row.length && row[row.length - 1] === '') row.pop();
+  return row;
 }
 
 // 银行对账单（导入识别结构）：readBankStatement（银行账单处理、前置资金对账、重复入账匹配）、平盘银行导入（流式）与入金链接表

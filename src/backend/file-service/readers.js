@@ -1775,7 +1775,8 @@ async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256, de
   const { truncated } = await readXlsxStreamed(
     filePath,
     (cells, _rowIdx, textInfo) => {
-      if (textInfo) textInfo.unverifiableColumns.forEach((index) => { cells[index] = UNVERIFIABLE_CELL_TEXT; });
+      // 还原出的首尾空白去掉后才与表头相等的格同样读成标记，不认作表头（与流式导入一致，Codex 第十八轮 P1）
+      if (textInfo) [...textInfo.unverifiableColumns, ...textInfo.trimSensitiveColumns].forEach((index) => { cells[index] = UNVERIFIABLE_CELL_TEXT; });
       const trimmed = trimTrailingEmptyCells(cells);
       if (isRowMeaningful(trimmed)) {
         rows.push(trimmed);
