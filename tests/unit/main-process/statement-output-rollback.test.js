@@ -347,3 +347,109 @@ test('文件系统不提供文件编号（ino 为 0）时按路径区分，不�
   assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
   assert.deepEqual([fs.readFileSync(first, 'utf8'), fs.readFileSync(second, 'utf8')], ['A-before', 'B-before']);
 });
+
+// ---------- 第四轮审查 ----------
+
+test('主路径在回滚前被另存替换、硬链接别名仍指向原文件：经别名写回原内容，主路径列入恢复清单', (t) => {
+  const { root, staging } = setup(t);
+  const seed = path.join(root, 'A.json');
+  const alias = path.join(root, 'B.json');
+  fs.writeFileSync(seed, 'before');
+  fs.linkSync(seed, alias);
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  journal.write(seed, writeText(seed, 'group-1'));
+  journal.write(alias, writeText(alias, 'group-2'));
+  fs.writeFileSync(`${seed}.tmp`, 'sync-client');
+  fs.renameSync(`${seed}.tmp`, seed);
+  const outcome = journal.rollback();
+  assert.deepEqual(outcome.failures.map((item) => [path.basename(item.filePath), item.reason]),
+    [['A.json', '写出后已被其他程序修改或替换，未自动处理']]);
+  assert.equal(fs.readFileSync(alias, 'utf8'), 'before', '经别名读到的是批前内容');
+  assert.equal(fs.readFileSync(seed, 'utf8'), 'sync-client');
+});
+
+test('写回时重新打开备份失败：不截断待还原的文件', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'detail.xlsx');
+  fs.writeFileSync(target, 'before');
+  let backupOpens = 0;
+  const fsImpl = { ...fs, openSync(filePath, flags, ...rest) {
+    if (path.basename(String(filePath)).endsWith('.bak') && flags === 'r') {
+      backupOpens += 1;
+      if (backupOpens === 2) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    }
+    return fs.openSync(filePath, flags, ...rest);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(target, writeText(target, 'batch-content'));
+  const outcome = journal.rollback();
+  assert.equal(backupOpens, 2, '前置：比较后第二次打开备份失败');
+  assert.equal(outcome.restored, false);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'batch-content', '未被清空');
+});
+
+test('写回期间路径被另存替换：不报已还原，保留备份', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'balance.xlsx');
+  fs.writeFileSync(target, 'before');
+  let swap = false;
+  const fsImpl = { ...fs, ftruncateSync(fd, length) {
+    fs.ftruncateSync(fd, length);
+    if (swap) {
+      swap = false;
+      fs.writeFileSync(`${target}.tmp`, 'sync-client');
+      fs.renameSync(`${target}.tmp`, target);
+    }
+  } };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(target, writeText(target, 'batch'));
+  swap = true;
+  const outcome = journal.rollback();
+  assert.equal(outcome.restored, false);
+  assert.deepEqual(outcome.failures.map((item) => item.reason), ['写出后已被其他程序修改或替换，未自动处理']);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'sync-client');
+  assert.equal(fs.readFileSync(path.join(outcome.backupDirectory, outcome.failures[0].backupName), 'utf8'), 'before');
+});
+
+test('写完后新输出已不在路径上：停止生成，不当作写成', (t) => {
+  const { root, staging } = setup(t);
+  const created = path.join(root, 'group-2.xlsx');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  assert.throws(() => journal.write(created, () => {
+    fs.writeFileSync(created, 'batch');
+    fs.renameSync(created, path.join(root, 'moved.xlsx'));
+  }), { code: 'STATEMENT_OUTPUT_CHANGED_EXTERNALLY' });
+  assert.equal(journal.rollback().restored, true);
+});
+
+test('写出记录：别名路径同样登记；登记失败时清掉刚做的备份', (t) => {
+  const { root, staging } = setup(t);
+  const seed = path.join(root, 'HSBC.json');
+  const alias = path.join(root, 'hsbc-alias.json');
+  fs.writeFileSync(seed, 'before');
+  fs.linkSync(seed, alias);
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  journal.write(seed, writeText(seed, 'group-1'));
+  journal.write(alias, writeText(alias, 'group-2'));
+  const [batchDir] = fs.readdirSync(staging);
+  assert.match(fs.readFileSync(path.join(staging, batchDir, RECORD_FILE_NAME), 'utf8'), /同一文件的别名路径：.*hsbc-alias\.json（原内容备份：001\.bak）/);
+  journal.commit();
+
+  const other = path.join(root, 'other.xlsx');
+  fs.writeFileSync(other, 'untouched');
+  let failAppend = false;
+  const fsImpl = { ...fs, appendFileSync(filePath, ...rest) {
+    if (failAppend) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+    return fs.appendFileSync(filePath, ...rest);
+  } };
+  const second = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  second.write(seed, writeText(seed, 'batch'));
+  failAppend = true;
+  assert.throws(() => second.write(other, writeText(other, 'never')), { code: 'ENOSPC' });
+  failAppend = false;
+  const [secondDir] = fs.readdirSync(staging);
+  assert.deepEqual(fs.readdirSync(path.join(staging, secondDir)).filter((name) => name.endsWith('.bak')), ['001.bak'],
+    '登记失败的文件不留备份');
+  assert.equal(fs.readFileSync(other, 'utf8'), 'untouched');
+  second.rollback();
+});

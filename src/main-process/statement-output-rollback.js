@@ -87,10 +87,11 @@ function sameContent(fsImpl, left, rightPath) {
   });
 }
 
-// 分块原地写回到已打开（不截断）并核对过身份的文件描述符：先截断再按位置写入，不换 dev + ino，不把整份文件读入内存
+// 分块原地写回到已打开（不截断）并核对过身份的文件描述符：备份成功打开后才截断（打开备份失败时不清空目标），
+//   再按位置写入，不换 dev + ino，不把整份文件读入内存
 function copyIntoDescriptor(fsImpl, fromPath, target) {
-  fsImpl.ftruncateSync(target, 0);
   withOpenFile(fsImpl, fromPath, 'r', (source) => {
+    fsImpl.ftruncateSync(target, 0);
     const buffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
     let position = 0;
     for (;;) {
@@ -175,7 +176,12 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     const known = byPath.get(resolved) || (stat && byFile.get(fileKeyOf(stat, resolved)));
     if (known) {
       byPath.set(resolved, known);
-      known.paths.add(resolved);
+      if (!known.paths.has(resolved)) {
+        known.paths.add(resolved);
+        // 别名同样登记到写出记录（恢复清单写不出时以写出记录代替，须能找到经别名写过的路径）
+        fsImpl.appendFileSync(path.join(ensureBackupDirectory(), RECORD_FILE_NAME), `   同一文件的别名路径：${resolved}${
+          known.backupName ? `（原内容备份：${known.backupName}）` : ''}\n`, 'utf8');
+      }
       // 本批上次写完后被其他程序替换或修改：不再写入，回滚时按写完后被改动处理
       if (known.writtenIdentity && identityOf(stat) !== known.writtenIdentity) throw changedExternallyError(resolved);
       return { entry: known, resolved, stat };
@@ -197,8 +203,20 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       entry.backupName = `${String(entries.length + 1).padStart(3, '0')}.bak`;
       fsImpl.copyFileSync(resolved, path.join(directory, entry.backupName));
     }
-    fsImpl.appendFileSync(path.join(directory, RECORD_FILE_NAME), `${entries.length + 1}. ${resolved}\n${
-      entry.existed ? `   原有文件，原内容备份：${entry.backupName}` : '   本次新建的文件（导入前不存在）'}\n`, 'utf8');
+    try {
+      fsImpl.appendFileSync(path.join(directory, RECORD_FILE_NAME), `${entries.length + 1}. ${resolved}\n${
+        entry.existed ? `   原有文件，原内容备份：${entry.backupName}` : '   本次新建的文件（导入前不存在）'}\n`, 'utf8');
+    } catch (error) {
+      // 登记失败时该文件还没被改写、也不归写出记录管理：清掉刚做的备份，不在批次目录里留下无关账单
+      if (entry.backupName) {
+        try {
+          fsImpl.rmSync(path.join(directory, entry.backupName), { force: true });
+        } catch (_cleanupError) {
+          // 尽力而为
+        }
+      }
+      throw error;
+    }
     entries.push(entry);
     byPath.set(resolved, entry);
     if (stat) byFile.set(fileKeyOf(stat, resolved), entry);
@@ -219,6 +237,8 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       entry.replacedWhileWriting = true;
       throw changedExternallyError(resolved);
     }
+    // 写完后路径上没有普通文件（被其他程序移走等）：本批没有可交付的输出（后续合并会跳过缺失的分组文件），停止生成
+    if (!written || !written.isFile()) throw changedExternallyError(resolved);
     entry.writtenIdentity = identityOf(written);
     if (!entry.ownedFileKey) entry.ownedFileKey = fileKeyOf(written, resolved);
     if (written) byFile.set(entry.ownedFileKey, entry);
@@ -252,24 +272,28 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
 
   // 原有文件写回：先只读打开比较内容（一致时不写回：被 Excel 占用、写出时根本没打开的文件，写回会再次撞上占用）；
   //   需要写回时以不截断方式打开，在同一描述符上核对身份后再截断、写回，核对与写回针对同一个文件
-  function restoreExisting(entry) {
+  //   写回后再核对路径仍指向写回的文件（写回期间被另存替换时，备份写进了已脱离路径的旧文件，不算还原）。
+  //   targetPath 为经哪个路径写回（主路径被替换时经仍指向原文件的别名写回）
+  function restoreExisting(entry, targetPath = entry.filePath) {
     const backupPath = path.join(backupDirectory, entry.backupName);
-    const readProblem = withOpenFile(fsImpl, entry.filePath, 'r', (fd) => {
+    const readProblem = withOpenFile(fsImpl, targetPath, 'r', (fd) => {
       const current = fsImpl.fstatSync(fd, { bigint: true });
       if (!current.isFile()) return { reason: FAILURE_REASONS.NOT_REGULAR_FILE };
       const problem = ownershipProblem(entry, current);
       if (problem) return { reason: problem };
-      return sameContent(fsImpl, fd, backupPath) ? { done: true } : { key: fileKeyOf(current, entry.filePath) };
+      return sameContent(fsImpl, fd, backupPath) ? { done: true } : { key: fileKeyOf(current, targetPath) };
     });
     if (readProblem.reason || readProblem.done) return readProblem.reason || null;
-    return withOpenFile(fsImpl, entry.filePath, 'r+', (fd) => {
+    return withOpenFile(fsImpl, targetPath, 'r+', (fd) => {
       const current = fsImpl.fstatSync(fd, { bigint: true });
       if (!current.isFile()) return FAILURE_REASONS.NOT_REGULAR_FILE;
-      if (fileKeyOf(current, entry.filePath) !== readProblem.key) return FAILURE_REASONS.CHANGED_EXTERNALLY;
+      if (fileKeyOf(current, targetPath) !== readProblem.key) return FAILURE_REASONS.CHANGED_EXTERNALLY;
       const problem = ownershipProblem(entry, current);
       if (problem) return problem;
       copyIntoDescriptor(fsImpl, backupPath, fd);
-      return null;
+      return fileKeyOf(lstatOrNull(fsImpl, targetPath), targetPath) === readProblem.key
+        ? null
+        : FAILURE_REASONS.CHANGED_EXTERNALLY;
     });
   }
 
@@ -277,6 +301,8 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   function restore(entry) {
     const failure = (reason, filePath = entry.filePath) => ({ filePath, existed: entry.existed, backupName: entry.backupName, reason });
     const failures = [];
+    // 原有文件的内容是否已写回（经主路径或仍指向原文件的别名）
+    let originalRestored = !entry.existed;
     try {
       const current = lstatOrNull(fsImpl, entry.filePath);
       if (current && !current.isFile()) {
@@ -284,6 +310,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       } else if (entry.existed && current) {
         const reason = restoreExisting(entry);
         if (reason) failures.push(failure(reason));
+        else originalRestored = true;
       } else {
         const problem = ownershipProblem(entry, current);
         if (problem) failures.push(failure(problem));
@@ -294,13 +321,20 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
         ? FAILURE_REASONS.MISSING
         : `系统错误 ${error && error.code ? error.code : (error && error.message) || String(error)}`));
     }
-    // 经别名路径写过的同一文件：别名已指向另一个文件（被其他程序另存替换等）时，该路径未还原，列入恢复清单
+    // 经别名路径写过的同一文件：别名已指向另一个文件（被其他程序另存替换等）时，该路径未还原，列入恢复清单。
+    //   主路径没能写回、别名仍指向原文件时经别名写回一次（否则之后经别名读到的仍是失败批次的内容）
     for (const aliasPath of entry.paths) {
       if (aliasPath === entry.filePath) continue;
       try {
         const aliased = lstatOrNull(fsImpl, aliasPath);
         const stillOwned = aliased ? fileKeyOf(aliased, aliasPath) === entry.ownedFileKey : !entry.existed;
-        if (!stillOwned) failures.push(failure(FAILURE_REASONS.CHANGED_EXTERNALLY, aliasPath));
+        if (!stillOwned) {
+          failures.push(failure(aliased ? FAILURE_REASONS.CHANGED_EXTERNALLY : FAILURE_REASONS.MISSING, aliasPath));
+        } else if (!originalRestored && aliased) {
+          const reason = restoreExisting(entry, aliasPath);
+          if (reason) failures.push(failure(reason, aliasPath));
+          else originalRestored = true;
+        }
       } catch (error) {
         failures.push(failure(`系统错误 ${error && error.code ? error.code : String(error)}`, aliasPath));
       }
