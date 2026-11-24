@@ -23,6 +23,7 @@ const {
   hashFileSha256Async
 } = require('../../main-process/position-reconciliation/input-staging');
 const { parseSourceFields } = require('../../main-process/position-reconciliation/source-row-storage');
+const { excelSerialOfSheetJsDate } = require('./xlsx-reader');
 
 const EXCEL_MAX_ROWS = 1048576;
 const REPORT_ARTIFACT_KEY = 'source-import-anomaly-report';
@@ -103,27 +104,27 @@ function reasonSummary(value) {
     .join('；');
 }
 
-// 读取器按本地时间解释 Excel 日期序号（2026-07-20 01:30 的单元格读成本地 01:30 的 Date），
-// ExcelJS 写出时却按 UTC 时刻换算序号：直接写会偏移一个时区，东八区的 01:30 会落到前一天 17:30。
-// 写出前把本地的年月日时分秒搬到 UTC 上，报告里的日期时间与来源单元格一致。只用于写报告，不改变导入解析口径。
-function excelWallClockDate(value) {
+// 把读取器给出的 Date 写回报告。ExcelJS 按 UTC 时刻换算日期序号，而读取器给出的是本地时刻，
+// 且带有读取器（SheetJS 口径）在部分时区的秒级偏差：既不能直接写（东八区会偏移 8 小时），
+// 也不能把本地年月日时分秒搬到 UTC（上海的月初 00:00:00 已被读成上月末 23:59:17，照搬仍然跨月）。
+// 先还原来源单元格的日期序号，再换成 ExcelJS 写出同一序号的 Date。只用于写报告，不改变导入解析口径。
+const EXCEL_EPOCH_SERIAL_OF_UNIX_EPOCH = 25569;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function excelReportDate(value) {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) return value;
-  return new Date(Date.UTC(
-    value.getFullYear(),
-    value.getMonth(),
-    value.getDate(),
-    value.getHours(),
-    value.getMinutes(),
-    value.getSeconds(),
-    value.getMilliseconds()
-  ));
+  const serial = excelSerialOfSheetJsDate(value);
+  return new Date(Math.round((serial - EXCEL_EPOCH_SERIAL_OF_UNIX_EPOCH) * DAY_MS));
 }
 
+// 标识类列一律写成文本（与审计列「业务单号」「对账 ID」同一份文本，便于逐列核对），
+// 即使来源单元格被 Excel 识别成了日期；日期换算只用于其余列。
 function excelValueForHeader(header, value) {
   const normalized = value ?? '';
-  if (normalized instanceof Date) return excelWallClockDate(normalized);
-  if (normalized === '' || !TEXT_HEADER_PATTERN.test(String(header))) return normalized;
-  return { richText: [{ text: String(normalized) }] };
+  if (normalized === '') return normalized;
+  if (TEXT_HEADER_PATTERN.test(String(header))) return { richText: [{ text: String(normalized) }] };
+  if (normalized instanceof Date) return excelReportDate(normalized);
+  return normalized;
 }
 
 // 过滤明细列：过滤信息 + 该来源保存下来的必用列。
@@ -326,8 +327,8 @@ module.exports = {
   TEXT_HEADER_PATTERN,
   createFilteredPayloadTable,
   detailHeadersFor,
+  excelReportDate,
   excelValueForHeader,
-  excelWallClockDate,
   reportDetailValues,
   writePositionAnomalyReport
 };

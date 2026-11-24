@@ -1784,7 +1784,7 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
     }
   });
 
-  test('来源记录标识、相等判断与落库对日期单元格用同一套表示；异常报告写出日期而不是内部标记', async (t) => {
+  test('来源记录标识、相等判断与落库对日期单元格用同一套表示', () => {
     const date = new Date(Date.UTC(2026, 6, 20, 3, 4, 5));
     const asDate = { 调拨单号: 'FT-1', 交易时间: date };
     const asText = { 调拨单号: 'FT-1', 交易时间: date.toISOString() };
@@ -1797,61 +1797,92 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
     assert.equal(sameSourceFields(JSON.parse(serializeSourceFields(asDate)), asDate), true);
     // 不含日期的行标识不变（仍是字段对象的稳定摘要）。
     assert.equal(sourceRecordKeyOf({ a: '1', b: 2 }), stableHash({ a: '1', b: 2 }));
-
-    const dir = tempDir(t, 'position-source-report-date-');
-    const side = createSideDb(dir);
-    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const file = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [
-      { ...base, 调拨单号: 'FT-DATE', 调拨状态: '处理中', 付款金额: '', 交易时间: new Date(2026, 6, 20, 1, 30) }
-    ]);
-    // 来源单元格的日期序号（与时区无关的原值）。
-    const sourceSheet = XLSX.readFile(file)
-      .Sheets[`${SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].sourceName}-数据`];
-    const sourceHeaderRow = XLSX.utils.sheet_to_json(sourceSheet, { header: 1, raw: true });
-    const sourceSerial = sourceHeaderRow[1][sourceHeaderRow[0].indexOf('交易时间')];
-    assert.equal(typeof sourceSerial, 'number');
-    const { result } = await importSources({ dir, files: [file], ...side, jobId: 'report-date-job' });
-    assert.equal(result.results[0].filteredRowCount, 1, JSON.stringify(result.results[0]));
-    const workbook = XLSX.readFile(result.anomalyReport.filePath, { cellDates: true });
-    const detail = XLSX.utils.sheet_to_json(workbook.Sheets['调拨异常明细'], { header: 1, raw: true });
-    const column = detail[0].indexOf('交易时间');
-    assert.ok(column >= 0);
-    const cell = detail[1][column];
-    assert.ok(cell instanceof Date, `交易时间应写成日期，实际：${JSON.stringify(cell)}`);
-    assert.equal(JSON.stringify(detail).includes('__position_reconciliation_type__'), false);
-    // 报告里的日期序号与来源单元格相同：不因读取按本地时间、写出按 UTC 而偏移一个时区。
-    const rawDetail = XLSX.utils.sheet_to_json(
-      XLSX.readFile(result.anomalyReport.filePath).Sheets['调拨异常明细'],
-      { header: 1, raw: true }
-    );
-    assert.ok(
-      Math.abs(rawDetail[1][column] - sourceSerial) < 1e-6,
-      `报告序号 ${rawDetail[1][column]} 应等于来源序号 ${sourceSerial}`
-    );
   });
 
-  test('异常报告日期在非 UTC 时区保留来源的日历日期与时间（固定东八区验证）', () => {
-    // 本机或 CI 是 UTC 时上面的往返断言恒成立，这里在子进程里固定时区验证换算本身。
-    const script = `
-      const { excelValueForHeader } = require(${JSON.stringify(
-        path.resolve(__dirname, '../../../src/backend/position-reconciliation-import/anomaly-report.js')
-      )});
-      const local = new Date(2026, 6, 20, 1, 30, 15);
-      process.stdout.write(JSON.stringify({
-        offset: local.getTimezoneOffset(),
-        written: excelValueForHeader('交易时间', local).toISOString(),
-        text: excelValueForHeader('备注', 'x')
-      }));
-    `;
-    const child = spawnSync(process.execPath, ['-e', script], {
-      env: { ...process.env, TZ: 'Asia/Shanghai' },
+  // 来源工作簿里的日期按数值序号 + 日期格式写入（Excel 的实际存法），不经 SheetJS 的 Date 换算。
+  function fundTransferFileWithCells(dir, name, row, cells) {
+    const definition = SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER];
+    const sheet = XLSX.utils.aoa_to_sheet([
+      definition.headers,
+      definition.headers.map((header) => row[header] ?? '')
+    ]);
+    for (const [header, cell] of Object.entries(cells)) {
+      sheet[XLSX.utils.encode_cell({ r: 1, c: definition.headers.indexOf(header) })] = cell;
+    }
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, `${definition.sourceName}-数据`);
+    const filePath = path.join(dir, name);
+    XLSX.writeFile(workbook, filePath);
+    return filePath;
+  }
+
+  function reportDetail(reportPath, options = {}) {
+    const rows = XLSX.utils.sheet_to_json(
+      XLSX.readFile(reportPath, options).Sheets['调拨异常明细'],
+      { header: 1, raw: true }
+    );
+    return { headers: rows[0], row: rows[1] };
+  }
+
+  const REPORT_DATE_ROUND_TRIP = '异常报告的日期与来源单元格的日期序号一致；标识列即使被识别成日期也写成与审计列相同的文本';
+
+  test(REPORT_DATE_ROUND_TRIP, async (t) => {
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const filtered = { ...base, 调拨状态: '处理中', 付款金额: '' };
+    // 月初 00:00:00 与带时分的两个序号：前者在上海时区会被读取器读成上月末 23:59:17。
+    for (const [index, serial] of [46204, 46223.0625].entries()) {
+      const dir = tempDir(t, `position-source-report-date-${index}-`);
+      const side = createSideDb(dir);
+      const file = fundTransferFileWithCells(dir, `date-${index}.xlsx`, { ...filtered, 调拨单号: `FT-DATE-${index}` }, {
+        交易时间: { t: 'n', v: serial, z: 'yyyy-mm-dd hh:mm:ss' }
+      });
+      const { result } = await importSources({ dir, files: [file], ...side, jobId: `report-date-job-${index}` });
+      assert.equal(result.results[0].filteredRowCount, 1, JSON.stringify(result.results[0]));
+      const typed = reportDetail(result.anomalyReport.filePath, { cellDates: true });
+      const column = typed.headers.indexOf('交易时间');
+      assert.ok(column >= 0);
+      assert.ok(typed.row[column] instanceof Date, `交易时间应写成日期，实际：${JSON.stringify(typed.row[column])}`);
+      assert.equal(JSON.stringify(typed.row).includes('__position_reconciliation_type__'), false);
+      const raw = reportDetail(result.anomalyReport.filePath);
+      assert.ok(
+        Math.abs(raw.row[column] - serial) < 1e-7,
+        `报告序号 ${raw.row[column]} 应等于来源序号 ${serial}`
+      );
+    }
+
+    // 「调拨单号」被 Excel 识别成日期：明细里的单号与审计列「业务单号」必须是同一份文本。
+    const dir = tempDir(t, 'position-source-report-date-key-');
+    const side = createSideDb(dir);
+    const file = fundTransferFileWithCells(dir, 'date-key.xlsx', filtered, {
+      调拨单号: { t: 'n', v: 46223, z: 'yyyy-mm-dd' }
+    });
+    const { result } = await importSources({ dir, files: [file], ...side, jobId: 'report-date-key-job' });
+    assert.equal(result.results[0].filteredRowCount, 1, JSON.stringify(result.results[0]));
+    const detail = reportDetail(result.anomalyReport.filePath);
+    const keyCell = detail.row[detail.headers.indexOf('调拨单号')];
+    const auditCell = detail.row[detail.headers.indexOf('业务单号')];
+    assert.equal(typeof keyCell, 'string');
+    assert.equal(keyCell, auditCell);
+    assert.notEqual(keyCell, '');
+  });
+
+  test('异常报告日期往返在上海时区同样成立（读取器在该时区有 43 秒的历史偏差）', () => {
+    // 默认时区下上面的断言可能恒成立：固定时区在子进程里把同一条用例完整再跑一遍。
+    if (process.env.POSITION_REPORT_DATE_TZ_CHILD === '1') return;
+    const child = spawnSync(process.execPath, [
+      '--test', `--test-name-pattern=${REPORT_DATE_ROUND_TRIP}`, __filename
+    ], {
+      // 去掉测试运行器传给子进程的上下文标记，让它作为独立的一次测试运行并正常输出结果。
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'NODE_TEST_CONTEXT')),
+        TZ: 'Asia/Shanghai',
+        POSITION_REPORT_DATE_TZ_CHILD: '1'
+      },
       encoding: 'utf8'
     });
-    assert.equal(child.status, 0, child.stderr);
-    const output = JSON.parse(child.stdout);
-    if (output.offset !== -480) return; // 运行环境不支持按 TZ 切换时区时无法验证
-    assert.equal(output.written, '2026-07-20T01:30:15.000Z');
-    assert.equal(output.text, 'x');
+    assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
+    assert.match(child.stdout, /ℹ pass 1\b/);
+    assert.match(child.stdout, /ℹ fail 0\b/);
   });
 
   test('单遍导入的磁盘门禁按暂存文件大小估算行数据与 WAL 增长，空间不足时在写库前拒绝', async (t) => {

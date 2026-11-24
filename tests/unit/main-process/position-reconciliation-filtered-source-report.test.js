@@ -33,7 +33,7 @@ const {
   createPositionReconciliationStore,
 } = require('../../../src/main-process/position-reconciliation/store');
 
-async function writeReport(filePath, { detailCount = 1 } = {}) {
+async function writeReport(filePath, { detailCount = 1, tradeTime = '2026-07-20' } = {}) {
   const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: filePath });
   const summary = workbook.addWorksheet('异常汇总');
   summary.addRow(['文件名', '来源类型', '过滤行数']).commit();
@@ -47,7 +47,7 @@ async function writeReport(filePath, { detailCount = 1 } = {}) {
     调拨单号: '123456789012345678901234567890',
     调拨状态: '付款失败',
     渠道流水号: 'RID-FILTERED-REPORT-1',
-    交易时间: '2026-07-20',
+    交易时间: tradeTime,
     付款金额: '',
     付款币种: 'USD',
     收款金额: '95',
@@ -136,6 +136,36 @@ test('异常报告按 SHA 校验、同字节导出并按运行冻结记录合并
     styledWorkbook.getWorksheet('调拨过滤数据').getCell('M2').value,
     { richText: [{ text: '123456789012345678901234567890' }] }
   );
+});
+
+test('运行过滤数据导出保留异常报告里日期单元格的序号', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-filtered-report-date-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const reportPath = path.join(dir, 'report.xlsx');
+  // 报告里的交易时间是日期单元格：序号 46204（2026-07-01 00:00:00）。
+  await writeReport(reportPath, { tradeTime: new Date(Date.UTC(2026, 6, 1)) });
+  const sourceDetail = XLSX.utils.sheet_to_json(XLSX.readFile(reportPath).Sheets['调拨异常明细'], { raw: true });
+  assert.equal(sourceDetail[0].交易时间, 46204);
+  const evidence = await hashFileSha256Async(reportPath);
+  const runOutput = path.join(dir, 'run-filtered.xlsx');
+  await writeRunFilteredSourcesWorkbook({
+    outputPath: runOutput,
+    run: { id: 13, scope: { channels: ['DBS'], months: ['2026-07'] } },
+    filteredSources: [{
+      reportRowKey: 'report-row-1',
+      sourceType: SOURCE_TYPES.FUND_TRANSFER,
+      sourceRevision: 3,
+      reportKey: 'report-date',
+      reportFileName: 'report.xlsx',
+      reportSha256: evidence.sha256
+    }],
+    reportFiles: [{
+      filePath: reportPath, reportKey: 'report-date', sha256: evidence.sha256, sizeBytes: evidence.sizeBytes
+    }]
+  });
+  const detail = XLSX.utils.sheet_to_json(XLSX.readFile(runOutput).Sheets['调拨过滤数据'], { raw: true });
+  // 读取按本地时间、写出按 UTC：不还原序号的话会偏移一个时区（并带上读取器在部分时区的秒级偏差）。
+  assert.ok(Math.abs(detail[0].交易时间 - 46204) < 1e-7, `实际：${detail[0].交易时间}`);
 });
 
 test('文件级分片与批次报告重叠时只从墓碑冻结的报告读取一次', async (t) => {

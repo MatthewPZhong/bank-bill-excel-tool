@@ -362,6 +362,26 @@ function sheetJsSerialDate(value) {
   return output;
 }
 
+// sheetJsSerialDate 的逆运算：由读取器给出的 Date 还原来源单元格的日期序号。
+// 读取器沿用 SheetJS 的换算（导入解析口径，不改）：它用 1899 年的本地偏移推算基准，而部分时区当年用的是
+// 带秒的地方时（上海为 +8:05:43），于是 2026-07-01 00:00:00 的单元格读成本地 2026-06-30 23:59:17。
+// 需要把日期原样写回 Excel 时不能取这个 Date 的年月日时分秒，要先还原成序号。
+// 有夏令时的时区里，落在「拨快一小时」那个不存在的本地小时内的两个序号会被读取器读成同一时刻，
+// 这类单元格无法区分，还原出其中靠前的一个；其余时刻精确还原（误差不超过 1 毫秒）。
+function excelSerialOfSheetJsDate(date) {
+  const time = date.getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const offset = date.getTimezoneOffset();
+  const candidates = offset === REFERENCE_OFFSET
+    ? [time]
+    : [time - (offset - REFERENCE_OFFSET) * 60000, time];
+  for (const candidate of candidates) {
+    const serial = (candidate - DATE_THRESHOLD) / dayMs;
+    if (Math.abs(sheetJsSerialDate(serial).getTime() - time) <= 1) return serial;
+  }
+  return (candidates[0] - DATE_THRESHOLD) / dayMs;
+}
+
 function sheetJsCompatibleCellValue(cell) {
   if (!cell || cell.cellType === 'blank' || cell.cellType === 'error') return '';
   if (cell.cellType === 'text') {
@@ -494,6 +514,7 @@ module.exports = {
   openPositionWorkbook,
   locatePositionBusinessSheet,
   readPhysicalHeader,
+  excelSerialOfSheetJsDate,
   sheetJsCompatibleCellValue,
   sheetJsSerialDate,
   streamPositionXlsxRows,
