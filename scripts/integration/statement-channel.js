@@ -2407,11 +2407,14 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     `Step20b.已完整还原的系统异常${logFails ? '（写日志失败）' : ''}：按未生效的导入返回，不清空上一批的导出缓存、不替换上一批的报错文件`);
     assertTrue(/已还原为导入前的状态/.test(restored.result.message), `Step20b.提示已还原：${restored.result.message}`);
   }
-  const selectionRestored = await runSelectionExecute(busy);
-  assertEq([selectionRestored.result.status, selectionRestored.result.preservesSession, selectionRestored.result.errorCode,
-    selectionRestored.result.errorReportReady, selectionRestored.cleared, selectionRestored.report],
-  ['error', true, 'BIG_ACCOUNT_SELECTION_RUNTIME', false, false, previousReport],
-  'Step20b.完成大账号选择后执行期写出失败、已完整还原：同样按未生效的导入返回，保留上一批的导出缓存与报错文件');
+  // 单模板（会话准备处）与多模板（多模板分组生成处，Codex 第十五轮）两条分支
+  for (const multiTemplate of [false, true]) {
+    const selectionRestored = await runSelectionExecute(busy, { multiTemplate });
+    assertEq([selectionRestored.result.status, selectionRestored.result.preservesSession, selectionRestored.result.errorCode,
+      selectionRestored.result.errorReportReady, selectionRestored.cleared, selectionRestored.report],
+    ['error', true, 'BIG_ACCOUNT_SELECTION_RUNTIME', false, false, previousReport],
+    `Step20b.完成大账号选择后${multiTemplate ? '多模板生成' : ''}执行期写出失败、已完整还原：同样按未生效的导入返回，保留上一批的导出缓存与报错文件`);
+  }
   const plain = await runExecute(Object.assign(new Error('EBUSY'), { code: 'EBUSY' }));
   assertEq([plain.result.preservesSession, plain.cleared], [undefined, true], 'Step20b.未经回滚的异常仍按失败的导入清空');
   const business = await runExecute(failedError(new FileValidationError('FILE_READ', '合并失败', { detailLines: ['明细'] })).error);
@@ -2446,9 +2449,11 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     const reports = files.filter((file) => file.relative.startsWith('error-reports') && file.relative.endsWith('.txt'));
     const logs = files.filter((file) => file.relative.startsWith('logs'));
     const leaked = files.filter((file) => file.relative.includes('6222020200012345678') || file.text.includes('6222020200012345678'));
-    assertTrue(reports.length === 1 && logs.length >= 1 && leaked.length === 0
-      && reports.every((file) => `${file.relative}\n${file.text}`.includes('按文件名映射模板')),
-    `Step20b.${label}：落盘的报错文件与日志不含真实模板名，报错文件用固定名称：${JSON.stringify(files.map((file) => [file.relative, file.text.slice(0, 160)]))}`);
+    assertTrue(reports.length === 1 && logs.length >= 1 && leaked.length === 0,
+      `Step20b.${label}：落盘的报错文件与日志不含真实模板名：${JSON.stringify(files.map((file) => [file.relative, file.text.slice(0, 160)]))}`);
+    // 命名契约单独核对：报错文件名用固定名称（正文的上下文本来就含该名称，Codex 第十五轮）
+    assertTrue(reports.every((file) => path.basename(file.relative).includes('按文件名映射模板')),
+      `Step20b.${label}：报错文件名用固定模板名：${reports.map((file) => path.basename(file.relative)).join('、')}`);
   };
   for (const [label, thrown, expected] of [['还原不完整', incompleteError, '未能自动还原'], ['导出位置不安全', unsafeError, '无法安全覆盖'],
     ['组内业务校验失败', groupError, '同时有值'], ['系统异常', Object.assign(new Error('EIO'), { code: 'EIO' }), '文件转换错误']]) {

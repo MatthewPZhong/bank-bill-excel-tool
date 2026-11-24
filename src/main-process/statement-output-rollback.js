@@ -62,21 +62,35 @@ function identityOf(stat) {
 // 文件对象（不含内容）：同一文件经不同路径写入时据此合并，写出回调抛错时据此判断路径上是否还是本批写过的文件。
 //   文件系统不提供文件编号（ino 为 0，与 balance-seed-store.js getBalanceSeedFileIdentity 同一回退）时按系统解析出的
 //   真实路径区分（realpathSync.native：不区分大小写的卷上还原磁盘上的实际大小写、Windows 短文件名还原为长文件名、
-//   解析链接），不把同卷所有文件当成同一个，也不把同一文件的大小写别名当成两个（Codex 第五轮）；解析失败时退回字面路径
+//   解析链接），不把同卷所有文件当成同一个，也不把同一文件的大小写别名当成两个（Codex 第五轮）。解析失败时退回字面路径，
+//   键标为未确认（path?:）：未确认的键与其他键不算「已确认是另一个文件」，写后与回滚时再解析，不把一次解析失败当成文件被
+//   替换（Codex 第十五轮）
+const UNCONFIRMED_PATH_KEY_PREFIX = 'path?:';
 function canonicalPathOf(fsImpl, filePath) {
   const resolved = path.resolve(String(filePath));
   const realpath = fsImpl.realpathSync && (fsImpl.realpathSync.native || fsImpl.realpathSync);
-  if (typeof realpath !== 'function') return resolved;
+  if (typeof realpath !== 'function') return { path: resolved, confirmed: true };
   try {
-    return path.resolve(realpath(resolved));
+    return { path: path.resolve(realpath(resolved)), confirmed: true };
   } catch (_error) {
-    return resolved;
+    return { path: resolved, confirmed: false };
   }
 }
 
 function fileKeyOf(stat, filePath, fsImpl) {
   if (!stat) return null;
-  return stat.ino ? `${stat.dev}:${stat.ino}` : `path:${canonicalPathOf(fsImpl, filePath)}`;
+  if (stat.ino) return `${stat.dev}:${stat.ino}`;
+  const canonical = canonicalPathOf(fsImpl, filePath);
+  return `${canonical.confirmed ? 'path:' : UNCONFIRMED_PATH_KEY_PREFIX}${canonical.path}`;
+}
+
+function isUnconfirmedFileKey(key) {
+  return typeof key === 'string' && key.startsWith(UNCONFIRMED_PATH_KEY_PREFIX);
+}
+
+// 两个键是否已确认指向不同的文件：任一键未确认（真实路径解析失败）时不下结论
+function confirmedDifferentFiles(left, right) {
+  return left !== right && !isUnconfirmedFileKey(left) && !isUnconfirmedFileKey(right);
 }
 
 function withOpenFile(fsImpl, filePath, flags, use) {
@@ -137,7 +151,12 @@ function copyIntoDescriptor(fsImpl, fromPath, target, expectedSize) {
         return true;
       }
       let written = 0;
-      while (written < read) written += fsImpl.writeSync(target, buffer, written, read - written, position + written);
+      while (written < read) {
+        const count = fsImpl.writeSync(target, buffer, written, read - written, position + written);
+        // 非空写入返回 0：文件系统不再前进，立即报错，由还原失败分支保留备份并继续处理其余文件（Codex 第十五轮）
+        if (!count) throw Object.assign(new Error('写回原内容时文件系统没有写入任何字节'), { code: 'STATEMENT_RESTORE_NO_PROGRESS' });
+        written += count;
+      }
       position += read;
     }
   });
@@ -179,12 +198,18 @@ function buildRollbackIncompleteError(error, { failures, backupDirectory, manife
     : (path.basename(manifestPath) === RECORD_FILE_NAME
       ? `恢复清单未能写出，请按写出记录逐个核对（记录列出本批全部写入尝试，不是失败清单）：${manifestPath}`
       : `恢复清单：${manifestPath}`);
+  // 操作指引与实际可用的恢复文件一致：正式清单、写出记录，或两者都写不出时只剩备份目录（Codex 第十五轮）
+  const guide = !manifestPath
+    ? '恢复清单与写出记录都未能写出，请到原内容备份目录人工核对处理后再重新导入'
+    : (path.basename(manifestPath) === RECORD_FILE_NAME
+      ? '请按写出记录逐个核对、人工处理后再重新导入'
+      : '请按恢复清单逐项核对、人工处理后再重新导入');
   const business = error instanceof FileValidationError;
   // 数量与清单位置同时放进消息：界面状态框只显示消息（清单在系统临时目录，路径不含账号）。只说未能自动还原的位置数，
   //   不说「已写出」：归属待核对的路径不一定是本批写出的，由清单逐项说明（spec D5、D7，Codex 第十四轮）
   return new FileValidationError(
     'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE',
-    `生成失败，且有 ${failures.length} 处输出未能自动还原，请按恢复清单逐项核对、人工处理后再重新导入（${location}）`,
+    `生成失败，且有 ${failures.length} 处输出未能自动还原，${guide}（${location}）`,
     {
       detailLines: [
         `生成失败原因：${business ? error.message : `系统异常${error && error.code ? `（${error.code}）` : ''}`}`,
@@ -333,15 +358,18 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       throw error;
     }
     const written = lstatOrNull(fsImpl, resolved);
-    if (keyBefore && fileKeyOf(written, resolved, fsImpl) !== keyBefore) {
+    const keyAfter = fileKeyOf(written, resolved, fsImpl);
+    // 写前、写后的真实路径任一次解析失败时不能确认换了文件，不按被替换处理（Codex 第十五轮）
+    if (keyBefore && confirmedDifferentFiles(keyAfter, keyBefore)) {
       entry.replacedWhileWriting = true;
       throw changedExternallyError(resolved);
     }
     // 写完后路径上没有普通文件（被其他程序移走等）：本批没有可交付的输出（后续合并会跳过缺失的分组文件），停止生成
     if (!written || !written.isFile()) throw changedExternallyError(resolved);
     entry.writtenIdentity = identityOf(written);
-    if (!entry.ownedFileKey) entry.ownedFileKey = fileKeyOf(written, resolved, fsImpl);
-    if (written) byFile.set(entry.ownedFileKey, entry);
+    // 未确认的键在之后解析成功时补上
+    if (!entry.ownedFileKey || isUnconfirmedFileKey(entry.ownedFileKey)) entry.ownedFileKey = keyAfter;
+    byFile.set(entry.ownedFileKey, entry);
     entry.writePending = false;
     return result;
   }
@@ -591,7 +619,22 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
 
   // 按首次写入的逆序还原。返回 { restored, failures, backupDirectory, manifestPath }：
   //   restored 为 true 表示本批写出的文件都已回到导入前的状态；有未能还原的文件时保留备份目录与恢复清单
+  // 回滚前重新核对登记时未能确认的文件键：不提供文件编号的卷上按真实路径区分，路径上的文件此时能解析时以此为准
+  //   （同一路径解析出同一个键；仍解析失败时保持未确认，按归属不明交给人工，Codex 第十五轮）
+  function reconfirmFileKeys() {
+    for (const entry of entries) {
+      if (!isUnconfirmedFileKey(entry.ownedFileKey)) continue;
+      try {
+        const key = fileKeyOf(lstatOrNull(fsImpl, entry.filePath), entry.filePath, fsImpl);
+        if (key && !isUnconfirmedFileKey(key)) entry.ownedFileKey = key;
+      } catch (_error) {
+        // 仍不能确认：保持未确认
+      }
+    }
+  }
+
   function rollback() {
+    reconfirmFileKeys();
     const failures = [];
     for (const entry of [...entries].reverse()) {
       failures.push(...restore(entry).reverse());

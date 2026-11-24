@@ -26,6 +26,16 @@ function setup(t) {
 }
 
 const writeText = (filePath, text) => () => fs.writeFileSync(filePath, text);
+// 临时目录所在的卷不支持硬链接（exFAT 等）时跳过依赖硬链接的用例，其余用例照常执行（Codex 第十五轮）
+function linkOrSkip(t, target, linkPath) {
+  try {
+    fs.linkSync(target, linkPath);
+    return true;
+  } catch (error) {
+    t.skip(`临时目录所在的卷不支持硬链接（${error && (error.code || error.message)}）`);
+    return false;
+  }
+}
 // 未启用开发者模式、也没有建链权限的 Windows 上创建符号链接报 EPERM：返回 false，由用例改用文件夹等其他非普通文件
 function trySymlink(target, linkPath) {
   try {
@@ -131,7 +141,7 @@ test('同一文件经不同路径写入（大小写别名、硬链接）按文�
   const seed = path.join(root, 'HSBC.json');
   const alias = path.join(root, 'hsbc-alias.json');
   fs.writeFileSync(seed, 'before');
-  fs.linkSync(seed, alias); // 可移植地模拟不区分大小写的文件系统上 HSBC.json / hsbc.json 指向同一文件
+  if (!linkOrSkip(t, seed, alias)) return; // 可移植地模拟不区分大小写的文件系统上 HSBC.json / hsbc.json 指向同一文件
   const journal = createStatementOutputJournal({ stagingRoot: staging });
   journal.write(seed, writeText(seed, 'group-1'));
   journal.write(alias, writeText(alias, 'group-2'));
@@ -301,7 +311,7 @@ test('经硬链接别名写过的路径在回滚前被另存替换：主路径�
   const seed = path.join(root, 'HSBC.json');
   const alias = path.join(root, 'hsbc-alias.json');
   fs.writeFileSync(seed, 'before');
-  fs.linkSync(seed, alias);
+  if (!linkOrSkip(t, seed, alias)) return;
   const journal = createStatementOutputJournal({ stagingRoot: staging });
   journal.write(seed, writeText(seed, 'group-1'));
   journal.write(alias, writeText(alias, 'group-2'));
@@ -388,7 +398,7 @@ test('主路径在回滚前被另存替换、硬链接别名仍指向原文件�
   const seed = path.join(root, 'A.json');
   const alias = path.join(root, 'B.json');
   fs.writeFileSync(seed, 'before');
-  fs.linkSync(seed, alias);
+  if (!linkOrSkip(t, seed, alias)) return;
   const journal = createStatementOutputJournal({ stagingRoot: staging });
   journal.write(seed, writeText(seed, 'group-1'));
   journal.write(alias, writeText(alias, 'group-2'));
@@ -460,7 +470,7 @@ test('写出记录：别名路径同样登记；登记失败时清掉刚做的�
   const seed = path.join(root, 'HSBC.json');
   const alias = path.join(root, 'hsbc-alias.json');
   fs.writeFileSync(seed, 'before');
-  fs.linkSync(seed, alias);
+  if (!linkOrSkip(t, seed, alias)) return;
   const journal = createStatementOutputJournal({ stagingRoot: staging });
   journal.write(seed, writeText(seed, 'group-1'));
   journal.write(alias, writeText(alias, 'group-2'));
@@ -494,7 +504,7 @@ test('主路径截断后写回失败、硬链接别名仍指向原文件：经�
   const seed = path.join(root, 'A.json');
   const alias = path.join(root, 'B.json');
   fs.writeFileSync(seed, 'before');
-  fs.linkSync(seed, alias);
+  if (!linkOrSkip(t, seed, alias)) return;
   let restoreWrites = 0;
   const fsImpl = { ...fs, writeSync(...args) {
     restoreWrites += 1;
@@ -515,7 +525,7 @@ test('主路径打开写回失败一次、经硬链接别名写回：复核主�
   const seed = path.join(root, 'A.json');
   const alias = path.join(root, 'B.json');
   fs.writeFileSync(seed, 'before');
-  fs.linkSync(seed, alias);
+  if (!linkOrSkip(t, seed, alias)) return;
   let failedOpen = false;
   const fsImpl = { ...fs, openSync(filePath, flags, ...rest) {
     if (!failedOpen && flags === 'r+' && path.resolve(String(filePath)) === seed) {
@@ -544,7 +554,7 @@ test('文件系统不提供文件编号且原有文件另有硬链接：首次�
   const seed = path.join(root, 'A.json');
   const alias = path.join(root, 'B.json');
   fs.writeFileSync(seed, 'before');
-  fs.linkSync(seed, alias);
+  if (!linkOrSkip(t, seed, alias)) return;
   const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
   let called = false;
   assert.throws(() => journal.write(seed, () => { called = true; }), (error) => (
@@ -696,6 +706,8 @@ test('恢复清单写不出时：写出记录说明不是失败清单、「写�
   assert.match(record, /本文件不是失败清单/);
   assert.match(record, /first\.xlsx\n {3}写前不存在（不代表路径上现在的文件由本批创建）/);
   assert.match(error.message, /恢复清单未能写出，请按写出记录逐个核对（记录列出本批全部写入尝试，不是失败清单）：/);
+  // 操作指引与括号内的位置一致：不要求按不存在的恢复清单核对（Codex 第十五轮）
+  assert.match(error.message, /^生成失败，且有 1 处输出未能自动还原，请按写出记录逐个核对、人工处理后再重新导入（恢复清单未能写出/);
 });
 
 test('提交或全部还原后删除批次目录：短暂占用时重试，仍失败时返回目录位置留痕', (t) => {
@@ -732,7 +744,7 @@ test('主路径写回后关闭描述符报 EIO：经别名复核内容一致，�
   const seed = path.join(root, 'HSBC.json');
   const alias = path.join(root, 'hsbc-alias.json');
   fs.writeFileSync(seed, 'before');
-  fs.linkSync(seed, alias);
+  if (!linkOrSkip(t, seed, alias)) return;
   const writable = new Set();
   let failClose = false;
   const fsImpl = { ...fs,
@@ -926,7 +938,7 @@ test('经硬链接别名写过的文件、备份被截短：别名路径同样�
   const target = path.join(root, 'seed.json');
   const alias = path.join(root, 'seed-alias.json');
   fs.writeFileSync(target, 'before-seed');
-  fs.linkSync(target, alias);
+  if (!linkOrSkip(t, target, alias)) return;
   const journal = createStatementOutputJournal({ stagingRoot: staging });
   journal.write(target, writeText(target, 'after-seed'));
   assert.throws(() => journal.write(alias, () => {
@@ -959,4 +971,134 @@ test('首次写出即失败留下半份文件：界面消息不推断归属，�
   assert.equal(error.message, `生成失败，且有 1 处输出未能自动还原，请按恢复清单逐项核对、人工处理后再重新导入（恢复清单：${outcome.manifestPath}）`);
   assert.doesNotMatch(error.message, /已写出/);
   assert.match(error.detailLines.join('\n'), /本次新建 0 个、写前不存在且归属待核对 1 个/);
+});
+
+// v3.2.22 B45（Codex 第十五轮）：恢复清单与写出记录都写不出：消息只指向备份目录，不要求按不存在的清单核对
+test('恢复清单与写出记录都不可用：界面消息指向原内容备份目录', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'fresh.xlsx');
+  const fullFs = { ...fs, writeFileSync(filePath, ...rest) {
+    if (path.basename(String(filePath)).startsWith(MANIFEST_FILE_NAME)) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+    return fs.writeFileSync(filePath, ...rest);
+  }, existsSync(filePath) {
+    return path.basename(String(filePath)) === RECORD_FILE_NAME ? false : fs.existsSync(filePath);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl: fullFs, stagingRoot: staging });
+  assert.throws(() => journal.write(target, () => {
+    fs.writeFileSync(target, 'half');
+    throw Object.assign(new Error('EIO'), { code: 'EIO' });
+  }), { code: 'EIO' });
+  const { error, outcome } = journal.failBatch(Object.assign(new Error('EIO'), { code: 'EIO' }));
+  t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.equal(outcome.manifestPath, null);
+  assert.equal(error.message, `生成失败，且有 1 处输出未能自动还原，恢复清单与写出记录都未能写出，请到原内容备份目录人工核对处理后再重新导入（原内容备份目录：${outcome.backupDirectory}）`);
+});
+
+// v3.2.22 B45（Codex 第十五轮）：写回时文件系统对非空写入持续返回 0：不卡在同步循环，保留备份、继续还原其余文件并写出恢复清单
+test('写回原内容时文件系统持续返回 0 字节：报错停止，保留备份并继续处理其余文件', { timeout: 10000 }, (t) => {
+  const { root, staging } = setup(t);
+  const stuck = path.join(root, 'stuck.json');
+  const other = path.join(root, 'other.json');
+  fs.writeFileSync(stuck, 'before-stuck');
+  fs.writeFileSync(other, 'before-other');
+  const openedPaths = new Map();
+  let zeroWrites = 0;
+  const fsImpl = {
+    ...fs,
+    openSync(filePath, ...rest) {
+      const fd = fs.openSync(filePath, ...rest);
+      openedPaths.set(fd, path.resolve(String(filePath)));
+      return fd;
+    },
+    writeSync(fd, ...rest) {
+      if (openedPaths.get(fd) !== path.resolve(stuck)) return fs.writeSync(fd, ...rest);
+      // 桩的防护：实现不停止重试时以另一个错误结束，用例失败而不是卡住
+      if ((zeroWrites += 1) > 100) throw Object.assign(new Error('写入桩：重试未停止'), { code: 'STUB_RETRY_GUARD' });
+      return 0;
+    }
+  };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(other, writeText(other, 'after-other'));
+  journal.write(stuck, writeText(stuck, 'after-stuck'));
+  const outcome = journal.rollback();
+  t.after(() => outcome.backupDirectory && fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.equal(outcome.restored, false);
+  assert.deepEqual(outcome.failures.map((item) => [path.basename(item.filePath), item.reason]),
+    [['stuck.json', '系统错误 STATEMENT_RESTORE_NO_PROGRESS']]);
+  assert.equal(fs.readFileSync(other, 'utf8'), 'before-other', '其余文件照常还原');
+  assert.equal(fs.readFileSync(path.join(outcome.backupDirectory, outcome.failures[0].backupName), 'utf8'), 'before-stuck', '保留备份');
+  assert.match(fs.readFileSync(outcome.manifestPath, 'utf8'), /stuck\.json/);
+});
+
+// v3.2.22 B45（Codex 第十五轮）：不提供文件编号的卷上，写后解析真实路径失败一次：不认作被替换，回滚时重新核对并照常还原
+test('ino 为 0 的卷上写后解析真实路径失败一次：不按被替换处理，回滚照常还原', (t) => {
+  const { root, staging } = setup(t);
+  const upper = path.join(root, 'BANK.json');
+  const lower = path.join(root, 'bank.json');
+  fs.writeFileSync(upper, 'before');
+  if (!fs.existsSync(lower)) {
+    t.skip('前提不满足：临时卷区分大小写');
+    return;
+  }
+  const zeroIno = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino: 0n });
+  let failNextRealpath = false;
+  const realpath = (filePath, ...rest) => {
+    if (failNextRealpath) {
+      failNextRealpath = false;
+      throw Object.assign(new Error('EIO: i/o error, realpath'), { code: 'EIO' });
+    }
+    return fs.realpathSync.native(filePath, ...rest);
+  };
+  realpath.native = realpath;
+  const fsImpl = {
+    ...fs,
+    realpathSync: realpath,
+    lstatSync: (...args) => { const stat = fs.lstatSync(...args); return stat && args[1] && args[1].bigint ? zeroIno(stat) : stat; },
+    fstatSync: (...args) => { const stat = fs.fstatSync(...args); return args[1] && args[1].bigint ? zeroIno(stat) : stat; }
+  };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  // 写后核对身份时的那一次解析失败
+  journal.write(lower, () => {
+    fs.writeFileSync(lower, 'group-1');
+    failNextRealpath = true;
+  });
+  journal.write(upper, writeText(upper, 'group-2'));
+  const outcome = journal.rollback();
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.equal(fs.readFileSync(upper, 'utf8'), 'before');
+});
+
+// v3.2.22 B45（Codex 第十五轮）：本批新建的文件首次写成后解析真实路径失败（键未确认），再次写出时报错：回滚前重新核对键，
+//   仍按本批写成的文件删除，不当作被其他程序替换
+test('ino 为 0 的卷上新建文件写后解析失败、再次写出报错：回滚前重新核对键，照常删除', (t) => {
+  const { root, staging } = setup(t);
+  const fresh = path.join(root, 'fresh.json');
+  const zeroIno = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino: 0n });
+  let failNextRealpath = false;
+  const realpath = (filePath, ...rest) => {
+    if (failNextRealpath) {
+      failNextRealpath = false;
+      throw Object.assign(new Error('EIO: i/o error, realpath'), { code: 'EIO' });
+    }
+    return fs.realpathSync.native(filePath, ...rest);
+  };
+  realpath.native = realpath;
+  const fsImpl = {
+    ...fs,
+    realpathSync: realpath,
+    lstatSync: (...args) => { const stat = fs.lstatSync(...args); return stat && args[1] && args[1].bigint ? zeroIno(stat) : stat; },
+    fstatSync: (...args) => { const stat = fs.fstatSync(...args); return args[1] && args[1].bigint ? zeroIno(stat) : stat; }
+  };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(fresh, () => {
+    fs.writeFileSync(fresh, 'group-1');
+    failNextRealpath = true;
+  });
+  assert.throws(() => journal.write(fresh, () => {
+    fs.writeFileSync(fresh, 'partial');
+    throw Object.assign(new Error('EIO'), { code: 'EIO' });
+  }), { code: 'EIO' });
+  const outcome = journal.rollback();
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.equal(fs.existsSync(fresh), false, '本批新建的文件已删除');
 });
