@@ -201,8 +201,8 @@
     //
     // 参数：
     //   onAssembleReady(summary) —— 装配成功后由调用方（handleExportBalance 分流）接收 summary 更新 state
-    //   onAssembleFailed(result) —— 装配未成功（出错或无数据）时调用，调用方据此更新状态框：出错时报错文件可导出，无数据时清掉上一次
-    //     尝试的报错状态（Codex 第十轮）
+    //   onAssembleFailed(result) —— 装配未成功（出错、无数据或本地校验未通过 status='invalid'）时调用，调用方据此更新状态框：
+    //     出错时报错文件可导出，其余情况清掉上一次尝试的报错状态（Codex 第十、十三轮）
     function createMonthlyBalanceExportDialog({ onAssembleReady, onAssembleFailed } = {}) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -296,24 +296,12 @@
         const hasTemplate = draft.templateValue !== '' && draft.templateValue !== null && draft.templateValue !== undefined;
         const hasTime = Number.isInteger(draft.year) && Number.isInteger(draft.month);
 
-        // E1 / E2 / E3：本地校验，弹 createAlertDialog 后重开本弹窗保留已填值
-        if (!hasTemplate && !hasTime) {
-
-          pushAlert(overlay, () => createAlertDialog('请选择模板和时间', {
-            onConfirm: null
-          }));
-          return;
-        }
-        if (!hasTemplate) {
-
-          pushAlert(overlay, () => createAlertDialog('请选择模板', {
-            onConfirm: null
-          }));
-          return;
-        }
-        if (!hasTime) {
-
-          pushAlert(overlay, () => createAlertDialog('请选择时间', {
+        // E1 / E2 / E3：本地校验，弹 createAlertDialog 后重开本弹窗保留已填值。未通过时同样同步状态框、关闭上一次尝试的
+        //   报错导出：同一弹窗内装配失败后改成未选月份再点完成，关窗后状态框不留上一次的报错（v3.2.22 B113，Codex 第十三轮）
+        const localProblem = !hasTemplate && !hasTime ? '请选择模板和时间' : (!hasTemplate ? '请选择模板' : (!hasTime ? '请选择时间' : ''));
+        if (localProblem) {
+          if (typeof onAssembleFailed === 'function') onAssembleFailed({ status: 'invalid', message: localProblem, errorReportReady: false });
+          pushAlert(overlay, () => createAlertDialog(localProblem, {
             onConfirm: null
           }));
           return;

@@ -499,7 +499,7 @@ async function handleOpenAccountMappings() {
           //   不留上一次尝试的报错状态（Codex 第六、十轮）
           if(!live(version))return;
           state.monthlyBalanceReady=false;state.monthlyBalancePreview=null;
-          if(result.status==='empty')setStatus(result.message||'该模板 / 月份范围内无余额数据','info',{errorReportReady:false});
+          if(result.status==='empty'||result.status==='invalid')setStatus(result.message||'该模板 / 月份范围内无余额数据','info',{errorReportReady:false});
           else setStatus(result.message||'装配月度余额账单失败','error',{errorReportReady:result.status==='error'&&Boolean(result.errorReportReady)});
         }}));
       }

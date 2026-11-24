@@ -27,12 +27,34 @@ function assertLinkedCellStorable(value, rowNumber, headerName) {
   }
 }
 
+// v3.2.22 B113（Codex 第十三轮）：只核对实际落库的列——入金表按白名单裁列，用户版本的模板按内置列改名，不落库的列含空字符
+//   不影响入库。用逐列不同的探针值走一遍落库投影，求出落库的值取自哪些源列（投影只取列、改名，不改值），之后每行只核对这些
+//   源列，报源行号与源列名
+const STORED_COLUMN_PROBE = '\u0000linked-stored-column:';
+function createStoredCellAssert(expectedHeaders, projection) {
+  const headerNames = (Array.isArray(expectedHeaders) ? expectedHeaders : [])
+    .map((header) => normalizeCell(header)).filter((name) => name !== '');
+  const probe = {};
+  headerNames.forEach((name, index) => { probe[name] = `${STORED_COLUMN_PROBE}${index}`; });
+  const projected = (typeof projection === 'function' ? projection(probe) : probe) || {};
+  const storedSources = [];
+  for (const value of Object.values(projected)) {
+    if (typeof value !== 'string' || !value.startsWith(STORED_COLUMN_PROBE)) continue;
+    const name = headerNames[Number(value.slice(STORED_COLUMN_PROBE.length))];
+    if (name !== undefined && !storedSources.includes(name)) storedSources.push(name);
+  }
+  return (row, rowNumber) => {
+    for (const name of storedSources) assertLinkedCellStorable(row[name], rowNumber, name);
+  };
+}
+
 async function streamLinkedRowsToInsert(filePath, signature, insertOne, transform) {
   const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
   if (expected.length === 0) {
     return { matched: false };
   }
   const xform = typeof transform === 'function' ? transform : (x) => x;
+  const assertStoredCells = createStoredCellAssert(expected, xform);
   let colOffset = -1;
 
   await readXlsxStreamed(filePath, (cells, _rowIdx, textInfo) => {
@@ -76,8 +98,8 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
       if (headerName === '') continue; // 跳过中间空列占位（不入对象，与数组路径一致）
       const cell = row[colOffset + i];
       obj[headerName] = normalizeCell(cell === undefined ? '' : cell);
-      assertLinkedCellStorable(obj[headerName], textInfo.rowNumber, headerName);
     }
+    assertStoredCells(obj, textInfo.rowNumber);
     insertOne(xform(obj));
     // v3.2.22 B113：与非流式读取（SheetJS）同样还原 OOXML 文本转义，同一笔交易两条路径导入得到同一个 BizId；
     //   表头识别（table-type-detector）与模板文件预检（input-structures）用同一选项
@@ -86,4 +108,4 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
   return { matched: colOffset >= 0 };
 }
 
-module.exports = { assertLinkedCellStorable, streamLinkedRowsToInsert };
+module.exports = { assertLinkedCellStorable, createStoredCellAssert, streamLinkedRowsToInsert };

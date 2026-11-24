@@ -316,7 +316,7 @@ const {
 } = require('./main-process/linked-derive-rebuild');
 // v3.0.6 需求1（T3）：调拨对账单派生纯函数（mid-allocation 导入触发 → in/out 两行落 linked_fund_transfer_recon）。
 const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
-const { assertLinkedCellStorable, streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
+const { createStoredCellAssert, streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 // v3.2.18：链接表按数据日期统计 / 删除 + 派生联动的共享实现（手工删除与链接表过期清理共用，禁复制 = R-5）。
 const {
   isLinkedDeleteTable,
@@ -19857,9 +19857,9 @@ function registerNewAccountHandlers() {
   //   既有 readLinkedRowsAsObjects 退化为只取 objects 的薄封装 → 所有旧调用方零行为变化。
   //   🔴 rowNumbers[i] = objects[i] 所在的原文件物理行号（1-based）；空行被 readRowsWithMetadata 过滤造成的
   //      行号断档（前后差 > 1）是 BOC 分组分隔符的唯一可还原依据（流式路径不透传行号，见 §2.5）。
-  // rejectUnstorableText：结果要写入 SQLite（链接表入库）时传 true，含空字符的值拒绝；退款订单等只在内存中使用的读取不传，
-  //   保留原有读取契约（v3.2.22 B113，Codex 第十一、十二轮）
-  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null, { rejectUnstorableText = false } = {}) {
+  // storedProjection：结果要写入 SQLite（链接表入库）时传入落库前的投影（裁列、改名），实际落库的列含空字符时拒绝；
+  //   退款订单等只在内存中使用的读取不传，保留原有读取契约（v3.2.22 B113，Codex 第十一至十三轮）
+  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null, { storedProjection = null } = {}) {
     const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
     if (expected.length === 0) {
       return { objects: [], rowNumbers: [] };
@@ -19894,6 +19894,7 @@ function registerNewAccountHandlers() {
       throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
     }
 
+    const assertStoredCells = storedProjection ? createStoredCellAssert(expected, storedProjection) : null;
     const objects = [];
     const rowNumbers = [];
     for (let ri = headerRowIdx + 1; ri < rows.length; ri += 1) {
@@ -19907,9 +19908,9 @@ function registerNewAccountHandlers() {
         if (headerName === '') continue; // 跳过中间空列占位（不入对象）
         const cell = row[colOffset + i];
         obj[headerName] = normalizeLinkedCell(cell === undefined ? '' : cell);
-        // 含空字符的值拒绝入库（与流式导入同口径，v3.2.22 B113，Codex 第十一轮）
-        if (rejectUnstorableText) assertLinkedCellStorable(obj[headerName], rowNumber, headerName);
       }
+      // 落库的列含空字符时拒绝入库（与流式导入同口径，v3.2.22 B113，Codex 第十一、十三轮）
+      if (assertStoredCells) assertStoredCells(obj, rowNumber);
       objects.push(obj);
       rowNumbers.push(rowNumber);
     }
@@ -19986,7 +19987,7 @@ function registerNewAccountHandlers() {
       }
     } else {
       // 数组路径：fx-settlement 用 WithMeta 同时取物理行号（BOC 分组扫描热依赖）；其余表零行为变化。
-      const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName, { rejectUnstorableText: true });
+      const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName, { storedProjection: transform });
       // 一行对应一行，物理行号 rowNumbers 与之对齐不变（BOC 分组依赖行号断档）。
       const rows = meta.objects.map((row) => projectLinkedRow(signature, row));
       if (repoKey === 'fx-settlement') {

@@ -382,6 +382,20 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
   });
+  // v3.2.22 B113（Codex 第十三轮）：装配失败后在同一弹窗改回「选择月份」再点完成：本地校验未通过也同步状态框，不能再导出旧报告
+  await test('月度装配失败后改成未选月份再点完成：状态框清掉上一次的报错状态', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.top().querySelector('[data-role="month"]').value='';statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='assemble').length`), 1, '本地校验未通过不发送装配请求');
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    assert.equal(await js('statementFixture.text()'), '请选择时间');
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+  });
   await test('真实月度装配双击只发送一次assemble且busy时不能关闭', async () => {
     await setup(); await openMonthly();
     await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.assemble=statementFixture.pending;const done=statementFixture.top().querySelector('[data-action="done"]');done.click();done.click();`);

@@ -234,13 +234,22 @@ test('链接表：本应用写出的含空字符的值经流式导入拒绝入�
       && !error.message.includes('TX'));
   assert.deepEqual(inserted.map((row) => row.BizId), ['TX1'], '只喂入了之前的行（真实仓储事务的整批回滚见集成 v3.0.0-linked-streaming-import Step7）');
   assert.doesNotThrow(() => assertLinkedCellStorable('TX\u0001B', 7, 'BizId'));
+
+  // 只核对实际落库的列（Codex 第十三轮）：投影裁掉的列含空字符照常入库；改名落库的列报源列名
+  const projectedPath = path.join(dir, 'nul-projected.xlsx');
+  writeWorkbookRows({ rows: [['交易号', '备注'], ['TX1', 'a\u0000b'], ['TX\u0000B', 'ok']], outputFilePath: projectedPath });
+  const stored = [];
+  await assert.rejects(streamLinkedRowsToInsert(projectedPath, { expectedHeaders: ['交易号', '备注'] }, (row) => stored.push(row),
+    (row) => ({ BizId: row['交易号'] })),
+  (error) => error.code === 'FILE_READ' && error.message.startsWith('源文件第 3 行「交易号」列的文本含空字符（U+0000）'));
+  assert.deepEqual(stored, [{ BizId: 'TX1' }], '不落库的「备注」列含空字符不拦截');
 });
 
 // v3.2.22 B113（Codex 第十二轮）：非流式读取（main.js 闭包内的真实函数）只在链接表入库时拒绝空字符；退款订单只在内存中使用，
 //   保留原有读取契约
 test('链接表非流式读取：入库调用拒绝含空字符的值并报物理行号，退款订单读取不拦截', (t) => {
   const acorn = require('acorn');
-  const { assertLinkedCellStorable } = require('../../../../src/main-process/linked-table-stream-source');
+  const { createStoredCellAssert } = require('../../../../src/main-process/linked-table-stream-source');
   const { FileValidationError } = require('../../../../src/backend/file-service/common');
   const mainSource = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'src', 'main.js'), 'utf8');
   const functions = new Map();
@@ -263,21 +272,24 @@ test('链接表非流式读取：入库调用拒绝含空字符的值并报物�
   };
   walk(acorn.parse(mainSource, { ecmaVersion: 'latest', sourceType: 'script' }), null);
   const names = ['readLinkedRowsAsObjectsWithMeta', 'readLinkedRowsAsObjects'];
-  const fns = Function('linkedTableReaders', 'normalizeLinkedCell', 'LinkedFileValidationError', 'assertLinkedCellStorable',
+  const fns = Function('linkedTableReaders', 'normalizeLinkedCell', 'LinkedFileValidationError', 'createStoredCellAssert',
     `${names.map((name) => mainSource.slice(functions.get(name).start, functions.get(name).end)).join('\n')}\nreturn { ${names.join(', ')} };`)(
     require('../../../../src/backend/file-service/readers'), require('../../../../src/backend/file-service/common').normalizeCell,
-    FileValidationError, assertLinkedCellStorable);
+    FileValidationError, createStoredCellAssert);
 
   const dir = createTempDir(t);
   const filePath = path.join(dir, 'linked-multi.xlsx');
   writeWorkbookRows({ rows: [['说明'], [], ['BizId', '备注'], ['TX1', 'ok'], ['TX2', 'a\u0000b']], outputFilePath: filePath });
   const signature = { expectedHeaders: ['BizId', '备注'] };
-  assert.throws(() => fns.readLinkedRowsAsObjectsWithMeta(filePath, signature, null, { rejectUnstorableText: true }),
+  assert.throws(() => fns.readLinkedRowsAsObjectsWithMeta(filePath, signature, null, { storedProjection: (row) => row }),
     (error) => error.code === 'FILE_READ' && error.message.startsWith('源文件第 5 行「备注」列的文本含空字符'));
+  // 投影裁掉「备注」列（如入金表白名单）：不落库的列含空字符不拦截（Codex 第十三轮）
+  assert.deepEqual(fns.readLinkedRowsAsObjectsWithMeta(filePath, signature, null, { storedProjection: (row) => ({ BizId: row.BizId }) })
+    .objects.map((row) => row.BizId), ['TX1', 'TX2']);
   assert.deepEqual(fns.readLinkedRowsAsObjects(filePath, signature).map((row) => row['备注']), ['ok', 'a\u0000b'], '退款订单读取不拦截');
-  // 链接表入库（importLinkedFileToRepo）的非流式读取启用拒绝；退款订单读取不启用
+  // 链接表入库（importLinkedFileToRepo）的非流式读取传入落库投影；退款订单读取不传
   assert.deepEqual(calls.filter((call) => call.owner !== 'readLinkedRowsAsObjects').map((call) => [call.owner, call.callee,
-    /rejectUnstorableText: true/.test(call.source)]), [
+    /storedProjection: transform/.test(call.source)]), [
     ['importLinkedFileToRepo', 'readLinkedRowsAsObjectsWithMeta', true],
     [calls.find((call) => call.callee === 'readLinkedRowsAsObjects').owner, 'readLinkedRowsAsObjects', false]
   ]);

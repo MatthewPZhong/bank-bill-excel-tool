@@ -145,25 +145,39 @@ async function run() {
     assertEq(retBlank.rowCount, 5, 'Step6.含1空行文件流式落库 rowCount=5（空行被跳过，非 6）');
     assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit').length, 5, 'Step6.DB 实际 5 行（无空 key 垃圾行）');
 
-    // Step7（v3.2.22 B113，Codex 第十一、十二轮）：本应用写出的明细中含空字符（写成 _x0000_）的值经真实入库路径整批拒绝：
-    //   先一行更新既有 ReconciliationId 的正常记录，再一行含空字符的 ReconciliationId；报物理行与列，原记录与行数不变
-    const nulFile = path.join(tmpDir, 'single-nul.xlsx');
-    writeWorkbookRows({
-      rows: [HEADERS, rowAoa({ ...DATA[0], 'Credit Amount': '9.9' }), rowAoa({ ...DATA[1], ReconciliationId: 'R-NUL\u0000X' })],
-      outputFilePath: nulFile
-    });
+    // Step7（v3.2.22 B113，Codex 第十一至十三轮）：本应用写出的明细中含空字符（写成 _x0000_）的值经真实入库路径
+    //   （按 BizId 幂等更新的入金表流式导入）：
+    //   7a 先按 BizId 建一条记录；7b 首行以同一 BizId 更新金额、次行落库列 ReconciliationId 含空字符 → 整批拒绝，
+    //   报物理行与列，该 BizId 仍是旧金额、全部记录不变；7c 只有不落库的列（Transaction Description）含空字符时照常入库
+    const upsertDepositFile = (fileName, rows) => {
+      const filePath = path.join(tmpDir, fileName);
+      writeWorkbookRows({ rows: [HEADERS, ...rows.map(rowAoa)], outputFilePath: filePath });
+      return appDb.upsertLinkedBankDepositStreaming(async (writeOne) => {
+        await streamLinkedRowsToInsert(filePath, SIG, writeOne, linkedRepo.pickBankDepositFields);
+      }, { sourceFileName: fileName });
+    };
+    const depositAmount = (bizId) => {
+      const row = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit').find((item) => item.BizId === bizId);
+      return row ? row['Credit Amount'] : null;
+    };
+    await upsertDepositFile('nul-base.xlsx', [{ ...DATA[0], BizId: 'BZ-NUL-1', 'Credit Amount': '1.2' }]);
+    assertEq(depositAmount('BZ-NUL-1'), '1.2', 'Step7a.按 BizId 建立旧记录');
     const rowsBeforeNul = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
     let nulError = null;
     try {
-      await appDb.upsertLinkedBankDepositStreaming(async (writeOne) => {
-        await streamLinkedRowsToInsert(nulFile, SIG, writeOne, linkedRepo.pickBankDepositFields);
-      }, { sourceFileName: 'single-nul.xlsx' });
+      await upsertDepositFile('single-nul.xlsx', [
+        { ...DATA[0], BizId: 'BZ-NUL-1', 'Credit Amount': '9.9' },
+        { ...DATA[1], BizId: 'BZ-NUL-2', ReconciliationId: 'R-NUL\u0000X' }
+      ]);
     } catch (error) {
       nulError = error;
     }
     assertEq(nulError && nulError.message.startsWith('源文件第 3 行「ReconciliationId」列的文本含空字符（U+0000）'), true,
-      `Step7.含空字符的值拒绝并报物理行与列：${nulError && nulError.message}`);
-    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeNul, 'Step7.原记录（含被更新的一行）与行数不变');
+      `Step7b.落库列含空字符拒绝并报物理行与列：${nulError && nulError.message}`);
+    assertEq(depositAmount('BZ-NUL-1'), '1.2', 'Step7b.首行对同一 BizId 的更新随整批回滚（仍是旧金额）');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeNul, 'Step7b.全部记录与行数不变');
+    await upsertDepositFile('nul-unstored.xlsx', [{ ...DATA[1], BizId: 'BZ-NUL-3', 'Transaction Description': 'memo\u0000x' }]);
+    assertEq(depositAmount('BZ-NUL-3'), '2.5', 'Step7c.只有不落库的列含空字符：照常入库');
   } finally {
     try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }
