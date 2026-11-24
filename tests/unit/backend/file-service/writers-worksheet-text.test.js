@@ -384,6 +384,39 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
   const delRows = [];
   await streamLinkedRowsToInsert(delFile, linked, (row) => delRows.push(row));
   assert.deepEqual(delRows.map((row) => row.BizId), ['TX\u007fA']);
+
+  // 幂等键列还原出的空白落在首尾：去掉首尾空白后与「TX」同键，拒绝整批并报行号与列名（Codex 第十七轮 P1）；
+  //   键列经落库投影改名时按源列核对；非键列与未指定键列时照常还原后去首尾空白；转义在中间、原始空白在首尾的不受影响
+  const edgeFile = await build('edge-escape', '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c></row>'
+    + '<row r="3"><c r="A3" t="s"><v>4</v></c><c r="B3" t="s"><v>5</v></c></row>',
+  '<si><t>TX_x000D_</t></si><si><t>note_x0009_</t></si><si><t xml:space="preserve"> TX_x0001_ </t></si><si><t>a_x000D_\nb</t></si>');
+  const edgeInserted = [];
+  for (const keyed of [
+    { keyField: 'BizId' },
+    { keyField: '交易号', transform: (row) => ({ 交易号: row.BizId }) }
+  ]) {
+    await assert.rejects(streamLinkedRowsToInsert(edgeFile, linked, (row) => edgeInserted.push(row), keyed.transform, { keyField: keyed.keyField }), (error) => (
+      error.code === 'FILE_READ'
+        && error.message.startsWith('源文件第 2 行「BizId」列（交易标识）的首尾含由 Excel 文本转义（_xHHHH_）还原出的空白字符')
+        && !error.message.includes('TX')
+        && error.message.endsWith('请到源系统核对该行的原始值并重新导出，不要按打开后显示的值修改或另存该文件')
+    ), keyed.keyField);
+  }
+  assert.deepEqual(edgeInserted, [], '拒绝前未写入任何行');
+  const keyedLower = [];
+  await streamLinkedRowsToInsert(writtenLower, linked, (row) => keyedLower.push(row.BizId), undefined, { keyField: 'BizId' });
+  assert.deepEqual(keyedLower, ['TX_x004a_', 'TXJ', 'TX\u007fA'], '转义不在首尾的键照常导入');
+  const unkeyed = [];
+  await streamLinkedRowsToInsert(edgeFile, linked, (row) => unkeyed.push(row));
+  assert.deepEqual(unkeyed.map((row) => [row.BizId, row['备注']]), [['TX', 'note'], ['TX\u0001', 'a\r\nb']]);
+  await assert.rejects(streamLinkedRowsToInsert(edgeFile, linked, () => {}, undefined, { keyField: '备注' }),
+    (error) => error.message.startsWith('源文件第 2 行「备注」列（交易标识）'), '按指定的键列核对');
+  // 链接表入库按键幂等写入的两张表传入落库键字段（与仓储 keyExtractor 的字段一致）
+  const mainSource = fs.readFileSync(path.join(__dirname, '../../../../src/main.js'), 'utf8');
+  assert.ok(mainSource.includes("const keyField = isGatewayBill ? 'ReconBillBizId' : (isBankDeposit ? 'BizId' : null);"));
+  assert.ok(mainSource.includes('streamLinkedRowsToInsert(filePath, signature, writeOne, transform, { keyField })'));
+  const repoSource = fs.readFileSync(path.join(__dirname, '../../../../src/backend/database/linked-table-repository.js'), 'utf8');
+  assert.ok(repoSource.includes('keyExtractor: (obj) => obj.ReconBillBizId') && repoSource.includes('keyExtractor: (obj) => obj.BizId'));
 });
 
 // v3.2.22 B113（Codex 第八轮）：注音不计入正文；CDATA、多段纯文本、带前缀的元素等非规范结构拒绝；表头格无法确认时不认作表头

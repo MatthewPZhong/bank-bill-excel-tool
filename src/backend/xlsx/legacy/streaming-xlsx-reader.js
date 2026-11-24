@@ -66,6 +66,19 @@ class UnverifiableCellText {
   }
 }
 
+// 还原出的空白落在首尾的单元格文本（只在 decodeTextEscapes 时出现）：调用方入库前去掉首尾空白时，按字面读取的写出端（ExcelJS）
+//   读回的「TX_x000D_」与「TX」是两个值，还原并去掉首尾空白后相同（Codex 第十七轮 P1）。值照常给出，另行标出列下标，
+//   由调用方决定是否拒绝
+class TrimSensitiveCellText {
+  constructor(value) {
+    this.value = value;
+  }
+}
+
+function cellTextValue(cell) {
+  return cell instanceof UnverifiableCellText || cell instanceof TrimSensitiveCellText ? cell.value : cell;
+}
+
 // 一格文本按 OOXML 转义还原（runs：各 <t> 段经 XML 实体还原后的文本）。以下情形两种读取方式或与 Excel 显示的值不一致，
 //   返回 UnverifiableCellText 由调用方决定是否拒绝（Codex 第七轮 P1 ×3）：
 //   - 转义由相邻 <t> 段拼成：Excel 按段还原（原样显示），SheetJS 与此处先拼接再还原，不同的原值会读成同一个值；
@@ -94,7 +107,8 @@ function decodeCellTextRuns(runs) {
     runs.map(decodeOoxmlTextEscapes).join('') === value
     && runs.every((run) => Array.from(run.matchAll(TEXT_ESCAPE_RE)).every((match) => isExcelWrittenEscape(match, run)))
   ));
-  return consistent ? value : new UnverifiableCellText(value);
+  if (!consistent) return new UnverifiableCellText(value);
+  return value !== joined && value.trim() !== decodeOoxmlTextEscapes(joined.trim()) ? new TrimSensitiveCellText(value) : value;
 }
 
 // decode 时文本段内出现标记（CDATA、注释等）也按无法确认原值处理：此处的 XML 实体还原不区分 CDATA 与字面文本，
@@ -151,7 +165,7 @@ function stringItemText(inner, decode) {
     && (plain ? parts.length <= 1 : (RICH_RUN_RE.test(inner) || parts.length === 0));
   const text = textOf(parts, true);
   if (canonical) return text;
-  return text instanceof UnverifiableCellText ? text : new UnverifiableCellText(text);
+  return text instanceof UnverifiableCellText ? text : new UnverifiableCellText(cellTextValue(text));
 }
 
 const CELL_OPEN_RE = /<c\b([^>]*?)\/>|<c\b([^>]*?)>([\s\S]*?)<\/c>/g;
@@ -224,7 +238,7 @@ function parseCellBody(body, type, sharedStrings, decode = false) {
     const idx = parseInt(v[1], 10);
     // 共享字符串表含带前缀的 <si>（被扫描跳过，后续索引错位）：所有共享字符串都无法确认原值（Codex 第九轮 P1）
     if (decode && sharedStrings && sharedStrings.unverifiable) {
-      return new UnverifiableCellText(idx >= 0 && idx < sharedStrings.length ? String(sharedStrings[idx]) : '');
+      return new UnverifiableCellText(idx >= 0 && idx < sharedStrings.length ? String(cellTextValue(sharedStrings[idx])) : '');
     }
     if (!sharedStrings || idx < 0 || idx >= sharedStrings.length) return '';
     return sharedStrings[idx];
@@ -333,8 +347,9 @@ function siInnerToText(inner, decode = false) {
 //   返回值新增 truncated：true 表示因 maxRows 提前终止（文件可能还有更多行），全量读时为 false。
 //   decodeTextEscapes 可选（v3.2.22 B113）：为 true 时把单元格文本中的 OOXML 转义 _xHHHH_ 还原（与 SheetJS 读取同一口径；
 //            本应用的 XLSX 写出端已把字面 _xHHHH_ 写成 _x005F_xHHHH_），回调另收第三个参数
-//            { rowNumber, unverifiableColumns }：rowNumber 为工作表行号，unverifiableColumns 为还原后无法确认原值的列下标
-//            （见 decodeCellTextRuns；这些格按 SheetJS 的结果给出）。缺省不还原（既有调用方行为不变）。
+//            { rowNumber, unverifiableColumns, trimSensitiveColumns }：rowNumber 为工作表行号，unverifiableColumns 为还原后
+//            无法确认原值的列下标（见 decodeCellTextRuns；这些格按 SheetJS 的结果给出），trimSensitiveColumns 为还原出的空白
+//            落在首尾的列下标（见 TrimSensitiveCellText）。缺省不还原（既有调用方行为不变）。
 async function readXlsxStreamed(filePath, onRowCallback, { colCount = 31, maxRows = 0, decodeTextEscapes = false } = {}) {
   let lastRowNumber = 0;
   const parseRow = (rowXml, rowIdx) => {
@@ -342,7 +357,12 @@ async function readXlsxStreamed(filePath, onRowCallback, { colCount = 31, maxRow
     if (!decodeTextEscapes) return onRowCallback(cells, rowIdx);
     const nonCanonical = isRowNonCanonical(rowXml);
     const unverifiableColumns = [];
+    const trimSensitiveColumns = [];
     cells.forEach((cell, index) => {
+      if (cell instanceof TrimSensitiveCellText) {
+        cells[index] = cell.value;
+        trimSensitiveColumns.push(index);
+      }
       if (cell instanceof UnverifiableCellText) cells[index] = cell.value;
       if (nonCanonical || cell instanceof UnverifiableCellText) unverifiableColumns.push(index);
     });
@@ -351,7 +371,7 @@ async function readXlsxStreamed(filePath, onRowCallback, { colCount = 31, maxRow
     const cellRow = /<c\b[^>]*?\sr="[A-Z]+(\d+)"/.exec(rowXml);
     const explicit = /^<row\b[^>]*?\sr=(?:"(\d+)"|'(\d+)')/.exec(rowXml);
     lastRowNumber = cellRow ? Number(cellRow[1]) : (explicit ? Number(explicit[1] || explicit[2]) : lastRowNumber + 1);
-    return onRowCallback(cells, rowIdx, { rowNumber: lastRowNumber, unverifiableColumns });
+    return onRowCallback(cells, rowIdx, { rowNumber: lastRowNumber, unverifiableColumns, trimSensitiveColumns });
   };
   // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误，
   //   不再让 JSZip 抛 `uncompressed data size mismatch` 天书）；预检自身失败时 fail-open 放行。

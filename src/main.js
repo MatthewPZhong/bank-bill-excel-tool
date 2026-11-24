@@ -19970,7 +19970,9 @@ function registerNewAccountHandlers() {
     let fxRowNumbers = null;
     if (useStreamingPath) {
       const feedRows = async (writeOne) => {
-        const { matched } = await streamLinkedRowsToInsert(filePath, signature, writeOne, transform);
+        // 按键幂等写入的两张表核对键列（见 streamLinkedRowsToInsert）
+        const keyField = isGatewayBill ? 'ReconBillBizId' : (isBankDeposit ? 'BizId' : null);
+        const { matched } = await streamLinkedRowsToInsert(filePath, signature, writeOne, transform, { keyField });
         if (!matched) {
           throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
         }

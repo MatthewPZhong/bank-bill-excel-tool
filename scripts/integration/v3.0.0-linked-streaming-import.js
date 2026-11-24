@@ -152,7 +152,8 @@ async function run() {
     //   7a 先按 BizId 建一条记录；7b 首行以同一 BizId 更新金额、次行落库列 ReconciliationId 含空字符 → 整批拒绝，
     //   报物理行与列，该 BizId 仍是旧金额、全部记录不变；7c 只有不落库的列（Transaction Description）含空字符时照常入库
     const importDepositFile = (filePath) => appDb.upsertLinkedBankDepositStreaming(async (writeOne) => {
-      await streamLinkedRowsToInsert(filePath, SIG, writeOne, linkedRepo.pickBankDepositFields);
+      // 与 main.js 一致：入金表按 BizId 幂等写入，传入落库键字段（Codex 第十七轮）
+      await streamLinkedRowsToInsert(filePath, SIG, writeOne, linkedRepo.pickBankDepositFields, { keyField: 'BizId' });
     }, { sourceFileName: path.basename(filePath) });
     const upsertDepositFile = (fileName, rows) => {
       const filePath = path.join(tmpDir, fileName);
@@ -257,6 +258,27 @@ async function run() {
       `Step10.跨段的保护目标拒绝并报物理行与列：${richError && richError.message}`);
     assertEq(depositAmount('TX_x0041_'), '9.9', 'Step10.TX_x0041_ 金额未被覆盖');
     assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeRich, 'Step10.全部记录与行数不变');
+
+    // Step11（v3.2.22 B113，Codex 第十七轮 P1 ⚠️ 资金口径）：ExcelJS 原样写出的字面「TXK_x000D_」读成「TXK」加回车，入库前
+    //   去掉首尾空白后与已有的「TXK」同键、覆盖其金额。流式导入按交易标识首尾含还原出的空白整批拒绝，数据库不变
+    await upsertDepositFile('edge-base.xlsx', [{ ...DATA[0], BizId: 'TXK', 'Credit Amount': '9.9' }]);
+    const edgeFile = path.join(tmpDir, 'exceljs-edge-escape.xlsx');
+    const edgeBook = new ExcelJS.Workbook();
+    const edgeSheet = edgeBook.addWorksheet('Sheet1');
+    edgeSheet.addRow(HEADERS);
+    edgeSheet.addRow(rowAoa({ ...DATA[1], BizId: 'TXK_x000D_', 'Credit Amount': '1.2' }));
+    await edgeBook.xlsx.writeFile(edgeFile);
+    const rowsBeforeEdge = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let edgeError = null;
+    try {
+      await importDepositFile(edgeFile);
+    } catch (error) {
+      edgeError = error;
+    }
+    assertEq(Boolean(edgeError) && edgeError.message.startsWith('源文件第 2 行「BizId」列（交易标识）的首尾含由 Excel 文本转义'), true,
+      `Step11.键列首尾的还原空白拒绝并报物理行与列：${edgeError && edgeError.message}`);
+    assertEq(depositAmount('TXK'), '9.9', 'Step11.TXK 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeEdge, 'Step11.全部记录与行数不变');
   } finally {
     try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }

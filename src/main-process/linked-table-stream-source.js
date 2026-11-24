@@ -33,30 +33,39 @@ function assertLinkedCellStorable(value, rowNumber, headerName) {
 //   不影响入库。用逐列不同的探针值走一遍落库投影，求出落库的值取自哪些源列（投影只取列、改名，不改值），之后每行只核对这些
 //   源列，报源行号与源列名
 const STORED_COLUMN_PROBE = '\u0000linked-stored-column:';
-function createStoredCellAssert(expectedHeaders, projection) {
+// 落库字段 → 取自的源列名
+function projectedSourceHeaders(expectedHeaders, projection) {
   const headerNames = (Array.isArray(expectedHeaders) ? expectedHeaders : [])
     .map((header) => normalizeCell(header)).filter((name) => name !== '');
   const probe = {};
   headerNames.forEach((name, index) => { probe[name] = `${STORED_COLUMN_PROBE}${index}`; });
   const projected = (typeof projection === 'function' ? projection(probe) : probe) || {};
-  const storedSources = [];
-  for (const value of Object.values(projected)) {
+  const sources = new Map();
+  for (const [field, value] of Object.entries(projected)) {
     if (typeof value !== 'string' || !value.startsWith(STORED_COLUMN_PROBE)) continue;
     const name = headerNames[Number(value.slice(STORED_COLUMN_PROBE.length))];
-    if (name !== undefined && !storedSources.includes(name)) storedSources.push(name);
+    if (name !== undefined) sources.set(field, name);
   }
+  return sources;
+}
+
+function createStoredCellAssert(expectedHeaders, projection) {
+  const storedSources = [...new Set(projectedSourceHeaders(expectedHeaders, projection).values())];
   return (row, rowNumber) => {
     for (const name of storedSources) assertLinkedCellStorable(row[name], rowNumber, name);
   };
 }
 
-async function streamLinkedRowsToInsert(filePath, signature, insertOne, transform) {
+// keyField：按键幂等写入的表（入金表 BizId、网关表 ReconBillBizId）的落库键字段，核对键取自的源列（见下）
+async function streamLinkedRowsToInsert(filePath, signature, insertOne, transform, { keyField = null } = {}) {
   const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
   if (expected.length === 0) {
     return { matched: false };
   }
   const xform = typeof transform === 'function' ? transform : (x) => x;
   const assertStoredCells = createStoredCellAssert(expected, xform);
+  const keySource = keyField ? projectedSourceHeaders(expected, xform).get(keyField) : undefined;
+  const keyIndex = keySource === undefined ? -1 : expected.findIndex((header) => normalizeCell(header) === keySource);
   let colOffset = -1;
 
   await readXlsxStreamed(filePath, (cells, _rowIdx, textInfo) => {
@@ -92,6 +101,15 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
               + '请到源系统核对该行的原始值并重新导出，不要按打开后显示的值修改或另存该文件');
         }
       }
+    }
+    // v3.2.22 B113（Codex 第十七轮 P1 ⚠️ 资金口径）：幂等键列的文本还原出的空白落在首尾（如 ExcelJS 原样写出的字面
+    //   「TX_x000D_」读成「TX」加回车），入库前去掉首尾空白后与另一笔「TX」同键而覆盖其金额，按字面读取的写出端认为两者不同。
+    //   拒绝整批，只给行号与列名；其余列与 SheetJS 读取同样还原后去首尾空白。先于全空行判断（同上）
+    if (keyIndex >= 0 && textInfo.trimSensitiveColumns.includes(colOffset + keyIndex)) {
+      throw new FileValidationError('FILE_READ',
+        `源文件第 ${textInfo.rowNumber} 行「${keySource}」列（交易标识）的首尾含由 Excel 文本转义（_xHHHH_）还原出的空白字符，`
+          + '去掉首尾空白后可能与另一笔交易的标识相同；'
+          + '请到源系统核对该行的原始值并重新导出，不要按打开后显示的值修改或另存该文件');
     }
     // 🔴 全空行跳过：与数组路径 readRowsWithMetadata `.filter(isRowMeaningful)` 对齐（防空 key 垃圾行 + row_count 虚高）。
     if (!isRowMeaningful(row)) return;

@@ -174,8 +174,25 @@ function vccRuntimeHeaders(sourceType) {
   };
 }
 
-// 银行对账单（导入识别结构）：readBankStatement（银行账单处理、前置资金对账、重复入账匹配）与平盘银行导入（流式）两种读法
-//   读出「渠道对账单」表头行；结果不同时不一致的列标出两种结果，预检必不通过。
+// 同一结构供入金链接表导入：单表 .xlsx 导入时走流式读取（还原 OOXML 文本转义，无法确认原值的格不认作表头，见
+//   linked-table-stream-source），读出首个有内容的行（去首尾空格）；多工作表等导入时不走流式的文件返回 null（Codex 第十七轮 P2）
+async function bankDepositStreamHeaderRow(filePath) {
+  const { readXlsxSheetMetaLite, readMeaningfulRowsHead } = require('../../backend/file-service/readers');
+  const { normalizeCell } = require('../../backend/file-service/common');
+  try {
+    const meta = await readXlsxSheetMetaLite(filePath);
+    if (meta.worksheetEntryCount !== 1 || meta.sheetNames.length !== 1) return null;
+    const { rows } = await readMeaningfulRowsHead(filePath, 21, { decodeTextEscapes: true });
+    const row = (rows[0] || []).map((cell) => normalizeCell(cell));
+    while (row.length && row[row.length - 1] === '') row.pop();
+    return row;
+  } catch (_error) {
+    return null;
+  }
+}
+
+// 银行对账单（导入识别结构）：readBankStatement（银行账单处理、前置资金对账、重复入账匹配）、平盘银行导入（流式）与入金链接表
+//   导入（单表 .xlsx 流式）三种读法读出「渠道对账单」表头行；结果不同时不一致的列标出各自结果，预检必不通过。
 async function bankStatementRuntimeHeaders(filePath) {
   const { readBankStatementHeaderRow } = require('../bank-statement-io');
   const {
@@ -191,10 +208,18 @@ async function bankStatementRuntimeHeaders(filePath) {
   } finally {
     await workbook.close();
   }
-  if (JSON.stringify(streamed) === JSON.stringify(sheetJs)) return [sheetJs];
-  const width = Math.max(sheetJs.length, streamed.length);
-  return [Array.from({ length: width }, (_, index) => ((sheetJs[index] ?? '') === (streamed[index] ?? '')
-    ? sheetJs[index] ?? '' : `${sheetJs[index] ?? ''} / ${streamed[index] ?? ''}`))];
+  const deposit = await bankDepositStreamHeaderRow(filePath);
+  const { normalizeCell } = require('../../backend/file-service/common');
+  const { UNVERIFIABLE_CELL_TEXT } = require('../../backend/file-service/readers');
+  const width = Math.max(sheetJs.length, streamed.length, deposit ? deposit.length : 0);
+  const consistent = (index) => (sheetJs[index] ?? '') === (streamed[index] ?? '')
+    && (!deposit || normalizeCell(sheetJs[index] ?? '') === (deposit[index] ?? ''));
+  if (Array.from({ length: width }, (_, index) => index).every(consistent)) return [sheetJs];
+  //   流式读取无法确认原值的格显示为去掉标记字符的提示文字
+  const shown = (cell) => (cell === UNVERIFIABLE_CELL_TEXT ? cell.slice(1) : cell);
+  return [Array.from({ length: width }, (_, index) => (consistent(index) ? sheetJs[index] ?? '' : [...new Set([
+    sheetJs[index] ?? '', streamed[index] ?? '', ...(deposit ? [shown(deposit[index] ?? '')] : [])
+  ])].join(' / ')))];
 }
 
 // 流水对账单：与 VCC OP 发生额计算相同的读法（JSZip 流式解析首行）。
