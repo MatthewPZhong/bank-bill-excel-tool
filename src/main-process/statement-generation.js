@@ -4,7 +4,14 @@ const { getBalanceSeedFileIdentity } = require('../backend/balance-seed-store');
 
 const { mapEachCollectingCurrencyBigAccountIssues } = require('../backend/file-service/currency-big-account');
 const { isZeroOrBlankAmount, parseDateValue } = require('../backend/file-service/normalizers');
-const { FileValidationError: BillDateValidationError, normalizeCell: normalizeBillDateCell } = require('../backend/file-service/common');
+const {
+  FileValidationError: BillDateValidationError,
+  assertNoUnwritableRowText,
+  collectUnwritableRowText,
+  noteUnwritableRowText,
+  normalizeCell: normalizeBillDateCell
+} = require('../backend/file-service/common');
+const { assertWorkbookFileTextWritable } = require('../backend/file-service/writers');
 
 // 账单日期的必填口径（parseRequiredBillDates 与写出前的只读校验共用）：表头须有 BillDate 列；
 //   单元格为空时跳过，有值但无法解析时报错；整批没有任何有效日期时报错。
@@ -217,6 +224,8 @@ function createStatementGenerationHelpers(deps) {
       return undefined;
     };
     const exported = { hasRow: false, hasValidDate: false, dateError: null };
+    // v3.2.22 B113：导出行里无法原样写入工作表的文本（按最终明细，含回填的大账号），与 generateStatementFiles 写出前同口径
+    const unwritableText = { total: 0, labels: [] };
     const all = { hasValidDate: false, dateError: null };
     const checkDate = (state, raw) => {
       if (state.dateError || billDateIndex === undefined) return;
@@ -246,6 +255,7 @@ function createStatementGenerationHelpers(deps) {
         }
         exported.hasRow = true;
         checkDate(exported, billDate);
+        noteUnwritableRowText(unwritableText, row, headerRow, mergedRowMeta(rowIndex));
       }
     }
     if (simultaneousAmountRows.length) {
@@ -255,6 +265,7 @@ function createStatementGenerationHelpers(deps) {
     const dateState = exported.hasRow ? exported : all;
     if (dateState.dateError) throw dateState.dateError;
     if (!dateState.hasValidDate) throw noValidBillDateError();
+    assertNoUnwritableRowText(unwritableText);
     const shouldGenerateBalance = includeBalance === null
       ? Boolean(balanceRequested)
       : Boolean(includeBalance) && Boolean(balanceRequested);
@@ -345,6 +356,18 @@ function createStatementGenerationHelpers(deps) {
         : []
     };
 
+    const shouldGenerateBalance = includeBalance === null
+      ? Boolean(preparedBatch.balanceRequested)
+      : Boolean(includeBalance) && Boolean(preparedBatch.balanceRequested);
+
+    // v3.2.22 B113：写出任何文件前按最终明细（已回填大账号）核对文本能否原样写入，报源行号；明细与余额一起生成时，
+    //   一并核对余额模板原有的文字，不留下「明细已写出、余额因无法写入的字符改报告警」的半份结果（余额记录的取值来自明细行）
+    assertNoUnwritableRowText(collectUnwritableRowText(effectiveDetailRows, { rowMetas: effectiveDetailRows.rowMetas || [] }));
+    if (includeDetail && shouldGenerateBalance) {
+      const balanceTemplatePath = getBalanceTemplatePath();
+      if (fs.existsSync(balanceTemplatePath)) assertWorkbookFileTextWritable(balanceTemplatePath, '余额账单模板');
+    }
+
     if (includeDetail) {
       const detailOutput = buildStatementOutputFilePath({
         kind: 'detail',
@@ -369,10 +392,6 @@ function createStatementGenerationHelpers(deps) {
         billDates: dateRangeBounds(billDates)
       };
     }
-
-    const shouldGenerateBalance = includeBalance === null
-      ? Boolean(preparedBatch.balanceRequested)
-      : Boolean(includeBalance) && Boolean(preparedBatch.balanceRequested);
 
     if (shouldGenerateBalance) {
       // v3.2.21（D2）：渠道组内余额方式不同（带 balanceModeByAccount）时，组配置模板可能不出余额，

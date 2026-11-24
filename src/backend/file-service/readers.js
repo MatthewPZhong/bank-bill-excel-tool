@@ -367,10 +367,12 @@ function stripXmlComments(text) {
 //   - XML 注释：读取库不跳过注释（注释里的 <sheet>、关系、<row>、<c> 都会被解析），本模块按有效内容定位；
 //   - 标签内出现空格、回车、换行以外的空白（制表符等）：读取库（parsexmltag）只把这三种当作标签名的结束，
 //     认不出 <Relationship\t…> 这类标签，本模块的正则却认得出。
-//   Excel、WPS 与银行系统不会生成这些写法；出现时整张表不还原，按无法核对原值提示
+//   Excel、WPS 与银行系统不会生成这些写法；出现时整张表不还原，按无法核对原值提示，也不参与重复账单过滤。
+//   标签按引号边界识别（属性值里的 > 不是标签结尾），属性值内的这类空白同样算在内
+const UNVERIFIABLE_TAG_WHITESPACE = /<(?:[^\s>"']|[ \r\n]|"[^"]*"|'[^']*')*?(?:[^\S \r\n]|"[^"]*?[^\S \r\n]|'[^']*?[^\S \r\n])/;
 function hasUnverifiableXmlMarkup(text) {
   const source = String(text);
-  return source.includes('<!--') || /<[^>]*[^\S \r\n]/.test(source);
+  return source.includes('<!--') || UNVERIFIABLE_TAG_WHITESPACE.test(source);
 }
 
 // OOXML 关系命名空间（过渡与严格两种写法）
@@ -706,6 +708,11 @@ function markXlsxSourceEvidence(workbook, sheetName, sheet, range, specials) {
     return;
   }
   const text = xml.toString('utf8');
+  // 与长数字还原同一判定（B133）：读取库可能按注释里的行取值，原文行与读到的行无法一一对应
+  if (hasUnverifiableXmlMarkup(text)) {
+    markAllRows('工作表原文含注释或非常规空白，无法核对');
+    return;
+  }
   markConditionalNumberFormatRows(workbook, sheet, text, range, specials);
   // 单元格实际的数字格式（显示文本可以因格式不同）：单元格自身的样式，没有时继承行样式（customFormat）、再继承列样式。
   //   读取库只按单元格自身的样式给格式（继承的读成 General），这里按原文解析

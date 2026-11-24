@@ -1434,3 +1434,16 @@ test('XLSX：同一坐标有注释掉的旧行时不还原并提示', async (t) 
   assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740992'], '不写进有效行的流水号原文');
   assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
 });
+
+// B133：属性值里的 > 不是标签结尾，其后标签内的制表符同样识别为读取库口径不同的写法，不还原并提示
+test('XLSX：工作表标签的属性值含 > 、其后有制表符时不还原并提示', async (t) => {
+  const dir = createTempDir(t);
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 5]];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'quoted-gt.xlsx'), rows, { 1111: SERIAL }, (xml) => {
+    assert.match(xml, /<sheetData>/);
+    return xml.replace('<sheetData>', '<sheetData a=">"\tb="1">');
+  });
+  const mapped = map(filePath);
+  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740992'], '不还原');
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+});

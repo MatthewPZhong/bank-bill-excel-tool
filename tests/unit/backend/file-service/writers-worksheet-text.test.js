@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const XLSX = require('xlsx');
 
-const { prepareWorkbookTextForWrite } = require('../../../../src/backend/file-service/writers');
+const { assertWorkbookFileTextWritable, prepareWorkbookTextForWrite } = require('../../../../src/backend/file-service/writers');
 const { writeBalanceWorkbook, writeWorkbookRows } = require('../../../../src/backend/file-service');
 
 const ESCAPE_LIKE = [
@@ -89,4 +89,34 @@ test('prepareWorkbookTextForWrite：只改字符串单元格，数值、日期�
   assert.deepEqual(sheet.A1, { t: 's', v: 'A_x005F_x0041_' });
   assert.deepEqual(sheet.B1, { t: 'n', v: 46000, z: 'yyyy-mm-dd' });
   assert.deepEqual(sheet.C1, { t: 'b', v: true });
+});
+
+test('报错的列名取表头原文（转义前）；超过 20 处时按行列顺序列前 20 处并给出总数', (t) => {
+  const dir = createTempDir(t);
+  const outputFilePath = path.join(dir, 'many.xlsx');
+  const rows = [['Ref_x0041_', '摘要']];
+  for (let index = 0; index < 25; index += 1) rows.push([`bad\uFFFF${index}`, index === 0 ? 'x\uFFFE' : 'ok']);
+  assert.throws(() => writeWorkbookRows({ rows, outputFilePath }), (error) => {
+    assert.match(error.message, /^第 2 行「Ref_x0041_」列的值含无法写入 Excel 的字符.*等 26 处/);
+    assert.equal(error.detailLines.length, 21);
+    assert.deepEqual(error.detailLines.slice(0, 3), ['第 2 行「Ref_x0041_」列', '第 2 行「摘要」列', '第 3 行「Ref_x0041_」列']);
+    assert.equal(error.detailLines[19], '第 20 行「Ref_x0041_」列');
+    assert.equal(error.detailLines[20], '另有 6 处，共 26 处');
+    return true;
+  });
+  assert.equal(fs.existsSync(outputFilePath), false);
+});
+
+test('assertWorkbookFileTextWritable：模板文件任一工作表含无法写入的文字时拒绝，位置带表名', (t) => {
+  const dir = createTempDir(t);
+  const templateFilePath = path.join(dir, 'template.xlsx');
+  const template = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(template, XLSX.utils.aoa_to_sheet([['MerchantId', 'Balance']]), 'Sheet1');
+  XLSX.utils.book_append_sheet(template, XLSX.utils.aoa_to_sheet([['说明'], ['附注\uFFFF']]), '附表');
+  XLSX.writeFile(template, templateFilePath);
+  assert.throws(() => assertWorkbookFileTextWritable(templateFilePath, '余额账单模板'), (error) => {
+    assert.equal(error.code, 'FILE_READ');
+    assert.deepEqual(error.detailLines, ['余额账单模板工作表「附表」第 2 行「说明」列']);
+    return true;
+  });
 });

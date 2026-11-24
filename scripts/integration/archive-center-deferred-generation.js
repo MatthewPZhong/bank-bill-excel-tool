@@ -200,10 +200,12 @@ async function run() {
     const lifecycle = createLifecycle(service, controller);
     const policyRegistry = createTaskPolicyRegistry();
     const templates = [{ id: 7, name: '测试银行-上海' }];
+    // Step 3b 起模板多一个账号含无法写入 Excel 字符的大账号（月度余额的账号取自模板大账号）
+    const extraBigAccounts = [];
     const database = {
       listTemplates: () => templates,
       getTemplateBigAccounts: (templateId) => (templateId === 7
-        ? [{ merchantId: '6222000011112222', currency: 'USD' }]
+        ? [{ merchantId: '6222000011112222', currency: 'USD' }, ...extraBigAccounts]
         : [])
     };
     const { contracts, activity, errorResults } = loadMainHandlers({ storageRoot, database });
@@ -284,6 +286,39 @@ async function run() {
         assertEq(String(rows[1] && rows[1][accountColumn]), '6222000011112222', `${label}.账号`);
         assertEq(Number(rows[1] && rows[1][balanceColumn]), 1234.56, `${label}.期末余额`);
       }
+    }
+
+    // Step 3b（v3.2.22 B113）：余额记录含无法写入 Excel 的字符（如早期版本写入种子的账号）——按业务校验错误返回消息与逐处位置，
+    //   不改报「装配月度余额账单失败」系统错误；不留下输出文件
+    {
+      const label = 'Step3b.月度余额含无法写入的字符';
+      extraBigAccounts.push({ merchantId: '62220000\uFFFF', currency: 'USD' });
+      writeBalanceSeedRecords(storageRoot, '测试银行', [
+        { merchantId: '6222000011112222', currency: 'USD', billDate: '2026-09-30', endBalance: 1234.56,
+          templateName: '测试银行-上海' },
+        { merchantId: '62220000\uFFFF', currency: 'USD', billDate: '2026-10-31', endBalance: 1,
+          templateName: '测试银行-上海' }
+      ]);
+      const before = errorResults.length;
+      const taskRunId = 'deferred-monthly-unwritable';
+      const run = await runDeferred({
+        lifecycle, policyRegistry, contracts, taskRunId,
+        channel: 'monthly-balance:assemble',
+        payload: { templateScope: 'single', templateName: '测试银行-上海', year: 2026, month: 10 }
+      });
+      const result = run.result || {};
+      assertEq(result.status, 'error', `${label}.返回错误`);
+      assertEq(result.errorCode, 'FILE_READ', `${label}.按业务校验错误返回`);
+      assertTrue(/含无法写入 Excel 的字符/.test(String(result.message)), `${label}.消息说明原因（${result.message}）`);
+      assertEq(Array.isArray(result.detailLines) && result.detailLines.length, 1, `${label}.给出 1 处位置`);
+      assertEq(result.detailLines, ['第 3 行「银行账号」列'], `${label}.位置为行号与列名（第 2 行是正常账号）`);
+      const errorOptions = errorResults[before] || {};
+      assertEq([errorResults.length - before, errorOptions.errorCode, errorOptions.errorType], [1, 'FILE_READ', undefined], `${label}.报错文件按业务错误记录`);
+      assertEq(errorOptions.detailLines, result.detailLines, `${label}.报错文件列出同样的位置`);
+      const exportsDir = path.join(storageRoot, 'exports', '2026-11-10', 'balance');
+      const leftovers = fs.existsSync(exportsDir) ? fs.readdirSync(exportsDir).filter((name) => /2026-10|202610/.test(name)) : [];
+      assertEq(leftovers, [], `${label}.不留下输出文件`);
+      extraBigAccounts.length = 0;
     }
 
     // Step 4：月度余额无记录——零输出，不预留 Batch

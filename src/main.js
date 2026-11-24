@@ -18564,6 +18564,20 @@ function registerFileHandlers() {
         }
       };
     } catch (error) {
+      // v3.2.22 B113：业务校验错误（如余额记录含无法写入 Excel 的字符）把消息与逐处位置交给弹窗和报错文件，不改报系统错误
+      if (error instanceof FileValidationError) {
+        const detailLines = Array.isArray(error.detailLines) ? error.detailLines.slice() : [];
+        return {
+          ...createErrorResult({
+            step: '装配月度余额账单',
+            message: error.message,
+            errorCode: error.code || 'BUSINESS_ERROR',
+            detailLines,
+            context: error.context || {}
+          }),
+          detailLines
+        };
+      }
       return createErrorResult({
         step: '装配月度余额账单',
         message: '装配月度余额账单失败，请导出报错文件查看详情',

@@ -852,7 +852,7 @@
 - **影响**：只在 XLSX 内部 XML 被手工改写成 Excel、WPS 与银行系统不会生成的写法时出现：① `workbook.xml.rels` 的 `<Relationship` 后用制表符分隔属性，读取库（SheetJS `parsexmltag` 不把制表符当标签名结束符）认不出该关系、改按物理序号读表，本模块仍按关系定位，逻辑顺序与物理顺序不同的多表文件中，流水号可能还原成另一张表的原文；② 工作表 XML 里同一坐标保留注释掉的旧 `<row>` / `<c>`，读取库会解析注释中的行，本模块去掉注释后取有效行的原文，金额与流水号可能来自不同的行。两种情况下还原前后舍入成同一个数，不触发精度提示，交易标识血缘错位
 - **关闭条件**：还原原文与读取库取值使用同一份解析结果（或按读取库的实际解析口径定位工作表与单元格）；无法证明一致时（关系或工作表 XML 含注释、标签内有非空格的空白分隔等）整张表不还原并提示「无法核对原值」；补上述两种构造文件的回归用例，并复核此前用这类文件导出的流水号
 - **目标版本**：v3.2.22（暂定）；在此之前，合并前人工复核须确认实际使用的银行文件均由 Excel、WPS 或银行系统直接导出、未经手工改写 XML
-- **关闭**：v3.2.22（暂定，分支 `fix/statement-xlsx-io-boundary`）。workbook.xml、关系文件或工作表 XML 含注释、标签内有制表符等写法时（`readers.js` `hasUnverifiableXmlMarkup`），整张表不还原并按「长数字无法核对原值」提示，照常生成（[spec](../changes/v3.2.22/fix/statement-xlsx-io-boundary/spec.md) D1）。验证：单测 `statement-long-number-source-text.test.js` 新增关系标签制表符分隔并互换目标、工作表同一坐标有注释掉的旧行两例，翻转单元格内注释与关系文件注释两例，修复前四例均失败。「复核此前用这类文件导出的流水号」须人工处理
+- **关闭**：v3.2.22（暂定，分支 `fix/statement-xlsx-io-boundary`）。workbook.xml、关系文件或工作表 XML 含注释、标签内有制表符等写法时（`readers.js` `hasUnverifiableXmlMarkup`），整张表不还原并按「长数字无法核对原值」提示，照常生成；判断跳过引号内的属性值；重复账单过滤的工作表原文核对共用同一判断（[spec](../changes/v3.2.22/fix/statement-xlsx-io-boundary/spec.md) D1）。验证：单测 `statement-long-number-source-text.test.js` 新增关系标签制表符分隔并互换目标、工作表同一坐标有注释掉的旧行、属性值含 `>` 三例，翻转单元格内注释与关系文件注释两例，修复前四例均失败；`duplicate-source-rows.test.js` 查重同口径，修复前失败。「复核此前用这类文件导出的流水号」须人工处理
 
 ### B113（P3 · 已知问题）网银账单明细写出时，文本中形如 `_xHHHH_` 的字面值被当作 OOXML 转义改写
 
@@ -862,7 +862,7 @@
 - **2026-11-22 补充**（第十四轮审查）：写出器修复前，费用账单「字段映射特殊处理」的覆盖值（「自己输入」的固定文本与取自源列的值）写出后读回会被改写时拒绝保存 / 生成并列出位置，不交付被改写的标识（`hasWorksheetEscapeLikeText` 按写出器规则模拟往返：字面 `_xHHHH_`，以及 `_x0041` 后接回车时与回车的写出编码 `_x000d_` 拼成的转义，第十五轮审查发现）；实测 `_x005F_x0041_` 写出回读为字面 `_x0041_`，可作转义方案依据。主映射路径仍未处理。修复写出边界后应移除该拒绝
 - **关闭条件**：在 XLSX 写出边界对字面 `_xHHHH_` 做转义（如前缀 `_x005F_`），内存中的业务值不变；对 `U+FFFE` / `U+FFFF` / 未配对代理项明确拒绝或报错列出源行与列；用真实工作簿回读覆盖主映射与费用行两条路径
 - **目标版本**：未定
-- **关闭**：v3.2.22（暂定，分支 `fix/statement-xlsx-io-boundary`）。写出边界（`writers.js` `prepareWorkbookTextForWrite`，单组明细 / 余额与 `main.js` 多组明细合并）把文本中 `_` 后接 `x` + 4 位十六进制的下划线写成 `_x005F_`，内存值不变；含 U+FFFE、U+FFFF 或未配对代理项时，网银映射阶段按源行与写进的列整份拒绝，写出边界按输出行列兜底；费用账单的临时拒绝 `hasWorksheetEscapeLikeText` 及渲染端校验已移除（[spec](../changes/v3.2.22/fix/statement-xlsx-io-boundary/spec.md) D2–D4）。验证：单测 `writers-worksheet-text.test.js`、`statement-balance-gap.test.js`（合并），集成 `statement-bill-split-fee-bill.js` 主映射与费用行真实工作簿往返。其他模块写出路径的同类问题见 B134
+- **关闭**：v3.2.22（暂定，分支 `fix/statement-xlsx-io-boundary`）。写出边界（`writers.js` `prepareWorkbookTextForWrite`，单组明细 / 余额与 `main.js` 多组明细合并）把文本中 `_` 后接 `x` + 4 位十六进制的下划线写成 `_x005F_`，内存值不变；含 U+FFFE、U+FFFF 或未配对代理项时，在任何文件写出之前按源行与写进的列整份拒绝（映射阶段在回填大账号之后，多组预检与生成前按最终明细再查，明细与余额一起生成时先核对余额模板），写出边界按输出行列兜底，月度余额装配把位置交给弹窗与报错文件；费用账单的临时拒绝 `hasWorksheetEscapeLikeText` 及渲染端校验已移除（[spec](../changes/v3.2.22/fix/statement-xlsx-io-boundary/spec.md) D2–D4）。验证：单测 `writers-worksheet-text.test.js`、`statement-balance-gap.test.js`（合并、最终明细预检、余额模板），集成 `statement-bill-split-fee-bill.js` 主映射与费用行真实工作簿往返、`archive-center-deferred-generation.js`（月度余额）。其他模块写出路径的同类问题见 B134
 
 ### B132（P4 · 已知问题）大账号配置与大账号选择弹窗按 `MerchantId@@币种` 原样拼接账户键，含 `@@` 的不同账户会同键
 

@@ -92,6 +92,41 @@ function isWorksheetWritableText(value) {
   return typeof value === 'string' && value.isWellFormed() && !/[\uFFFE\uFFFF]/.test(value);
 }
 
+// v3.2.22 B113：行数据中无法原样写入工作表的文本。rows 首行为表头（列名），rowMetas[i] 对应 rows[i + 1]（取源行号）；
+//   include(row) 为 false 的行不看（如收付金额均为空或 0、不导出的行）。只保留前 limit 处位置说明，另计总数（大批出错时不随错误数占用内存）
+const UNWRITABLE_TEXT_DETAIL_LIMIT = 20;
+function noteUnwritableRowText(found, row, fieldNames, meta) {
+  row.forEach((value, columnIndex) => {
+    if (typeof value !== 'string' || isWorksheetWritableText(value)) return;
+    found.total += 1;
+    if (found.labels.length >= UNWRITABLE_TEXT_DETAIL_LIMIT) return;
+    const rowLabel = meta && meta.sourceRowNumber !== undefined ? `第 ${meta.sourceRowNumber} 行` : '';
+    found.labels.push(`${rowLabel}写进「${fieldNames[columnIndex]}」列的值`);
+  });
+  return found;
+}
+
+function collectUnwritableRowText(rows, { rowMetas = [], include = null, found = { total: 0, labels: [] } } = {}) {
+  const fieldNames = Array.isArray(rows[0]) ? rows[0] : [];
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (!Array.isArray(row) || (include && !include(row))) continue;
+    noteUnwritableRowText(found, row, fieldNames, rowMetas[index - 1]);
+  }
+  return found;
+}
+
+function assertNoUnwritableRowText(found) {
+  if (!found.total) return;
+  const detailLines = found.labels.slice();
+  if (found.total > detailLines.length) detailLines.push(`另有 ${found.total - detailLines.length} 处，共 ${found.total} 处`);
+  throw new FileValidationError(
+    'FILE_READ',
+    `源文件${found.labels[0]}含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）${found.total > 1 ? `等 ${found.total} 处` : ''}，请修正源文件后重新生成`,
+    { detailLines }
+  );
+}
+
 module.exports = {
   FEATURE_FILTER_FIELD_TOKEN_PREFIX,
   FileValidationError,
@@ -104,6 +139,10 @@ module.exports = {
   isRowMeaningful,
   isUnverifiedLongNumber,
   isWorksheetWritableText,
+  UNWRITABLE_TEXT_DETAIL_LIMIT,
+  assertNoUnwritableRowText,
+  collectUnwritableRowText,
+  noteUnwritableRowText,
   normalizeCell,
   trimTrailingEmptyCells
 };

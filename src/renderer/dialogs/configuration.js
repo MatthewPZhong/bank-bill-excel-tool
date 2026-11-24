@@ -358,9 +358,11 @@
           }));
           return;
         }
-        // status === 'error' 或其它失败
-
-        pushAlert(overlay, () => createAlertDialog(result?.message || '装配月度余额账单失败', {
+        // status === 'error' 或其它失败；业务校验错误（如记录含无法写入 Excel 的字符）一并列出逐处位置（v3.2.22 B113）
+        const lines = [result?.message || '装配月度余额账单失败']
+          .concat(Array.isArray(result?.detailLines) ? result.detailLines : []);
+        const text = lines.map((line) => String(line).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])).join('<br/>');
+        pushAlert(overlay, () => createAlertDialog(text, {
           onConfirm: null
         }));
       });
