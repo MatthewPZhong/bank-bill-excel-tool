@@ -18,6 +18,7 @@ const { LINKED_IMPORT_SIGNATURES } = require('../../src/constants/table-signatur
 const { AppDatabase } = require('../../src/backend/database');
 const linkedRepo = require('../../src/backend/database/linked-table-repository');
 const { streamLinkedRowsToInsert } = require('../../src/main-process/linked-table-stream-source');
+const { writeWorkbookRows } = require('../../src/backend/file-service');
 const { CHANNEL_VALUE, ADM_FUND_TYPES } = require('../../src/constants/adm-bank-deposit-fields');
 
 let passed = 0;
@@ -143,6 +144,26 @@ async function run() {
     }, { sourceFileName: 'single-blank.xlsx' });
     assertEq(retBlank.rowCount, 5, 'Step6.含1空行文件流式落库 rowCount=5（空行被跳过，非 6）');
     assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit').length, 5, 'Step6.DB 实际 5 行（无空 key 垃圾行）');
+
+    // Step7（v3.2.22 B113，Codex 第十一、十二轮）：本应用写出的明细中含空字符（写成 _x0000_）的值经真实入库路径整批拒绝：
+    //   先一行更新既有 ReconciliationId 的正常记录，再一行含空字符的 ReconciliationId；报物理行与列，原记录与行数不变
+    const nulFile = path.join(tmpDir, 'single-nul.xlsx');
+    writeWorkbookRows({
+      rows: [HEADERS, rowAoa({ ...DATA[0], 'Credit Amount': '9.9' }), rowAoa({ ...DATA[1], ReconciliationId: 'R-NUL\u0000X' })],
+      outputFilePath: nulFile
+    });
+    const rowsBeforeNul = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let nulError = null;
+    try {
+      await appDb.upsertLinkedBankDepositStreaming(async (writeOne) => {
+        await streamLinkedRowsToInsert(nulFile, SIG, writeOne, linkedRepo.pickBankDepositFields);
+      }, { sourceFileName: 'single-nul.xlsx' });
+    } catch (error) {
+      nulError = error;
+    }
+    assertEq(nulError && nulError.message.startsWith('源文件第 3 行「ReconciliationId」列的文本含空字符（U+0000）'), true,
+      `Step7.含空字符的值拒绝并报物理行与列：${nulError && nulError.message}`);
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeNul, 'Step7.原记录（含被更新的一行）与行数不变');
   } finally {
     try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }

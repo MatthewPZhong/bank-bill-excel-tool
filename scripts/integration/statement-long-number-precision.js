@@ -387,7 +387,7 @@ async function verifyBigAccountRecognitionRead(dir) {
   const plainDecision = directFor(plainUnrecognized);
   assertEq([plainDecision.status, plainDecision.code], ['failed', 'BIG_ACCOUNT_NOT_RECOGNIZED'], '⑤ 对照：普通未识别且只维护一个选项时按未识别报错');
   const unverifiedDecision = directFor(commented);
-  assertEq([unverifiedDecision.status, unverifiedDecision.code, /超出精度范围.*无法核对原值/.test(unverifiedDecision.message || '')],
+  assertEq([unverifiedDecision.status, unverifiedDecision.code, /超出精度范围.*无法核对原值.*不能确认哪个值是账号/.test(unverifiedDecision.message || '')],
     ['failed', 'BIG_ACCOUNT_NOT_RECOGNIZED', true], '⑤ 无法核对原值的长账号：按未识别报错并说明原因，不套用唯一的维护选项');
   assertEq([directFor(commented, plainUnrecognized).status, directFor(plainUnrecognized, commented).status], ['failed', 'failed'],
     '⑤ 与普通未识别的文件同批：两种文件顺序结果相同');

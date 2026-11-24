@@ -232,10 +232,55 @@ test('链接表：本应用写出的含空字符的值经流式导入拒绝入�
   await assert.rejects(streamLinkedRowsToInsert(outputFilePath, { expectedHeaders: ['BizId', '备注'] }, (row) => inserted.push(row)),
     (error) => error.code === 'FILE_READ' && error.message.startsWith('源文件第 3 行「BizId」列的文本含空字符（U+0000）')
       && !error.message.includes('TX'));
-  assert.deepEqual(inserted.map((row) => row.BizId), ['TX1'], '只喂入了之前的行（由仓储事务整批回滚）');
-  // 非流式导入（main.js readLinkedRowsAsObjectsWithMeta）调用同一校验
-  assert.throws(() => assertLinkedCellStorable('TX\u0000B', 7, 'BizId'), /第 7 行「BizId」列的文本含空字符/);
+  assert.deepEqual(inserted.map((row) => row.BizId), ['TX1'], '只喂入了之前的行（真实仓储事务的整批回滚见集成 v3.0.0-linked-streaming-import Step7）');
   assert.doesNotThrow(() => assertLinkedCellStorable('TX\u0001B', 7, 'BizId'));
+});
+
+// v3.2.22 B113（Codex 第十二轮）：非流式读取（main.js 闭包内的真实函数）只在链接表入库时拒绝空字符；退款订单只在内存中使用，
+//   保留原有读取契约
+test('链接表非流式读取：入库调用拒绝含空字符的值并报物理行号，退款订单读取不拦截', (t) => {
+  const acorn = require('acorn');
+  const { assertLinkedCellStorable } = require('../../../../src/main-process/linked-table-stream-source');
+  const { FileValidationError } = require('../../../../src/backend/file-service/common');
+  const mainSource = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'src', 'main.js'), 'utf8');
+  const functions = new Map();
+  const calls = [];
+  const walk = (node, owner) => {
+    if (!node || typeof node !== 'object') return;
+    let current = owner;
+    if (node.type === 'FunctionDeclaration' && node.id) {
+      functions.set(node.id.name, node);
+      current = node.id.name;
+    }
+    if (node.type === 'CallExpression' && node.callee.type === 'Identifier'
+      && ['readLinkedRowsAsObjectsWithMeta', 'readLinkedRowsAsObjects'].includes(node.callee.name)) {
+      calls.push({ owner: current, callee: node.callee.name, source: mainSource.slice(node.start, node.end) });
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach((item) => walk(item, current));
+      else if (value && typeof value === 'object' && value.type) walk(value, current);
+    }
+  };
+  walk(acorn.parse(mainSource, { ecmaVersion: 'latest', sourceType: 'script' }), null);
+  const names = ['readLinkedRowsAsObjectsWithMeta', 'readLinkedRowsAsObjects'];
+  const fns = Function('linkedTableReaders', 'normalizeLinkedCell', 'LinkedFileValidationError', 'assertLinkedCellStorable',
+    `${names.map((name) => mainSource.slice(functions.get(name).start, functions.get(name).end)).join('\n')}\nreturn { ${names.join(', ')} };`)(
+    require('../../../../src/backend/file-service/readers'), require('../../../../src/backend/file-service/common').normalizeCell,
+    FileValidationError, assertLinkedCellStorable);
+
+  const dir = createTempDir(t);
+  const filePath = path.join(dir, 'linked-multi.xlsx');
+  writeWorkbookRows({ rows: [['说明'], [], ['BizId', '备注'], ['TX1', 'ok'], ['TX2', 'a\u0000b']], outputFilePath: filePath });
+  const signature = { expectedHeaders: ['BizId', '备注'] };
+  assert.throws(() => fns.readLinkedRowsAsObjectsWithMeta(filePath, signature, null, { rejectUnstorableText: true }),
+    (error) => error.code === 'FILE_READ' && error.message.startsWith('源文件第 5 行「备注」列的文本含空字符'));
+  assert.deepEqual(fns.readLinkedRowsAsObjects(filePath, signature).map((row) => row['备注']), ['ok', 'a\u0000b'], '退款订单读取不拦截');
+  // 链接表入库（importLinkedFileToRepo）的非流式读取启用拒绝；退款订单读取不启用
+  assert.deepEqual(calls.filter((call) => call.owner !== 'readLinkedRowsAsObjects').map((call) => [call.owner, call.callee,
+    /rejectUnstorableText: true/.test(call.source)]), [
+    ['importLinkedFileToRepo', 'readLinkedRowsAsObjectsWithMeta', true],
+    [calls.find((call) => call.callee === 'readLinkedRowsAsObjects').owner, 'readLinkedRowsAsObjects', false]
+  ]);
 });
 
 // v3.2.22 B113（Codex 第七轮）：链接表的表头识别与流式导入按同一口径还原（写出端转义后的表头仍能识别）；还原后无法确认原值的格

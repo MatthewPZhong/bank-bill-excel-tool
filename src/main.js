@@ -3450,8 +3450,10 @@ function resolveDirectBigAccountRecognition({
       if (!fileResult.hasUnverifiedLongNumber || unrecognized.status !== 'failed') return unrecognized;
       return {
         ...unrecognized,
-        message: '账单表头上方的账号超出精度范围（超过 15 位且存成了数字），无法核对原值，未自动识别大账号。'
-          + '文件里存的已可能是近似值，另存或改单元格格式都无法恢复：请从银行原系统按文本重新导出账单后重新导入。',
+        // 只能确定识别窗口里有无法核对的长数字，不能确定它就是账号（可能是批次号等），提示不断言账号失真（Codex 第十二轮）
+        message: '账单表头上方的识别范围内有超出精度范围的数字（超过 15 位且存成了数字），无法核对原值，不能确认哪个值是账号，'
+          + '未自动识别大账号。文件里存的已可能是近似值，另存或改单元格格式都无法恢复：请从银行原系统把账号及表头上方的长编号按文本'
+          + '重新导出后重新导入。',
         detailLines: Array.isArray(unrecognized.detailLines) ? unrecognized.detailLines.slice() : []
       };
     }
@@ -19855,7 +19857,9 @@ function registerNewAccountHandlers() {
   //   既有 readLinkedRowsAsObjects 退化为只取 objects 的薄封装 → 所有旧调用方零行为变化。
   //   🔴 rowNumbers[i] = objects[i] 所在的原文件物理行号（1-based）；空行被 readRowsWithMetadata 过滤造成的
   //      行号断档（前后差 > 1）是 BOC 分组分隔符的唯一可还原依据（流式路径不透传行号，见 §2.5）。
-  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null) {
+  // rejectUnstorableText：结果要写入 SQLite（链接表入库）时传 true，含空字符的值拒绝；退款订单等只在内存中使用的读取不传，
+  //   保留原有读取契约（v3.2.22 B113，Codex 第十一、十二轮）
+  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null, { rejectUnstorableText = false } = {}) {
     const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
     if (expected.length === 0) {
       return { objects: [], rowNumbers: [] };
@@ -19904,7 +19908,7 @@ function registerNewAccountHandlers() {
         const cell = row[colOffset + i];
         obj[headerName] = normalizeLinkedCell(cell === undefined ? '' : cell);
         // 含空字符的值拒绝入库（与流式导入同口径，v3.2.22 B113，Codex 第十一轮）
-        assertLinkedCellStorable(obj[headerName], rowNumber, headerName);
+        if (rejectUnstorableText) assertLinkedCellStorable(obj[headerName], rowNumber, headerName);
       }
       objects.push(obj);
       rowNumbers.push(rowNumber);
@@ -19982,7 +19986,7 @@ function registerNewAccountHandlers() {
       }
     } else {
       // 数组路径：fx-settlement 用 WithMeta 同时取物理行号（BOC 分组扫描热依赖）；其余表零行为变化。
-      const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName);
+      const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName, { rejectUnstorableText: true });
       // 一行对应一行，物理行号 rowNumbers 与之对齐不变（BOC 分组依赖行号断档）。
       const rows = meta.objects.map((row) => projectLinkedRow(signature, row));
       if (repoKey === 'fx-settlement') {
