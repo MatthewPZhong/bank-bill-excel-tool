@@ -22425,12 +22425,26 @@ function buildToolboxAuditDetailLines(files, warningSummary = null) {
 }
 
 // v3.2.22 B58（spec D3，Codex 第十轮）：前台生成器失败时先核对冻结的输入：源文件在生成期间被替换（如换成缺少所选字段的版本）时
-//   按计划的失效口径报源文件已变化，不把另一版本引起的错误（「找不到字段」等）报给用户；输入未变或已取消时保留原错误
+//   按计划的失效口径报源文件已变化，不把另一版本引起的错误（「找不到字段」等）报给用户；输入未变或已取消时保留原错误。
+//   改报源文件已变化时保留原错误的暂存保留标志、清理诊断与人工恢复路径，清理失败的暂存文件不被外层删除（Codex 第十一轮）
+const TOOLBOX_CLEANUP_FAILURE_LINE_PREFIX = '清理工具箱临时产物失败：';
 async function generateToolboxCheckingInputs(filePlan, generate) {
   try {
     return await generate();
   } catch (error) {
-    if (filePlan && !/_CANCELLED$/.test(String(error && error.code || ''))) await assertFilePlanInputsFreshAsync(filePlan);
+    if (!filePlan || /_CANCELLED$/.test(String(error && error.code || ''))) throw error;
+    try {
+      await assertFilePlanInputsFreshAsync(filePlan);
+    } catch (staleError) {
+      if (error && typeof error === 'object') {
+        if (error.preserveTemporaryFiles === true) staleError.preserveTemporaryFiles = true;
+        const cleanupLines = (Array.isArray(error.detailLines) ? error.detailLines : [])
+          .filter((line) => String(line).startsWith(TOOLBOX_CLEANUP_FAILURE_LINE_PREFIX));
+        if (cleanupLines.length) staleError.detailLines = [...(staleError.detailLines || []), ...cleanupLines];
+        if (Array.isArray(error.recoveryPaths)) staleError.recoveryPaths = error.recoveryPaths.slice();
+      }
+      throw staleError;
+    }
     throw error;
   }
 }

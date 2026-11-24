@@ -714,9 +714,43 @@ for (const { kind, channel } of GENERATION_FAILURE_CASES) {
         assert.equal(result.code, kind === 'merge' ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', JSON.stringify(result));
         assert.doesNotMatch(String(result.message), /找不到字段/);
       } else {
-        assert.notEqual(result.code, kind === 'merge' ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', JSON.stringify(result));
+        // 源文件未变：原样透传注入的错误（Codex 第十一轮）
+        assert.deepEqual([result.code, result.message], ['TOOLBOX_INJECTED_GENERATION_FAILURE', '注入的生成失败'], JSON.stringify(result));
       }
       assert.equal(calls.publication, 0);
     });
   }
+}
+
+// 改报源文件已变化时保留原错误的暂存保留标志与清理诊断：清理失败的暂存文件不被外层删除（Codex 第十一轮）
+for (const kind of ['single', 'multiple', 'merge']) {
+  test(`${kind}：生成器清理失败且源文件已被替换：报源文件已变化，保留暂存文件与清理诊断（B58-T3）`, async (t) => {
+    const env = setup(t);
+    const kept = [];
+    const failAfterReplacing = async (options) => {
+      const savePath = options.savePath || options.groups[0].savePath;
+      fs.writeFileSync(savePath, 'staged');
+      kept.push(savePath);
+      fs.writeFileSync(`${env.source}.tmp`, 'Other,Price\n1,2\n');
+      fs.renameSync(`${env.source}.tmp`, env.source);
+      throw Object.assign(new Error('源文件中找不到字段「Name」'), {
+        detailLines: ['字段说明', '清理工具箱临时产物失败：EBUSY'],
+        preserveTemporaryFiles: true
+      });
+    };
+    t.after(() => kept.forEach((filePath) => fs.rmSync(path.dirname(filePath), { recursive: true, force: true })));
+    const { calls, contracts, execute } = loadHandlers(env, caseOverrides(env, kind, {
+      exportToolboxFilter: failAfterReplacing,
+      exportToolboxMultiFilters: failAfterReplacing,
+      toolboxMergeFilesToXlsx: failAfterReplacing
+    }));
+    const contract = contracts.get(CASES[kind].channel);
+    const prepared = await prepareIpcTaskInvocation(contract, {}, casePayload(env, kind) ? [casePayload(env, kind)] : []);
+    const result = await execute(contract, prepared);
+    assert.equal(result.code, kind === 'merge' ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', JSON.stringify(result));
+    assert.deepEqual(result.detailLines, ['清理工具箱临时产物失败：EBUSY']);
+    assert.equal(kept.length, 1);
+    assert.equal(fs.existsSync(kept[0]), true, '清理失败的暂存文件保留');
+    assert.equal(calls.publication, 0);
+  });
 }

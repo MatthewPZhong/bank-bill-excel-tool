@@ -717,6 +717,13 @@ test('多文件拆分后台生成失败：源文件被替换时报输入已变�
     await writeStyledFixture(sourcePath);
     const filePlan = multiFilePlan(sourcePath, [path.join(dir, 'final-A.xlsx')]);
     let publisherCalls = 0;
+    // 失败后的核对在主进程异步读取，不同步访问源文件（Codex 第十一轮）
+    const lstatSync = fs.lstatSync;
+    let syncSourceLstats = 0;
+    fs.lstatSync = (filePath, ...rest) => {
+      if (path.resolve(String(filePath)) === path.resolve(sourcePath)) syncSourceLstats += 1;
+      return lstatSync(filePath, ...rest);
+    };
     await assert.rejects(generateValidateAndPublishMultiOutput({
       runtime: {
         async execute() {
@@ -735,7 +742,8 @@ test('多文件拆分后台生成失败：源文件被替换时报输入已变�
       routeManifestPath: path.join(dir, `route-${replaced}.sealed.json`),
       production: false,
       publisher: async () => { publisherCalls += 1; }
-    }), { code: replaced ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_GENERATION_FAILED' });
+    }), { code: replaced ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_GENERATION_FAILED' }).finally(() => { fs.lstatSync = lstatSync; });
     assert.equal(publisherCalls, 0);
+    assert.equal(syncSourceLstats, 0, '不同步访问源文件');
   }
 });
