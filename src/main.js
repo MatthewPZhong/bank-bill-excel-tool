@@ -23666,6 +23666,12 @@ function registerToolboxHandlers() {
         }
       }
     } catch (error) {
+      // 读取、生成或发布前核对到源文件已变化：清除本次拆分读取会话（预取值与字段缓存），与 Renderer 丢弃 token 一致；
+      //   目标变化等可重试的失败保留会话（v3.2.22 B58，Codex 第十二、十三轮）
+      const code = error && error.code;
+      if (code === 'TOOLBOX_SPLIT_READ_CONTEXT_STALE' || code === 'ARCHIVE_INPUT_CHANGED') {
+        clearToolboxSplitReadContext(prepared && prepared.readContext);
+      }
       return toolboxFailureResult(error);
     }
     }

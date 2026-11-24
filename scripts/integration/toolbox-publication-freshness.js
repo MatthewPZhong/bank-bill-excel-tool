@@ -120,15 +120,21 @@ for (const kind of Object.keys(CASES)) {
       operationTracker: { appendOperationFiles: async () => ({ ok: true }) },
       persistTerminalIntent: (intent) => controller.persistTaskTerminalIntent(intent) });
     let batchContext = null;
+    // 业务侧发起的结算（不含 TaskLifecycle 在业务返回后的失败收尾）：包装真实 controls 计数后转发（Codex 第十三轮）
+    let businessSettles = 0;
     const result = await lifecycle.runFileTask({ policy, meta: { channel: policy.channel },
       taskRunId: `fresh-${kind}`, operationKey: `fresh-${kind}-operation`,
       filePlanResolver: () => prepared.filePlan, beforeStart: prepared.beforeStart,
       execute: async (context, controls) => {
         batchContext = context;
-        return contract.execute({}, prepared, createIpcTaskContext(context, controls));
+        const countedControls = { ...controls, settleArtifacts: (...args) => {
+          businessSettles += 1;
+          return controls.settleArtifacts(...args);
+        } };
+        return contract.execute({}, prepared, createIpcTaskContext(context, countedControls));
       } });
     assert.deepEqual([result.status, result.code], ['failed', LIFECYCLE_CODES[kind]], JSON.stringify(result));
-    assert.deepEqual([calls.publication, calls.settle], [0, 0]);
+    assert.deepEqual([calls.publication, businessSettles], [0, 0], '业务侧未发布、未结算');
     const task = service.repository.getTaskRun(`fresh-${kind}`);
     assert.deepEqual([task.status, task.failureCode], ['failed', 'BUSINESS_TASK_FAILED']);
     const batch = service.repository.getBatch(batchContext.batchId);

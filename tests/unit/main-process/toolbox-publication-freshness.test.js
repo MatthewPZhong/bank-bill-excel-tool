@@ -410,6 +410,8 @@ for (const kind of Object.keys(CASES)) {
       assert.equal(calls.publication, 0);
       assert.equal(calls.settle, 0);
       assert.deepEqual(fs.readdirSync(env.output).filter((name) => !name.startsWith('.')), []);
+      // 拆分：源文件已变化时清除本次拆分读取会话（Codex 第十三轮）
+      assert.equal(calls.clearedReadContexts.length, kind === 'merge' ? 0 : 1);
     });
   }
 }

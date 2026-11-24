@@ -925,3 +925,37 @@ test('单值拆分后台生成找不到字段：源文件已被替换时报输�
     fs.lstatSync = lstatSync;
   }
 });
+
+// v3.2.22 B58（Codex 第十三轮）：后台合表生成失败后先核对输入：生成期间第二份源文件被换成不同表头的版本时报输入已变化；
+//   源文件未变、表头本来就不同时保留原错误
+test('合表后台生成表头不一致：源文件已被替换时报输入已变化，未变时保留原错误', async () => {
+  const dir = makeTempDir('toolbox-background-merge-changed-');
+  const first = await writeWorkbook(path.join(dir, 'a.xlsx'), [['Name', 'Amount'], ['A', '1']]);
+  const second = await writeWorkbook(path.join(dir, 'b.xlsx'), [['Name', 'Amount'], ['B', '2']]);
+  const mergeInput = (inputs, name) => createGenerationInput({
+    actionKey: TOOLBOX_GENERATION_ACTIONS.MERGE,
+    filePlan: createFilePlan(inputs, path.join(dir, 'final.xlsx'), TOOLBOX_GENERATION_ACTIONS.MERGE),
+    generationPath: path.join(dir, `${name}.xlsx`),
+    operationConfig: { sheetBaseName: 'Sheet' }
+  });
+  // 源文件未变、表头本来就不同：保留生成器的原错误
+  const other = await writeWorkbook(path.join(dir, 'other.xlsx'), [['Other', 'Amount'], ['C', '3']]);
+  await assert.rejects(executeMergeGeneration(mergeInput([first, other], 'mismatch'), new AbortController().signal),
+    (error) => error.code !== 'ARCHIVE_INPUT_CHANGED' && /表头与.*不一致/.test(String(error.message)));
+  // 冻结两份同表头的输入；生成前的核对看到的是替换前的第二份，生成器读到的是不同表头的新版本
+  const replacedInput = mergeInput([first, second], 'replaced');
+  const statBefore = fs.lstatSync(second, { bigint: true });
+  await writeWorkbook(`${second}.next.xlsx`, [['Other', 'Amount'], ['B', '2']]);
+  fs.renameSync(`${second}.next.xlsx`, second);
+  const lstatSync = fs.lstatSync;
+  let secondLstats = 0;
+  fs.lstatSync = (filePath, ...rest) => {
+    if (path.resolve(String(filePath)) === path.resolve(second) && (secondLstats += 1) === 1) return statBefore;
+    return lstatSync(filePath, ...rest);
+  };
+  try {
+    await assert.rejects(executeMergeGeneration(replacedInput, new AbortController().signal), { code: 'ARCHIVE_INPUT_CHANGED' });
+  } finally {
+    fs.lstatSync = lstatSync;
+  }
+});
