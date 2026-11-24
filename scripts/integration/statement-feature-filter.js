@@ -12,6 +12,7 @@
 //   ⑥ 拆分/合并「不复用」映射：拆分映射所选特征值在展开行生效；拆分映射引用缺失时保存主映射被拒；
 //      主映射残留该值但不生效时不要求选特征值、不记未命中
 //   ⑦ BillDate 取该值时，所选特征值源列里的“合计”标签仍按合计行跳过，合计金额不作为交易导出（资金红线回归）
+//   ⑧ v3.2.22 新增分隔符 - _ $：保存 → 读回保留键名 → 生成按所选分隔符取值 → 回读导出明细
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-feature-filter.js
@@ -668,6 +669,41 @@ function verifySummaryRowWithFeatureBillDate(dir, { database, main }) {
   );
 }
 
+// ⑧ v3.2.22 新增分隔符：保存 → 读回 → 生成 → 回读导出
+function verifyNewSeparators(dir, { database, main }) {
+  const template = database.upsertTemplate({ name: 'BANKF-分隔符', sourceFileName: 'f.xlsx', headers: HEADERS });
+  saveFeatureFilters(main, database, template.id, [
+    { name: '流水号', sourceField: '附言', separator: 'dollar', length: '10', letterPrefixCount: '2', digitsOnly: true, sample: 'FT24123456' },
+    { name: '订单号', sourceField: '附言', separator: 'hyphen', length: '6', digitsOnly: true, sample: '123456' },
+    { name: '批次号', sourceField: '附言', separator: 'underscore', letterPrefixCount: '1', length: '4' }
+  ]);
+  assertEq(database.getTemplate(template.id).featureFilters.map((item) => [item.id, item.name, item.separator]),
+    [['1', '流水号', 'dollar'], ['2', '订单号', 'hyphen'], ['3', '批次号', 'underscore']], '⑧ 新分隔符保存后读回保留键名');
+  const validated = main.validateTemplateConfiguration({
+    template,
+    mappings: mappingsFor({ Remark: { feature: '1' }, Reference: { feature: '2' } }),
+    enumValues: ENUM_VALUES,
+    featureFilters: database.getTemplate(template.id).featureFilters
+  });
+  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, {});
+  const sourcePath = path.join(dir, 'source-f.xlsx');
+  writeSource(sourcePath, [
+    ['2026-11-01', 'PAY$FT24123456$X-123456-Y', 'USD', '100', '', 'ACC1'],
+    ['2026-11-02', 'FT24999999-654321', 'USD', '', '30', 'ACC1']
+  ]);
+  const detailRows = generate(main, database, template.id, sourcePath);
+  assertEq(pickColumns(detailRows, ['Remark', 'Reference']), [['FT24123456', '123456'], ['', '654321']],
+    '⑧ 按 $ / - 拆段取值；未出现 $ 时整格不满足条件留空');
+  const outputPath = path.join(dir, 'detail-f.xlsx');
+  writeWorkbookRows({ rows: buildDetailExportRows(detailRows), outputFilePath: outputPath });
+  const exported = readSheet(outputPath);
+  assertEq(
+    exported.rows.map((row) => [row[exported.header.indexOf('Remark')], row[exported.header.indexOf('Reference')]]),
+    [['FT24123456', '123456'], ['', '654321']],
+    '⑧ 回读导出明细'
+  );
+}
+
 async function run() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-feature-filter-'));
   try {
@@ -678,6 +714,7 @@ async function run() {
     verifyBundleRoundTrip(dir, context);
     verifyBillSplitNotReuse(dir, context);
     verifySummaryRowWithFeatureBillDate(dir, context);
+    verifyNewSeparators(dir, context);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }

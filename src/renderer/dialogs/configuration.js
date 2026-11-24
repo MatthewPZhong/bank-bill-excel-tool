@@ -1446,7 +1446,11 @@
       { value: 'slash', label: '/' },
       { value: 'comma', label: ',' },
       { value: 'dot', label: '.' },
-      { value: 'backslash', label: '\\' }
+      { value: 'backslash', label: '\\' },
+      // v3.2.22：新增 - _ $
+      { value: 'hyphen', label: '-' },
+      { value: 'underscore', label: '_' },
+      { value: 'dollar', label: '$' }
     ];
     const FEATURE_FILTER_MAX_LENGTH = 200;
     const FEATURE_FILTER_NAME_MAX_LENGTH = 30;
@@ -1472,7 +1476,9 @@
     function splitFeatureFilterText(text, separator) {
       const value = String(text ?? '').trim();
       if (!value) return [];
-      const splitter = { space: /\s+/u, slash: '/', comma: ',', dot: '.', backslash: '\\' }[separator];
+      const splitter = {
+        space: /\s+/u, slash: '/', comma: ',', dot: '.', backslash: '\\', hyphen: '-', underscore: '_', dollar: '$'
+      }[separator];
       if (!splitter) return [value];
       return value.split(splitter).map((part) => part.trim()).filter((part) => part !== '');
     }
@@ -1738,7 +1744,32 @@
         renderFeatureFilterOptions(pickSelect, currentList, selectedId);
       }
 
-      renderPick('');
+      // v3.2.22：特征值下拉默认空白；已有特征值时默认选中最早新增的一个并回显（列表即新增顺序：新增追加在末尾，保存保序）
+      function applyDefaultSelection() {
+        const first = currentList[0] || null;
+        renderPick(first ? first.id : '');
+        if (!first) {
+          hideForm();
+          return;
+        }
+        editingId = String(first.id);
+        showForm(first);
+      }
+
+      // v3.2.22：正在修改的已有特征值与原值一致（如打开后默认选中即点【保存】）时直接关闭、不写库
+      function isDraftUnchanged(item, draft) {
+        if (!item) return false;
+        const countText = (value) => (value ? String(value) : '');
+        return String(draft.name || '').trim() === String(item.name || '').trim()
+          && String(draft.sourceField || '').trim() === String(item.sourceField || '').trim()
+          && String(draft.separator || '') === String(item.separator || '')
+          && String(draft.length || '').trim() === countText(item.length)
+          && String(draft.letterPrefixCount || '').trim() === countText(item.letterPrefixCount)
+          && draft.digitsOnly === Boolean(item.digitsOnly)
+          && String(draft.sample || '').trim() === String(item.sample || '').trim();
+      }
+
+      applyDefaultSelection();
       syncDigitsLabel();
 
       pickSelect.addEventListener('change', () => {
@@ -1809,8 +1840,7 @@
               const closed = closeModal(handle, { status: 'submitted' });
               if (closed.status !== 'closed') return;
               currentList = cloneFeatureFilters(result.featureFilters);
-              renderPick('');
-              hideForm();
+              applyDefaultSelection();
               if (typeof onChange === 'function') onChange(cloneFeatureFilters(currentList));
             }
           });
@@ -1831,8 +1861,7 @@
           closeManager('submitted');
           return;
         }
-        const others = currentList.filter((item) => String(item.id) !== editingId);
-        const { errors, rule } = validateFeatureFilterDraft({
+        const draft = {
           name: nameInput.value,
           sourceField: sourceSelect.value,
           separator: separatorSelect.value,
@@ -1840,7 +1869,13 @@
           letterPrefixCount: prefixInput.value,
           digitsOnly: digitsInput.checked,
           sample: sampleInput.value
-        }, headers, others);
+        };
+        if (editingId && isDraftUnchanged(findFeatureFilterById(currentList, editingId), draft)) {
+          closeManager('submitted');
+          return;
+        }
+        const others = currentList.filter((item) => String(item.id) !== editingId);
+        const { errors, rule } = validateFeatureFilterDraft(draft, headers, others);
         if (errors.length) {
           pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
           return;
@@ -5135,6 +5170,7 @@
 
         if (fieldName === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD) {
           renderAmountSplitToggleRow(fieldName);
+          renderFeatureFilterSettingRow();
           return;
         }
 
@@ -5167,7 +5203,8 @@
             || (!supportsMultiSelect && savedMapping.mappedField === LOGIC_VALUE_MAPPING_FIELD)
           )))
           .join('');
-        // v3.2.19：「选择特征值」+ 下拉框 +【特征值管理】成组，与映射字段下拉框同行；空间不足时整组换行
+        // v3.2.19：「选择特征值」+ 下拉框成组，与映射字段下拉框同行；空间不足时整组换行
+        //   v3.2.22：行内不再有【特征值管理】，改在「个性化映射设置 → 特征值设置」点【管理】
         // v3.2.19：「逻辑取值」时下拉框右侧显示【设置】与当前候补顺序
         row.innerHTML = `
           <td>${escapeHtml(fieldName)}</td>
@@ -5178,7 +5215,6 @@
                 <span class="mapping-feature-value-group" hidden>
                   <span class="mapping-feature-value-label" hidden>选择特征值</span>
                   <select class="mapping-select mapping-feature-value-select" hidden></select>
-                  <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
                 </span>
                 <button class="secondary-btn small mapping-logic-value-btn" type="button" hidden>设置</button>
                 <span class="mapping-logic-value-preview" hidden></span>
@@ -5204,7 +5240,6 @@
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
         const manageCurrencyBigAccountBtn = row.querySelector('.mapping-currency-big-account-manage-btn');
-        const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
         const featureValueGroup = row.querySelector('.mapping-feature-value-group');
         const featureValueLabel = row.querySelector('.mapping-feature-value-label');
         const featureValueSelect = row.querySelector('.mapping-feature-value-select');
@@ -5355,10 +5390,9 @@
           if (manageCurrencyBigAccountBtn) {
             manageCurrencyBigAccountBtn.hidden = selectedValue !== MERCHANT_ID_CURRENCY_ONLY_OPTION;
           }
-          if (featureFilterBtn) {
+          if (featureValueGroup) {
             const isFeatureFilterMode = selectedValue === FEATURE_FILTER_MAPPING_FIELD;
             featureValueGroup.hidden = !isFeatureFilterMode;
-            featureFilterBtn.hidden = !isFeatureFilterMode;
             featureValueLabel.hidden = !isFeatureFilterMode;
             featureValueSelect.hidden = !isFeatureFilterMode;
           }
@@ -5450,12 +5484,9 @@
           });
         }
 
-        if (featureFilterBtn) {
+        if (featureValueSelect) {
           featureValueSelect.addEventListener('change', () => {
             featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
-          });
-          featureFilterBtn.addEventListener('click', () => {
-            openFeatureFilterManager();
           });
         }
 
@@ -5473,8 +5504,8 @@
         tbody.appendChild(row);
       });
 
-      // v3.2.21：「启用」列——从「原始账单预处理」标题行到最后一个勾选行，两侧竖线贯穿，勾选框居于竖线中间。
-      //   缺标题行或其后没有勾选行（旧载荷）时不加列，勾选框保持在文字右侧。
+      // v3.2.21：「启用」列——从「原始账单预处理」标题行到最后一个勾选行，勾选框居于「启用」列头正下方。
+      //   v3.2.22：去掉列两侧的竖线。缺标题行或其后没有勾选行（旧载荷）时不加列，勾选框保持在文字右侧。
       (function markEnableColumnRows() {
         const rows = Array.from(tbody.rows);
         const startIndex = rows.findIndex((item) => item.dataset.enableHead === 'true');
@@ -5485,8 +5516,6 @@
           return;
         }
         rows.slice(startIndex, endIndex + 1).forEach((item) => item.classList.add('mapping-enable-span'));
-        rows[startIndex].classList.add('mapping-enable-span-start');
-        rows[endIndex].classList.add('mapping-enable-span-end');
       })();
 
       // v3.2.19：取值只有 是 / 否（空白）的行用勾选框（勾选 = 是）：文字在左、勾选框紧跟其右；
@@ -5602,6 +5631,24 @@
           onToggle: () => applyAmountSplitMutualExclusion(),
           onButtonClick: () => openAmountSplitRulesDialog()
         });
+      }
+
+      // v3.2.22：「个性化映射设置」中「按字段区分发生额」下方的「特征值设置」——右侧【管理】打开特征值管理（原映射行内的【特征值管理】）。
+      //   不是映射行：不写 data-template-field，collectMappingDraftFromTable 不收集；载荷没有「按字段区分发生额」（旧载荷）时不渲染。
+      function renderFeatureFilterSettingRow() {
+        const row = document.createElement('tr');
+        row.className = 'mapping-setting-row';
+        row.dataset.role = 'feature-filter-setting';
+        row.innerHTML = `
+          <td>特征值设置</td>
+          <td>
+            <div class="mapping-field-editor">
+              <button class="secondary-btn small feature-filter-manage-btn" type="button">管理</button>
+            </div>
+          </td>
+        `;
+        row.querySelector('.feature-filter-manage-btn').addEventListener('click', () => openFeatureFilterManager());
+        tbody.appendChild(row);
       }
 
       // v3.2.19：原始账单预处理——「过滤账单」勾选后显示【规则设置】；「重复账单过滤」只有勾选框；与拆分/合并无关，始终可用
@@ -5803,13 +5850,8 @@
           preprocessFields: preprocessFields.slice(),
           advancedMappingFields: advancedMappingFields.slice(),
           billSplitGroupFields: billSplitGroupFields.slice(),
-          // v3.2.18：与主映射共用特征值列表；拆分弹窗里的【特征值管理】即时落库后回写主映射
+          // v3.2.18：与主映射共用特征值列表；v3.2.22 起特征值只在主弹窗「特征值设置 →【管理】」维护，拆分弹窗只选用
           featureFilters: currentFeatureFilters,
-          getMainFeatureFilterUsage: () => collectFeatureFilterUsage(collectMappingDraftFromTable(tbody)),
-          onFeatureFiltersChange: (nextFeatureFilters) => {
-            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
-            refreshFeatureValueSelects();
-          },
           onDone: (nextMappings) => {
             currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
             // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
@@ -5921,21 +5963,18 @@
 
         function setRowDisabled(row, control, disabled) {
           if (!row || !control) return;
-          // v3.2.16：互斥禁用时【特征值管理】按钮与「选择特征值」随下拉框一起禁用
-          const featureFilterButton = row.querySelector('.mapping-feature-filter-btn');
+          // v3.2.16：互斥禁用时「选择特征值」随下拉框一起禁用
           const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           // v3.2.19：逻辑取值的【设置】同样随行禁用
           const logicValueButton = row.querySelector('.mapping-logic-value-btn');
           if (disabled) {
             row.classList.add('mapping-row-mutex-disabled');
             control.disabled = true;
-            if (featureFilterButton) featureFilterButton.disabled = true;
             if (featureValueSelect) featureValueSelect.disabled = true;
             if (logicValueButton) logicValueButton.disabled = true;
           } else {
             row.classList.remove('mapping-row-mutex-disabled');
             control.disabled = false;
-            if (featureFilterButton) featureFilterButton.disabled = false;
             if (featureValueSelect) featureValueSelect.disabled = false;
             if (logicValueButton) logicValueButton.disabled = false;
           }
@@ -6322,16 +6361,14 @@
       advancedMappingFields = [],
       billSplitGroupFields = [],
       featureFilters = [],
-      getMainFeatureFilterUsage = null,
-      onFeatureFiltersChange = null,
       onDone,
       onCancel
     }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card bill-split-mappings-card';
-      // v3.2.18：与主映射共用特征值列表；【特征值管理】即时落库后经 onFeatureFiltersChange 回写主映射弹窗。
-      let currentFeatureFilters = cloneFeatureFilters(featureFilters);
+      // v3.2.18：与主映射共用特征值列表；v3.2.22 起本弹窗只选用，特征值在主弹窗「特征值设置 →【管理】」维护。
+      const currentFeatureFilters = cloneFeatureFilters(featureFilters);
 
       // 模板字段列表 = targetFields 排除 Currency / Credit Amount / Debit Amount + 高级字段 + bill-split group 字段
       const excludeFields = new Set([
@@ -6421,7 +6458,6 @@
                 ${supportsMultiSelect ? `
                 <span class="mapping-feature-value-label" hidden>选择特征值</span>
                 <select class="mapping-select mapping-feature-value-select" hidden></select>
-                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
                 ` : ''}
                 ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
@@ -6438,7 +6474,6 @@
           `;
 
           const select = row.querySelector('.bill-split-mapping-select');
-          const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
           const featureValueLabel = row.querySelector('.mapping-feature-value-label');
           const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           const concatPicker = row.querySelector('.concat-field-picker');
@@ -6506,14 +6541,11 @@
             });
           }
 
-          if (featureFilterBtn) {
+          if (featureValueSelect) {
             featureValueSelect.addEventListener('change', () => {
               entry.featureFilterRef = featureValueSelect.value;
               syncFeatureFilterRef();
               featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
-            });
-            featureFilterBtn.addEventListener('click', () => {
-              openFeatureFilterManager();
             });
           }
 
@@ -6526,8 +6558,7 @@
           function syncEditorState() {
             const isConcatMode = select.value === CONCAT_FIELDS_MAPPING_FIELD;
             const isFeatureFilterMode = select.value === FEATURE_FILTER_MAPPING_FIELD;
-            if (featureFilterBtn) {
-              featureFilterBtn.hidden = !isFeatureFilterMode;
+            if (featureValueSelect) {
               featureValueLabel.hidden = !isFeatureFilterMode;
               featureValueSelect.hidden = !isFeatureFilterMode;
             }
@@ -6560,40 +6591,6 @@
       function validateLocalMappings() {
         // 校验：同字段不可重复（已通过结构保证），空字段会被后端丢弃，无需前端报错
         return true;
-      }
-
-      // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」（保留已选）。
-      //   已删除特征值的缓存引用一并清掉：删除最大 id 后再新增会沿用该 id，残留引用切回时会指向新特征值而界面显示空白。
-      function refreshFeatureValueSelects() {
-        currentDialogMappings.forEach((entry) => {
-          if (!entry.featureFilterRef || findFeatureFilterById(currentFeatureFilters, entry.featureFilterRef)) return;
-          entry.featureFilterRef = '';
-          if (entry.mappedField === FEATURE_FILTER_MAPPING_FIELD) entry.mappedFields = [];
-        });
-        tbody.querySelectorAll('.mapping-feature-value-select').forEach((featureValueSelect) => {
-          renderFeatureFilterOptions(featureValueSelect, currentFeatureFilters, featureValueSelect.value);
-        });
-      }
-
-      function openFeatureFilterManager() {
-        pushModal(overlay, () => createFeatureFilterManagerDialog({
-          templateId: template.id,
-          headers,
-          featureFilters: currentFeatureFilters,
-          getUsage: () => collectFeatureFilterUsage(
-            currentDialogMappings,
-            FEATURE_FILTER_SPLIT_USAGE_SUFFIX,
-            typeof getMainFeatureFilterUsage === 'function' ? getMainFeatureFilterUsage() : new Map()
-          ),
-          onChange: (nextFeatureFilters) => {
-            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
-            refreshFeatureValueSelects();
-            if (typeof onFeatureFiltersChange === 'function') onFeatureFiltersChange(cloneFeatureFilters(currentFeatureFilters));
-          },
-          onClose: () => {
-            returnToModal(overlay);
-          }
-        }));
       }
 
       // 返回因「逻辑取值」留空的字段（拆分/合并账单映射不支持该值）。

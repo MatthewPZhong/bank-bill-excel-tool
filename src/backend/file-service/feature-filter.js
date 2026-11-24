@@ -20,7 +20,11 @@ const FEATURE_FILTER_SEPARATOR_SPLITTERS = Object.freeze({
   slash: '/',
   comma: ',',
   dot: '.',
-  backslash: '\\'
+  backslash: '\\',
+  // v3.2.22：新增 - _ $（按字符串拆分，$ 不走正则）
+  hyphen: '-',
+  underscore: '_',
+  dollar: '$'
 });
 
 const FEATURE_FILTER_SEPARATOR_LABELS = Object.freeze({
@@ -29,7 +33,10 @@ const FEATURE_FILTER_SEPARATOR_LABELS = Object.freeze({
   slash: '/',
   comma: ',',
   dot: '.',
-  backslash: '\\'
+  backslash: '\\',
+  hyphen: '-',
+  underscore: '_',
+  dollar: '$'
 });
 
 function fail(message, name = '') {
@@ -115,7 +122,7 @@ function extractFeatureValue(cellValue, rule) {
 // 规范化并校验一条筛选条件；headers 为模板表头时校验源字段存在；name 只用于错误提示。失败抛 FileValidationError。
 function normalizeFeatureFilterRule(raw, { headers = null, name = '' } = {}) {
   if (!isPlainObject(raw)) {
-    throw fail('尚未设置筛选条件，请点击【特征值管理】设置', name);
+    throw fail('尚未设置筛选条件，请在「特征值设置」点击【管理】设置', name);
   }
 
   const sourceField = normalizeCell(raw.sourceField);
@@ -239,7 +246,7 @@ function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null, 
     const id = normalizeCell(raw.id);
     if (id) {
       if (knownIds && !knownIds.has(id)) {
-        throw fail(`特征值「${name}」不存在或已被删除，请重新打开【特征值管理】`);
+        throw fail(`特征值「${name}」不存在或已被删除，请在「特征值设置」点击【管理】重新打开`);
       }
       if (seenIds.has(id)) {
         throw fail(`特征值 id 重复：${id}`);
