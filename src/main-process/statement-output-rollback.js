@@ -4,7 +4,8 @@
 //   - 每个文件首次写入前记下原状态：已存在的普通文件复制原内容到批次临时目录，不存在的记为新建；路径上是符号链接、
 //     文件夹等非普通文件时拒绝写出（写出会跟随链接改写别处的文件，回滚无法还原），由调用方回滚本批已写的内容。
 //     同一文件经不同路径写入（不区分大小写的文件系统上大小写不同的路径、硬链接）按 dev + ino 合并为一条，只保留首份备份，
-//     并记下写过的每个路径（回滚时逐一核对，已脱离原文件的路径列入恢复清单）。文件系统不提供文件编号（ino 为 0）时按路径区分。
+//     并记下写过的每个路径（回滚时逐一核对，已脱离原文件的路径列入恢复清单）。文件系统不提供文件编号（ino 为 0）时按路径区分；
+//     此时原有文件另有硬链接（nlink > 1）的无法确认各链接是否同一文件，首次改写前拒绝。
 //   - 首次记下时即把「原路径 ↔ 备份文件」追加到批次目录的写出记录，临时卷随后写满时仍可据此人工恢复。
 //   - 每次写完记下文件身份（dev + ino + 大小 + 修改时间）。同一文件再次写入前核对身份，写完后被其他程序替换或修改的
 //     不再写入、回滚时也不覆盖。已知文件（原有文件、本批写成过的文件）写前写后的文件编号不同，说明写出期间被替换，同样停止。
@@ -124,14 +125,17 @@ function changedExternallyError(filePath) {
   );
 }
 
-function unsafeTargetError(filePath) {
+function unsafeTargetError(filePath, message = '导出位置有同名的快捷方式（符号链接）或文件夹，无法安全覆盖，请移走后重新导入') {
   // 只给目录：内部文件名可能含完整账号
   return new FileValidationError(
     'STATEMENT_OUTPUT_TARGET_UNSAFE',
-    '导出位置有同名的快捷方式（符号链接）或文件夹，无法安全覆盖，请移走后重新导入',
+    message,
     { detailLines: [`所在目录：${path.dirname(filePath)}`] }
   );
 }
+
+const UNIDENTIFIABLE_HARD_LINK_MESSAGE = '导出位置的同名文件另有硬链接，且所在磁盘不提供文件编号、无法确认各链接是否为同一文件，'
+  + '无法安全覆盖，请改为独立的文件后重新导入';
 
 // 还原不完整：改报业务错误，列出原因、未能还原的数量与恢复清单位置（清单在系统临时目录、含完整路径，供本机人工恢复）。
 //   不列文件路径：内部文件名可能含完整账号，错误会写入报错文件
@@ -176,10 +180,13 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   }
 
   // 写出前的目标检查：路径上是符号链接、文件夹等非普通文件时拒绝。多模板生成在首次读取余额种子前也调用
+  //   文件系统不提供文件编号（ino 为 0）且文件另有硬链接时同样拒绝：真实路径不能把各硬链接归为同一文件，经不同链接写入会
+  //   各记一份备份（后一份已是前组写后的内容），回滚无法还原批前内容（Codex 第六轮）
   function checkTarget(filePath) {
     const resolved = path.resolve(String(filePath || ''));
     const stat = lstatOrNull(fsImpl, resolved);
     if (stat && !stat.isFile()) throw unsafeTargetError(resolved);
+    if (stat && !stat.ino && stat.nlink > 1) throw unsafeTargetError(resolved, UNIDENTIFIABLE_HARD_LINK_MESSAGE);
     return { resolved, stat };
   }
 
@@ -282,6 +289,29 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     return fileKeyOf(current, entry.filePath, fsImpl) === entry.ownedFileKey ? null : FAILURE_REASONS.CHANGED_EXTERNALLY;
   }
 
+  function noteRestoreAttempt(entry, fd) {
+    try {
+      entry.writtenIdentity = identityOf(fsImpl.fstatSync(fd, { bigint: true }));
+      entry.writePending = false;
+    } catch (_error) {
+      // 取不到状态时保持原记录：别名重试按写完后被改动处理，交给人工
+    }
+  }
+
+  // 经别名写回原内容后复核此前失败的路径：仍指向原文件且内容与备份一致的，已随别名一起还原（Codex 第六轮）
+  function restoredInPlace(entry, filePath) {
+    try {
+      const current = lstatOrNull(fsImpl, filePath);
+      if (!current || !current.isFile() || fileKeyOf(current, filePath, fsImpl) !== entry.ownedFileKey) return false;
+      return withOpenFile(fsImpl, filePath, 'r', (fd) => (
+        fileKeyOf(fsImpl.fstatSync(fd, { bigint: true }), filePath, fsImpl) === entry.ownedFileKey
+          && sameContent(fsImpl, fd, path.join(backupDirectory, entry.backupName))
+      ));
+    } catch (_error) {
+      return false;
+    }
+  }
+
   // 原有文件写回：先只读打开比较内容（一致时不写回：被 Excel 占用、写出时根本没打开的文件，写回会再次撞上占用）；
   //   需要写回时以不截断方式打开，在同一描述符上核对身份后再截断、写回，核对与写回针对同一个文件
   //   写回后再核对路径仍指向写回的文件（写回期间被另存替换时，备份写进了已脱离路径的旧文件，不算还原）。
@@ -302,7 +332,13 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       if (fileKeyOf(current, targetPath, fsImpl) !== readProblem.key) return FAILURE_REASONS.CHANGED_EXTERNALLY;
       const problem = ownershipProblem(entry, current);
       if (problem) return problem;
-      copyIntoDescriptor(fsImpl, backupPath, fd);
+      try {
+        copyIntoDescriptor(fsImpl, backupPath, fd);
+      } catch (error) {
+        // 截断后写回失败：在已核对的描述符上记下失败后的文件状态，经别名重试时仍认作本批文件，不误判为被其他程序修改（Codex 第六轮）
+        noteRestoreAttempt(entry, fd);
+        throw error;
+      }
       return fileKeyOf(lstatOrNull(fsImpl, targetPath), targetPath, fsImpl) === readProblem.key
         ? null
         : FAILURE_REASONS.CHANGED_EXTERNALLY;
@@ -349,6 +385,12 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
         }
       } catch (error) {
         failures.push(failure(`系统错误 ${error && error.code ? error.code : String(error)}`, aliasPath));
+      }
+    }
+    // 先前写回失败的路径（如主路径打开失败）经后面的别名写回了同一文件：复核后不再列入恢复清单
+    if (entry.existed && originalRestored && failures.length) {
+      for (let index = failures.length - 1; index >= 0; index -= 1) {
+        if (restoredInPlace(entry, failures[index].filePath)) failures.splice(index, 1);
       }
     }
     // 有未还原的路径时保留备份（别名原本指向同一文件，也按这份备份人工恢复）

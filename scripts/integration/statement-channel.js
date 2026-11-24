@@ -470,6 +470,7 @@ function createEnvironment(dir, label, overrides = {}) {
     'resolveEntryBalancePlan',
     'inspectBalanceEntryRows',
     'generateMultiTemplateGroupFiles',
+    'statementOutputErrorForLog',
     'assertStatementBatchWritable',
     'assertStatementEntriesWritable',
     'planVirtualTemplateBalanceRegeneration',
@@ -541,6 +542,7 @@ function createEnvironment(dir, label, overrides = {}) {
     exportMappingsByTemplateId,
     bigAccountsByTemplateId,
     lastGeneratedExports,
+    imported,
     mainDeps,
     getTemplateMappingConfig,
     defineTemplate,
@@ -1903,7 +1905,18 @@ function verifyOutputPathConcatenationConflict(dir) {
 //    会话条目、批次与导出缓存用真实实现（realSession）。
 function verifyMultiTemplateGenerationRollback(dir) {
   const faults = { writeCalls: 0, failWriteAt: 0, balanceCalls: 0, failBalanceAt: 0, mergeCalls: 0, failMergeAt: 0,
-    seedCalls: 0, failSeedAt: 0, seedRecordsStored: 0, replaceSeedAfterRecords: 0, afterJournalWrite: null };
+    seedCalls: 0, failSeedAt: 0, failSeedReadAt: 0, partialSeedWrites: 0, seedRecordsStored: 0, afterJournalWrite: null };
+  // 在真实的种子读写处注入（balance-seed-store 经 fs.readFileSync / fs.writeFileSync 读写种子 JSON）：只拦截余额种子文件
+  const isSeedFile = (target) => typeof target === 'string' && /[\\/]balance-seeds[\\/][^\\/]+\.json$/.test(target);
+  const withPatchedFs = (method, replacement, use) => {
+    const original = fs[method];
+    fs[method] = (...args) => replacement(original, ...args);
+    try {
+      return use();
+    } finally {
+      fs[method] = original;
+    }
+  };
   const { createStatementOutputJournal: realJournal } = require('../../src/main-process/statement-output-rollback');
   const busy = (what) => Object.assign(new Error(`EBUSY: resource busy or locked（注入：${what}被占用）`), { code: 'EBUSY' });
   const env = createEnvironment(dir, 'step20', {
@@ -1924,9 +1937,21 @@ function verifyMultiTemplateGenerationRollback(dir) {
     storeGeneratedBalanceSeeds: (input, realStore) => {
       faults.seedCalls += 1;
       if (faults.failSeedAt && faults.seedCalls === faults.failSeedAt) {
-        // 模拟逐笔写种子时第一笔已写入、下一笔时磁盘已满
-        realStore({ ...input, seedRecords: input.seedRecords.slice(0, 1) });
-        throw Object.assign(new Error('ENOSPC: no space left on device（注入：种子写入）'), { code: 'ENOSPC' });
+        // 真实写种子 JSON 时只写出前一半字节即磁盘已满
+        return withPatchedFs('writeFileSync', (original, target, data, ...rest) => {
+          if (!isSeedFile(target)) return original(target, data, ...rest);
+          const text = String(data);
+          original(target, text.slice(0, Math.floor(text.length / 2)), ...rest);
+          faults.partialSeedWrites += 1;
+          throw Object.assign(new Error('ENOSPC: no space left on device（注入：种子写入）'), { code: 'ENOSPC' });
+        }, () => realStore(input));
+      }
+      if (faults.failSeedReadAt && faults.seedCalls === faults.failSeedReadAt) {
+        // 写入前重读种子 JSON 时读取失败（本笔尚未写入）
+        return withPatchedFs('readFileSync', (original, target, ...rest) => {
+          if (isSeedFile(target)) throw Object.assign(new Error('EIO: i/o error（注入：种子重读）'), { code: 'EIO' });
+          return original(target, ...rest);
+        }, () => realStore(input));
       }
       const stored = realStore(input);
       faults.seedRecordsStored += input.seedRecords.length;
@@ -2048,7 +2073,8 @@ function verifyMultiTemplateGenerationRollback(dir) {
   assertTrue(retriedExports.some((name) => retried[name] !== baseline[name]), 'Step20.重试后输出为新内容');
   assertEq(env.removedSessionPaths, ['/old/replaced.xlsx', '/old/replaced.xlsx'], 'Step20.每次成功各替换一次旧会话条目');
 
-  // （5b）第二组种子写到一半失败（一笔新余额已写入、下一笔时磁盘已满）：异常原样传出，种子字节与文件身份还原，会话不提交；
+  // （5b）第二组种子写到一半失败（第二组第一笔已写入、第二笔在真实写 JSON 时只写出一半即磁盘已满）：异常原样传出，
+  //   种子字节与文件身份还原，会话不提交；
   //   重试后余额按链正确（两组都换了金额，第一组与第二组首笔的新种子都须还原）
   const seedFaultSources = () => {
     writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '13', '']]);
@@ -2057,9 +2083,10 @@ function verifyMultiTemplateGenerationRollback(dir) {
   };
   const beforeSeedFault = snapshot();
   const seedInoBeforeFault = fs.statSync(seedFile).ino;
-  faults.failSeedAt = 2;
+  faults.failSeedAt = 3;
   const seedError = run(seedFaultSources());
   faults.failSeedAt = 0;
+  assertEq(faults.partialSeedWrites, 1, 'Step20.前置：第二组第二笔种子在真实写入时写出一半');
   assertEq(seedError && seedError.code, 'ENOSPC', 'Step20.种子写到一半失败原样抛出');
   assertEq(snapshot(), beforeSeedFault, 'Step20.种子写到一半失败：已写的新余额与同批输出全部还原');
   assertEq(fs.statSync(seedFile).ino, seedInoBeforeFault, 'Step20.种子写到一半失败：种子原地还原，文件身份不变');
@@ -2096,6 +2123,23 @@ function verifyMultiTemplateGenerationRollback(dir) {
   if (replacedLocation.startsWith('恢复清单：')) fs.rmSync(path.dirname(replacedLocation.slice('恢复清单：'.length)), { recursive: true, force: true });
   fs.writeFileSync(seedFile, seedBytesBeforeReplace); // 人工按恢复清单处理后的状态，供后续步骤使用
 
+  // （5e）逐笔写种子前重读种子失败（FILE_READ，本笔尚未写入）：与初次读取失败一样按「余额生成失败」告警提交，不整批回滚、
+  //   不清掉上一批的导出入口（spec D3，Codex 第六轮）
+  const sessionsBeforeReadFault = env.removedSessionPaths.length;
+  faults.failSeedReadAt = 2;
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '19', '']]);
+  writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', '29', '']]);
+  const readFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)]);
+  faults.failSeedReadAt = 0;
+  assertEq(readFaultError, null, 'Step20.重读种子失败：不整批回滚');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeReadFault + 1, 'Step20.重读种子失败：本批照常提交');
+  const readFaultWarnings = (env.imported[env.imported.length - 1].warnings || [])
+    .filter((warning) => warning.type === 'balance-generate-failed').map((warning) => warning.message);
+  assertEq(readFaultWarnings, ['本地余额种子文件损坏，请检查或删除后重试'], 'Step20.重读种子失败：按「余额生成失败」告警');
+  assertEq(readBalanceSeedRecords(env.storageRoot, '回滚').map((record) => [record.merchantId, record.billDate, String(record.endBalance)]).sort(),
+    [['M001', '2026-08-31', '100'], ['M001', '2026-09-01', '119'], ['M002', '2026-08-31', '200'], ['M002', '2026-09-01', '223'],
+      ['M002', '2026-09-02', '228']], 'Step20.重读种子失败：第一组种子照常更新，第二组种子未写入');
+
   // （5c）第二组的余额种子路径是文件夹：首次读取种子前拦下、整批回滚，不转成「余额生成失败」告警提交第一组的新种子与缺组的余额
   const templateE = env.defineTemplate('目录种子-E', 'B');
   const directorySeed = path.join(env.storageRoot, 'balance-seeds', '目录种子.json');
@@ -2107,7 +2151,7 @@ function verifyMultiTemplateGenerationRollback(dir) {
   const directoryError = run([env.entryFor(templateA, fileA), env.entryFor(templateE, fileE)]);
   assertEq(directoryError && directoryError.code, 'STATEMENT_OUTPUT_TARGET_UNSAFE', 'Step20.种子路径是文件夹：整批拦下');
   assertEq(snapshot(), beforeDirectorySeed, 'Step20.种子路径是文件夹：第一组的输出与新种子还原');
-  assertEq(env.removedSessionPaths.length, 3, 'Step20.种子路径是文件夹时不替换旧会话条目');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeReadFault + 1, 'Step20.种子路径是文件夹时不替换旧会话条目');
   fs.rmSync(directorySeed, { recursive: true, force: true });
 
   // （6）同一账户跨组的余额链：C 组 09-01、D 组 09-02 同为 M009/USD，D 组的上期余额取 C 组本批写入的种子。

@@ -57,19 +57,25 @@ function writeNewReportFile(targetDir, baseName, content) {
       if (error && error.code === 'EEXIST' && attempt < 1000) continue;
       throw error;
     }
+    let failure = null;
     try {
       fs.writeFileSync(fd, content, 'utf8');
     } catch (error) {
+      failure = error;
+    }
+    // 只关闭一次；网络文件系统可能到关闭时才报告延迟写入的错误，同样按写入失败处理（Codex 第六轮）
+    try {
+      fs.closeSync(fd);
+    } catch (error) {
+      failure = failure || error;
+    }
+    if (failure) {
       try {
-        fs.closeSync(fd);
-        fd = null;
         fs.rmSync(targetFile, { force: true });
       } catch (_cleanupError) {
         // 尽力而为
       }
-      throw error;
-    } finally {
-      if (fd !== null && fd !== undefined) fs.closeSync(fd);
+      throw failure;
     }
     return targetFile;
   }

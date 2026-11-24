@@ -515,7 +515,10 @@ function createStatementGenerationHelpers(deps) {
             });
           }
         } catch (writeError) {
-          if (journaled) throw new StatementOutputWriteFailure(writeError);
+          // 读取失败（FILE_READ：余额模板不可读、逐笔写种子前重读种子失败）发生在本次写入之前，与初次读取种子失败一样
+          //   按「余额生成失败」告警处理，不整批回滚（spec D3，Codex 第六轮）
+          const readFailure = writeError instanceof FileValidationError && writeError.code === 'FILE_READ';
+          if (journaled && !readFailure) throw new StatementOutputWriteFailure(writeError);
           throw writeError;
         }
         // 已确认替换的人工补录写入后不再按它比对：用户已同意替换（D11）。

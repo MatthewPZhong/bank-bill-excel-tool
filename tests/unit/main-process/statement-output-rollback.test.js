@@ -476,3 +476,72 @@ test('写出记录：别名路径同样登记；登记失败时清掉刚做的�
   assert.equal(fs.readFileSync(other, 'utf8'), 'untouched');
   second.rollback();
 });
+
+// ---------- 第六轮审查 ----------
+
+test('主路径截断后写回失败、硬链接别名仍指向原文件：经别名写回批前内容，不误判为被其他程序修改，报完整还原', (t) => {
+  const { root, staging } = setup(t);
+  const seed = path.join(root, 'A.json');
+  const alias = path.join(root, 'B.json');
+  fs.writeFileSync(seed, 'before');
+  fs.linkSync(seed, alias);
+  let restoreWrites = 0;
+  const fsImpl = { ...fs, writeSync(...args) {
+    restoreWrites += 1;
+    if (restoreWrites === 1) throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+    return fs.writeSync(...args);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(seed, writeText(seed, 'group-1'));
+  journal.write(alias, writeText(alias, 'group-2'));
+  const outcome = journal.rollback();
+  assert.ok(restoreWrites >= 2, '前置：主路径截断后第一次写回失败，别名重试');
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.deepEqual([fs.readFileSync(seed, 'utf8'), fs.readFileSync(alias, 'utf8')], ['before', 'before']);
+});
+
+test('主路径打开写回失败一次、经硬链接别名写回：复核主路径已还原，不列入恢复清单', (t) => {
+  const { root, staging } = setup(t);
+  const seed = path.join(root, 'A.json');
+  const alias = path.join(root, 'B.json');
+  fs.writeFileSync(seed, 'before');
+  fs.linkSync(seed, alias);
+  let failedOpen = false;
+  const fsImpl = { ...fs, openSync(filePath, flags, ...rest) {
+    if (!failedOpen && flags === 'r+' && path.resolve(String(filePath)) === seed) {
+      failedOpen = true;
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    }
+    return fs.openSync(filePath, flags, ...rest);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(seed, writeText(seed, 'group-1'));
+  journal.write(alias, writeText(alias, 'group-2'));
+  const outcome = journal.rollback();
+  assert.equal(failedOpen, true, '前置：主路径以 r+ 打开失败');
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.deepEqual([fs.readFileSync(seed, 'utf8'), fs.readFileSync(alias, 'utf8')], ['before', 'before']);
+});
+
+test('文件系统不提供文件编号且原有文件另有硬链接：首次改写前拒绝，不写入', (t) => {
+  const { root, staging } = setup(t);
+  const zeroIno = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino: 0n });
+  const fsImpl = {
+    ...fs,
+    lstatSync: (...args) => { const stat = fs.lstatSync(...args); return stat && args[1] && args[1].bigint ? zeroIno(stat) : stat; },
+    fstatSync: (...args) => { const stat = fs.fstatSync(...args); return args[1] && args[1].bigint ? zeroIno(stat) : stat; }
+  };
+  const seed = path.join(root, 'A.json');
+  const alias = path.join(root, 'B.json');
+  fs.writeFileSync(seed, 'before');
+  fs.linkSync(seed, alias);
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  let called = false;
+  assert.throws(() => journal.write(seed, () => { called = true; }), (error) => (
+    error instanceof FileValidationError && error.code === 'STATEMENT_OUTPUT_TARGET_UNSAFE' && /硬链接/.test(error.message)
+      && !error.detailLines.some((line) => line.includes('A.json'))
+  ));
+  assert.equal(called, false);
+  assert.throws(() => journal.checkTarget(alias), { code: 'STATEMENT_OUTPUT_TARGET_UNSAFE' }, '首次读取种子前的检查同样拒绝');
+  assert.equal(fs.readFileSync(seed, 'utf8'), 'before');
+});

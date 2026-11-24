@@ -13599,9 +13599,18 @@ function isRestoredStatementRuntimeFailure(error) {
 
 // 不调用 createErrorResult：上一批的状态框与可导出的报错文件保持不变（不替换 lastErrorReport），异常堆栈可能含内部文件名
 //   （含账号），不写入可导出的报告。诊断尽力写入日志文件与活动日志（不含路径），写不出不影响返回（导出盘已满或只读时）。
+// 写日志前去掉异常消息（Codex 第六轮）：Node 文件异常的消息带完整路径，内部文件名含完整账号；保留错误名、代码、系统调用与调用栈
+function statementOutputErrorForLog(error) {
+  const code = error && error.code ? String(error.code) : '';
+  const syscall = error && error.syscall ? String(error.syscall) : '';
+  const frames = String((error && error.stack) || '').split('\n').filter((line) => /^\s+at\s/.test(line));
+  const header = `${(error && error.name) || 'Error'}${code ? `（${code}${syscall ? `，${syscall}` : ''}）` : ''}：异常消息可能含内部文件名，已省略`;
+  return { stack: [header, ...frames].join('\n') };
+}
+
 function createRestoredStatementRuntimeFailureResult(error, { step, errorCode }) {
   try {
-    appendLog(ensureStorageRoot(), error);
+    appendLog(ensureStorageRoot(), statementOutputErrorForLog(error));
   } catch (_logError) {
     // 诊断落盘尽力而为
   }
@@ -13900,7 +13909,7 @@ function generateMultiTemplateGroupFiles({
       //   诊断落盘尽力而为：导出盘已满或只读时写日志可能再次失败，不能掩盖回滚结果与恢复清单位置
       if (!(error instanceof FileValidationError)) {
         try {
-          failure.detailLines.push(`系统异常已额外写入日志文件：${appendLog(ensureStorageRoot(), error)}`);
+          failure.detailLines.push(`系统异常已额外写入日志文件：${appendLog(ensureStorageRoot(), statementOutputErrorForLog(error))}`);
         } catch (_logError) {
           failure.detailLines.push('系统异常未能写入日志文件');
         }

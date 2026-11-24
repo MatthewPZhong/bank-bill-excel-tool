@@ -338,6 +338,7 @@ function createEnvironment(dir, label) {
     'buildChannelBalanceModeMismatchError',
     'maskAccountLikeTextForLog',
     'generateMultiTemplateGroupFiles',
+    'statementOutputErrorForLog',
     'assertStatementBatchWritable',
     'assertStatementEntriesWritable',
     'planVirtualTemplateBalanceRegeneration',

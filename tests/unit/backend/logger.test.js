@@ -325,3 +325,23 @@ test('writeErrorReport：同一秒同名时另建 -2 文件；写入失败时不
   assert.deepEqual(fs.readdirSync(path.dirname(first.filePath)).sort(), before, '不留下写了一半的新报告');
   assert.deepEqual(fs.readFileSync(first.filePath), firstBytes);
 });
+
+// v3.2.22 B45（Codex 第六轮）：关闭时才报告的延迟写入错误同样按写入失败处理：删掉新文件，同一描述符只关闭一次
+test('writeErrorReport：关闭报告文件失败时删掉本次新建的文件，不重复关闭', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const closeSync = fs.closeSync;
+  const closed = [];
+  fs.closeSync = (fd) => {
+    closed.push(fd);
+    closeSync(fd);
+    throw Object.assign(new Error('EIO: i/o error, close'), { code: 'EIO' });
+  };
+  t.after(() => { fs.closeSync = closeSync; });
+  assert.throws(() => writeErrorReport(root, { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' }), { code: 'EIO' });
+  fs.closeSync = closeSync;
+  assert.equal(closed.length, 1, '同一描述符只关闭一次');
+  const reportFiles = fs.readdirSync(root, { recursive: true }).filter((name) => String(name).endsWith('.txt'));
+  assert.deepEqual(reportFiles, [], '不留下内容不完整的新报告');
+});
