@@ -23,7 +23,9 @@ const { normalizeCell, isRowMeaningful, FileValidationError } = require('../back
 function assertLinkedCellStorable(value, rowNumber, headerName) {
   if (typeof value === 'string' && value.includes('\u0000')) {
     throw new FileValidationError('FILE_READ',
-      `源文件第 ${rowNumber} 行「${headerName}」列的文本含空字符（U+0000），数据库读回时会在该处截断；请删除该字符后重新导入`);
+      `源文件第 ${rowNumber} 行「${headerName}」列的文本含空字符（U+0000），数据库读回时会在该处截断；`
+        // 不建议直接删除该字符：删除后可能与另一笔交易的标识相同而被覆盖（Codex 第十六轮 P1）
+        + '请到源系统核对该行的原始值并重新导出，不要直接删除该字符后导入');
   }
 }
 
@@ -85,7 +87,9 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
         if (headerName !== '' && unverifiable.has(colOffset + i)) {
           throw new FileValidationError('FILE_READ',
             `源文件第 ${textInfo.rowNumber} 行「${headerName}」列的文本含无法确认原值的 Excel 文本转义（_xHHHH_）、`
-              + '不完整的 Unicode 字符或非常规的文本结构，不同读取方式会得到不同的值；请用 Excel 打开该文件另存后重新导入');
+              + '不完整的 Unicode 字符或非常规的文本结构，不同读取方式会得到不同的值；'
+              // 不建议另存或照显示值修改：打开后显示的可能已是还原后的值，另存后与另一笔交易的标识相同（Codex 第十六轮 P1）
+              + '请到源系统核对该行的原始值并重新导出，不要按打开后显示的值修改或另存该文件');
         }
       }
     }

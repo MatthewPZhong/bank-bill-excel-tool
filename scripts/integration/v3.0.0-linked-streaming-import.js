@@ -233,6 +233,30 @@ async function run() {
       `Step9.可打印字符的转义拒绝并报物理行与列：${lowerError && lowerError.message}`);
     assertEq(depositAmount('TXJ'), '9.9', 'Step9.TXJ 金额未被覆盖');
     assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeLower, 'Step9.全部记录与行数不变');
+
+    // Step10（v3.2.22 B113，Codex 第十六轮 P1 ⚠️ 资金口径）：ExcelJS 写出富文本「TX_x005f_」+「x0041_」（ExcelJS 读回
+    //   「TX_x005f_x0041_」），保护目标跨段时 SheetJS 口径读成「TX_x0041_」，与另一笔「TX_x0041_」合并、覆盖其金额。
+    //   流式导入按无法确认原值整批拒绝，数据库不变
+    await upsertDepositFile('rich-base.xlsx', [{ ...DATA[0], BizId: 'TX_x0041_', 'Credit Amount': '9.9' }]);
+    assertEq(depositAmount('TX_x0041_'), '9.9', 'Step10.前置：本应用写出的字面「TX_x0041_」按原文入库');
+    const richFile = path.join(tmpDir, 'exceljs-rich-escape.xlsx');
+    const richBook = new ExcelJS.Workbook();
+    const richSheet = richBook.addWorksheet('Sheet1');
+    richSheet.addRow(HEADERS);
+    richSheet.addRow(rowAoa({ ...DATA[1], 'Credit Amount': '1.2' }));
+    richSheet.getCell(2, HEADERS.indexOf('BizId') + 1).value = { richText: [{ text: 'TX_x005f_' }, { text: 'x0041_' }] };
+    await richBook.xlsx.writeFile(richFile);
+    const rowsBeforeRich = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let richError = null;
+    try {
+      await importDepositFile(richFile);
+    } catch (error) {
+      richError = error;
+    }
+    assertEq(Boolean(richError) && richError.message.startsWith('源文件第 2 行「BizId」列的文本含无法确认原值的 Excel 文本转义'), true,
+      `Step10.跨段的保护目标拒绝并报物理行与列：${richError && richError.message}`);
+    assertEq(depositAmount('TX_x0041_'), '9.9', 'Step10.TX_x0041_ 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeRich, 'Step10.全部记录与行数不变');
   } finally {
     try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }

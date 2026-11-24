@@ -231,7 +231,9 @@ test('链接表：本应用写出的含空字符的值经流式导入拒绝入�
   const inserted = [];
   await assert.rejects(streamLinkedRowsToInsert(outputFilePath, { expectedHeaders: ['BizId', '备注'] }, (row) => inserted.push(row)),
     (error) => error.code === 'FILE_READ' && error.message.startsWith('源文件第 3 行「BizId」列的文本含空字符（U+0000）')
-      && !error.message.includes('TX'));
+      && !error.message.includes('TX')
+      // 不建议直接删除该字符（Codex 第十六轮 P1）
+      && error.message.endsWith('请到源系统核对该行的原始值并重新导出，不要直接删除该字符后导入'));
   assert.deepEqual(inserted.map((row) => row.BizId), ['TX1'], '只喂入了之前的行（真实仓储事务的整批回滚见集成 v3.0.0-linked-streaming-import Step7）');
   assert.doesNotThrow(() => assertLinkedCellStorable('TX\u0001B', 7, 'BizId'));
 
@@ -336,7 +338,9 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
     // ExcelJS 等不转义的写出端原样写出的可打印字符转义、不起保护作用的 _x005F_（Codex 第十五轮 P1）
     ['表示可打印字符的转义', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t>ID_x004a_</t></si>'],
     ['公式字符串里表示可打印字符的转义', '<row r="5"><c r="A5" t="str"><v>ID_x0041_</v></c></row>', ''],
-    ['不起保护作用的 _x005F_', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t>ID_x005F_</t></si>']
+    ['不起保护作用的 _x005F_', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t>ID_x005F_</t></si>'],
+    // 保护目标在下一个富文本段：Excel 按段还原、ExcelJS 读回原文（Codex 第十六轮 P1）
+    ['跨富文本段的 _x005F_ 保护目标', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><r><t>ID_x005f_</t></r><r><t>x0041_</t></r></si>']
   ];
   for (const [label, rowXml, sharedStrings] of rejected) {
     const filePath = await build(label, rowXml, sharedStrings);
@@ -344,6 +348,8 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
     await assert.rejects(streamLinkedRowsToInsert(filePath, linked, (row) => inserted.push(row)), (error) => (
       error.code === 'FILE_READ' && /^源文件第 5 行「BizId」列的文本含无法确认原值的 Excel 文本转义（_xHHHH_）、不完整的 Unicode 字符或非常规的文本结构/.test(error.message)
         && !error.message.includes('ID_')
+        // 要求回源系统核对，不引导另存或照显示值修改（Codex 第十六轮 P1）
+        && error.message.endsWith('请到源系统核对该行的原始值并重新导出，不要按打开后显示的值修改或另存该文件')
     ), label);
     assert.deepEqual(inserted, [], `${label}：不入库`);
   }
@@ -367,11 +373,17 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
   assert.deepEqual(writtenRows.map((row) => row.BizId), ['TX_X0041_', 'TXA'], '本应用写出的字面大写转义读回原文，不与 TXA 合并');
   // 本应用写出的字面「_x004a_」「_x005F_」与控制字符读回原文（Codex 第十五轮）
   const writtenLower = path.join(dir, 'written-lower.xlsx');
-  writeWorkbookRows({ rows: [['BizId', '备注'], ['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c']], outputFilePath: writtenLower });
+  writeWorkbookRows({ rows: [['BizId', '备注'], ['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c'], ['TX\u007fA', 'd']], outputFilePath: writtenLower });
   const lowerRows = [];
   await streamLinkedRowsToInsert(writtenLower, linked, (row) => lowerRows.push(row));
-  assert.deepEqual(lowerRows.map((row) => [row.BizId, row['备注']]), [['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c']]);
-  assert.deepEqual(readRows(writtenLower).slice(1, 3), [['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c']], '与非流式读取一致');
+  assert.deepEqual(lowerRows.map((row) => [row.BizId, row['备注']]), [['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c'], ['TX\u007fA', 'd']]);
+  assert.deepEqual(readRows(writtenLower).slice(1, 4), [['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c'], ['TX\u007fA', 'd']], '与非流式读取一致');
+  // 仓库的 encodeExcelStXstring（工具箱、VCC 写出端）把 DEL 写成 _x007F_：按控制字符还原（Codex 第十六轮 P2）
+  const { encodeExcelStXstring } = require('../../../../src/backend/xlsx/excel-text');
+  const delFile = await build('del-escape', '<row r="2"><c r="A2" t="s"><v>2</v></c></row>', `<si><t>${encodeExcelStXstring('TX\u007fA')}</t></si>`);
+  const delRows = [];
+  await streamLinkedRowsToInsert(delFile, linked, (row) => delRows.push(row));
+  assert.deepEqual(delRows.map((row) => row.BizId), ['TX\u007fA']);
 });
 
 // v3.2.22 B113（Codex 第八轮）：注音不计入正文；CDATA、多段纯文本、带前缀的元素等非规范结构拒绝；表头格无法确认时不认作表头
