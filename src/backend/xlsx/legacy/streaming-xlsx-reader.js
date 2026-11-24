@@ -83,21 +83,47 @@ function decodeCellTextRuns(runs) {
 }
 
 // decode 时文本段内出现标记（CDATA、注释等）也按无法确认原值处理：此处的 XML 实体还原不区分 CDATA 与字面文本，
-//   SheetJS 对 CDATA 按字面保留、富文本段内的 CDATA 直接丢弃，不同的原值可能读成同一个值（Codex 第八轮 P1）
+//   SheetJS 对 CDATA 按字面保留、富文本段内的 CDATA 直接丢弃，不同的原值可能读成同一个值（Codex 第八轮 P1）；
+//   原始回车同样如此：XML 解析（Excel）把它规范为换行，此处与 SheetJS 保留为回车，与 _x000D_ 读成同一个值（Codex 第九轮 P1）
 function textOf(runs, decode) {
   if (!decode) return xmlUnescape(runs.join(''));
-  if (runs.some((run) => run.includes('<'))) return new UnverifiableCellText(decodeOoxmlTextEscapes(xmlUnescape(runs.join(''))));
+  if (runs.some((run) => run.includes('<') || run.includes('\r'))) {
+    return new UnverifiableCellText(decodeOoxmlTextEscapes(xmlUnescape(runs.join(''))));
+  }
   return decodeCellTextRuns(runs.map(xmlUnescape));
 }
 
+// 字符引用（&#…;）表示非 ASCII 字符：SheetJS 对公式字符串（t="str"）还原后再按 UTF-8 解码，读成「�」等，与此处不同（Codex 第九轮 P2）
+const CHAR_REFERENCE_RE = /&#(x[0-9A-Fa-f]+|\d+);/g;
+function hasNonAsciiCharReference(raw) {
+  return Array.from(raw.matchAll(CHAR_REFERENCE_RE))
+    .some((match) => (match[1][0] === 'x' ? parseInt(match[1].slice(1), 16) : parseInt(match[1], 10)) >= 0x80);
+}
+
+// 行内出现注释、CDATA、处理指令、带命名空间前缀的元素，或单元格缺少 r（坐标）时，按坐标逐格读取与 SheetJS 的结果不能对应
+//   （注释中的单元格被读出、带前缀或缺坐标的单元格被跳过），该行各列都按无法确认原值处理（Codex 第九轮）
+const ROW_NONCANONICAL_RE = /<!--|<!\[CDATA\[|<\?|<\/?[A-Za-z_][\w.-]*:/;
+const CELL_TAG_RE = /<c\b([^>]*?)\/?>/g;
+function isRowNonCanonical(rowXml) {
+  if (ROW_NONCANONICAL_RE.test(rowXml)) return true;
+  CELL_TAG_RE.lastIndex = 0;
+  let m;
+  while ((m = CELL_TAG_RE.exec(rowXml))) {
+    if (!CELL_R_RE.test(m[1])) return true;
+  }
+  return false;
+}
+
 const RPH_RE = /<rPh\b[^>]*>[\s\S]*?<\/rPh>/g;
+const PREFIXED_STRING_ITEM_RE = /<[A-Za-z_][\w.-]*:si[\s/>]/;
 const PREFIXED_ELEMENT_RE = /<\/?[A-Za-z_][\w.-]*:/;
 const PLAIN_TEXT_START_RE = /^\s*<t[\s/>]/;
 const RICH_RUN_RE = /<r>/;
 
 // 共享字符串 <si> 与内联字符串 <is> 的正文。decode 时与 SheetJS（parse_si）同口径，只接受 Excel 写出的规范结构：
 //   注音（<rPh>，日文输入法生成）不计入正文（Codex 第八轮 P1）；纯文本形式只取唯一的 <t>，富文本形式拼接各段 <t>；
-//   多个纯文本 <t>、既非纯文本也非富文本却含 <t>、带命名空间前缀的元素按无法确认原值处理（两种读取方式结果不同）
+//   多个纯文本 <t>、既非纯文本也非富文本却含 <t>、带命名空间前缀的元素、注释（其中的 <t> 会被取出，Codex 第九轮 P1）、
+//   CDATA 与处理指令按无法确认原值处理（两种读取方式结果不同）
 function stringItemText(inner, decode) {
   const source = decode ? inner.replace(RPH_RE, '') : inner;
   T_CONTENT_RE.lastIndex = 0;
@@ -106,7 +132,7 @@ function stringItemText(inner, decode) {
   while ((m = T_CONTENT_RE.exec(source))) parts.push(m[1]);
   if (!decode) return textOf(parts, false);
   const plain = PLAIN_TEXT_START_RE.test(inner);
-  const canonical = !PREFIXED_ELEMENT_RE.test(inner)
+  const canonical = !PREFIXED_ELEMENT_RE.test(inner) && !/<!--|<!\[CDATA\[|<\?/.test(inner)
     && (plain ? parts.length <= 1 : (RICH_RUN_RE.test(inner) || parts.length === 0));
   const text = textOf(parts, true);
   if (canonical) return text;
@@ -181,13 +207,19 @@ function parseCellBody(body, type, sharedStrings, decode = false) {
     const v = V_CONTENT_RE.exec(body);
     if (!v) return '';
     const idx = parseInt(v[1], 10);
+    // 共享字符串表含带前缀的 <si>（被扫描跳过，后续索引错位）：所有共享字符串都无法确认原值（Codex 第九轮 P1）
+    if (decode && sharedStrings && sharedStrings.unverifiable) {
+      return new UnverifiableCellText(idx >= 0 && idx < sharedStrings.length ? String(sharedStrings[idx]) : '');
+    }
     if (!sharedStrings || idx < 0 || idx >= sharedStrings.length) return '';
     return sharedStrings[idx];
   }
   if (type === 'str') {
     // formula string
     const v = V_CONTENT_RE.exec(body);
-    return v ? textOf([v[1]], decode) : '';
+    if (!v) return '';
+    if (decode && hasNonAsciiCharReference(v[1])) return new UnverifiableCellText(decodeOoxmlTextEscapes(xmlUnescape(v[1])));
+    return textOf([v[1]], decode);
   }
   if (type === 'b') {
     const v = V_CONTENT_RE.exec(body);
@@ -211,10 +243,14 @@ async function readSharedStrings(zip, decode = false) {
     const decoder = new StringDecoder('utf8');
     let pending = '';
     const strings = [];
+    const notePrefixed = () => {
+      if (decode && PREFIXED_STRING_ITEM_RE.test(pending)) strings.unverifiable = true;
+    };
 
     stream.on('data', (chunk) => {
       try {
         pending += typeof chunk === 'string' ? chunk : decoder.write(chunk);
+        notePrefixed();
         // 逐个提取 <si>...</si>
         while (true) {
           const siStart = pending.indexOf('<si>');
@@ -222,8 +258,8 @@ async function readSharedStrings(zip, decode = false) {
             // 兼容 <si 带属性（极少见）
             const siStart2 = pending.indexOf('<si ');
             if (siStart2 < 0) {
-              // 保留缓冲少量前缀（防 <si 开标签跨 chunk）
-              if (pending.length > 8) pending = pending.slice(-8);
+              // 保留缓冲少量前缀（防 <si 开标签、带前缀的 <x:si 跨 chunk）
+              if (pending.length > 64) pending = pending.slice(-64);
               break;
             }
             const gt = pending.indexOf('>', siStart2);
@@ -248,6 +284,7 @@ async function readSharedStrings(zip, decode = false) {
     });
     stream.on('end', () => {
       pending += decoder.end();
+      notePrefixed();
       // 最后再扫一遍剩余的 <si>
       while (true) {
         const siStart = pending.indexOf('<si>');
@@ -288,15 +325,17 @@ async function readXlsxStreamed(filePath, onRowCallback, { colCount = 31, maxRow
   const parseRow = (rowXml, rowIdx) => {
     const cells = parseRowXml(rowXml, colCount, sharedStrings, decodeTextEscapes);
     if (!decodeTextEscapes) return onRowCallback(cells, rowIdx);
+    const nonCanonical = isRowNonCanonical(rowXml);
     const unverifiableColumns = [];
     cells.forEach((cell, index) => {
-      if (!(cell instanceof UnverifiableCellText)) return;
-      cells[index] = cell.value;
-      unverifiableColumns.push(index);
+      if (cell instanceof UnverifiableCellText) cells[index] = cell.value;
+      if (nonCanonical || cell instanceof UnverifiableCellText) unverifiableColumns.push(index);
     });
-    // <row> 省略可选的 r 时按上一行行号顺推（与 SheetJS 相同；Codex 第八轮 P3）
-    const explicit = /^<row\b[^>]*?\sr="(\d+)"/.exec(rowXml);
-    lastRowNumber = explicit ? Number(explicit[1]) : lastRowNumber + 1;
+    // 行号以单元格坐标为准（扫描器会把自闭合的空行与后一行切成同一段，Codex 第九轮 P3）；没有带坐标的单元格时取 <row r>
+    //   （单双引号均可），省略时按上一行行号顺推（与 SheetJS 相同；Codex 第八轮 P3）
+    const cellRow = /<c\b[^>]*?\sr="[A-Z]+(\d+)"/.exec(rowXml);
+    const explicit = /^<row\b[^>]*?\sr=(?:"(\d+)"|'(\d+)')/.exec(rowXml);
+    lastRowNumber = cellRow ? Number(cellRow[1]) : (explicit ? Number(explicit[1] || explicit[2]) : lastRowNumber + 1);
     return onRowCallback(cells, rowIdx, { rowNumber: lastRowNumber, unverifiableColumns });
   };
   // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误，

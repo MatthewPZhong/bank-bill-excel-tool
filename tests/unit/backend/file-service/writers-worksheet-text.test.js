@@ -341,3 +341,67 @@ test('链接表：注音不计入正文，非规范文本结构拒绝导入；�
   const signature = { tableKey: 'bank-statement', structureExact: true, expectedHeaders: ['BizId', '备注'] };
   assert.notEqual((await detectTableType(splitHeader, [signature])).status, 'matched');
 });
+
+// v3.2.22 B113（Codex 第九轮）：带前缀的共享字符串项（后续索引错位）、带前缀的内联字符串、注释中的文本段、原始回车、公式字符串中表示
+//   非 ASCII 字符的字符引用、行内注释或缺坐标的单元格均拒绝；行号以单元格坐标为准；无法确认的格不与任何可配置列名相等
+test('链接表：带前缀、注释、原始回车、非 ASCII 字符引用等非规范结构拒绝导入；行号取单元格坐标；标记不与列名相等', async (t) => {
+  const JSZip = require('jszip');
+  const { streamLinkedRowsToInsert } = require('../../../../src/main-process/linked-table-stream-source');
+  const { detectTableType } = require('../../../../src/main-process/table-type-detector');
+  const { UNVERIFIABLE_CELL_TEXT } = require('../../../../src/backend/file-service/readers');
+  const dir = createTempDir(t);
+  const build = async (name, sheetData, sharedStrings) => {
+    const filePath = path.join(dir, `${name}.xlsx`);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['BizId', '备注']]), 'S');
+    XLSX.writeFile(workbook, filePath, { bookSST: true });
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+    zip.file('xl/worksheets/sheet1.xml', (await zip.file('xl/worksheets/sheet1.xml').async('string'))
+      .replace(/<dimension ref="[^"]*"\/>/, '<dimension ref="A1:B20"/>')
+      .replace(/<sheetData>[\s\S]*<\/sheetData>|<sheetData\/>/, `<sheetData>${sheetData}</sheetData>`));
+    zip.file('xl/sharedStrings.xml', '<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + `<si><t>BizId</t></si><si><t>备注</t></si>${sharedStrings}</sst>`);
+    fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+    return filePath;
+  };
+  const header = '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>';
+  const linked = { expectedHeaders: ['BizId', '备注'] };
+  const rejected = [
+    // 第 2 行是正常交易：遇到异常行时整批拒绝（调用方回滚已喂入的行）
+    ['带前缀的共享字符串项', '<row r="2"><c r="A2" t="str"><v>OK1</v></c></row><row r="5"><c r="A5" t="s"><v>3</v></c></row>',
+      '<x:si xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:t>TX1</x:t></x:si><si><t>TX2</t></si>'],
+    ['带前缀的内联字符串', '<row r="5"><c r="A5" t="inlineStr"><x:is xmlns:x="urn:x"><x:t>TX</x:t></x:is></c></row>', ''],
+    ['富文本中的注释', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><r><t>TX</t></r><!--<r><t>_x0041_</t></r>--></si>'],
+    ['原始回车', '<row r="5"><c r="A5" t="str"><v>TX\rA</v></c></row>', ''],
+    ['公式字符串的非 ASCII 字符引用', '<row r="5"><c r="A5" t="str"><v>TX&#xE9;_x0041_</v></c></row>', ''],
+    ['行内注释中的单元格', '<row r="5"><c r="B5" t="str"><v>n</v></c><!--<c r="A5" t="str"><v>TX</v></c>--></row>', ''],
+    ['缺坐标的单元格', '<row r="5"><c t="str"><v>TX</v></c></row>', ''],
+    ['单引号行号', "<row r='5'><c r=\"A5\" t=\"str\"><v>ID_xD800_</v></c></row>", ''],
+    ['单引号行号、缺坐标的单元格', "<row r='5'><c t=\"str\"><v>TX</v></c></row>", ''],
+    ['自闭合空行后的数据行', '<row r="3"/><row r="5"><c r="A5" t="str"><v>ID_xD800_</v></c></row>', '']
+  ];
+  for (const [label, rows, sharedStrings] of rejected) {
+    const filePath = await build(label, header + rows, sharedStrings);
+    const inserted = [];
+    let rejection = null;
+    const result = await streamLinkedRowsToInsert(filePath, linked, (row) => inserted.push(row.BizId)).catch((error) => { rejection = error; });
+    if (label === '带前缀的共享字符串项') {
+      // 所有共享字符串（含表头）都无法确认：不认作表头，调用方按未匹配表头拒绝
+      assert.deepEqual([result, inserted], [{ matched: false }, []], label);
+      continue;
+    }
+    assert.ok(rejection && rejection.code === 'FILE_READ', `${label}：拒绝导入`);
+    assert.match(rejection.message, /^源文件第 5 行「BizId」列的文本含无法确认原值的/, label);
+    assert.ok(!inserted.includes('TX2') && !inserted.includes('TXA') && !inserted.includes('TX\nA'), `${label}：不按错误的键入库`);
+  }
+  // 原始换行（Excel 写出的形式）照常导入
+  const newline = await build('newline', `${header}<row r="2"><c r="A2" t="str"><v>TX\nA</v></c></row>`, '');
+  const inserted = [];
+  assert.deepEqual(await streamLinkedRowsToInsert(newline, linked, (row) => inserted.push(row.BizId)), { matched: true });
+  assert.deepEqual(inserted, ['TX\nA']);
+  // 标记不与可配置的列名相等：签名第二列恰为提示文字时，无法确认的格不命中
+  const marker = await build('marker', '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="str"><v>X_x00E9_</v></c></row>', '');
+  const signature = { tableKey: 'bank-statement', structureExact: true, expectedHeaders: ['BizId', '（无法确认原值的文本）'] };
+  assert.notEqual((await detectTableType(marker, [signature])).status, 'matched');
+  assert.ok(UNVERIFIABLE_CELL_TEXT.endsWith('（无法确认原值的文本）'), '前置：标记含提示文字');
+});

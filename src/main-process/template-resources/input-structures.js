@@ -94,7 +94,7 @@ async function reconIdFixRuntimeHeaders(filePath) {
 //   两种读法对布尔等表头读出的文本不同，任一与快照不一致都会在预检中被拒。返回第 headerRow 个有内容的行。
 function linkedRuntimeHeaders(headerRow) {
   return async (filePath) => {
-    const { readRowsWithMetadata, readMeaningfulRowsHead } = require('../../backend/file-service/readers');
+    const { readRowsWithMetadata, readMeaningfulRowsHead, UNVERIFIABLE_CELL_TEXT } = require('../../backend/file-service/readers');
     const { normalizeCell } = require('../../backend/file-service/common');
     const pick = (rows) => {
       const row = Array.isArray(rows) && Array.isArray(rows[headerRow - 1]) ? rows[headerRow - 1].map((cell) => normalizeCell(cell)) : [];
@@ -109,9 +109,11 @@ function linkedRuntimeHeaders(headerRow) {
     if (JSON.stringify(streamed) === JSON.stringify(sheetJs)) return [sheetJs];
     // 两种读法结果不同：导入文件格式不同时读出的列名不同，不一致的列标出两种结果（必与快照不同，预检不通过）。
     const width = Math.max(sheetJs.length, streamed.length);
+    //   流式读取无法确认原值的格显示为去掉标记字符的提示文字
+    const shown = (cell) => (cell === UNVERIFIABLE_CELL_TEXT ? cell.slice(1) : cell);
     return [Array.from({ length: width }, (_, index) => (sheetJs[index] === streamed[index]
       ? sheetJs[index]
-      : `${sheetJs[index] ?? ''} / ${streamed[index] ?? ''}`))];
+      : `${sheetJs[index] ?? ''} / ${shown(streamed[index]) ?? ''}`))];
   };
 }
 

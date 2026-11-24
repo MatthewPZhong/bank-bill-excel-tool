@@ -1760,7 +1760,8 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
 //   返回 { rows, truncated }：rows 为前 N 个有意义行的 cell 数组；truncated 表示文件还有更多行（已达 maxRows 上限）。
 //   decodeTextEscapes：还原 OOXML 文本转义（与 SheetJS 读取同一口径；链接表的表头识别与预检传 true，与流式导入一致）；
 //     无法确认原值的格读成 UNVERIFIABLE_CELL_TEXT，不与任何表头相等（流式导入同样不认这类格为表头，Codex 第八轮 P1）
-const UNVERIFIABLE_CELL_TEXT = '（无法确认原值的文本）';
+// 含未配对的代理项：XLSX、CSV 读出的表头与保存的模板表头都不可能含有，不会与任何可配置的列名相等（Codex 第九轮 P3）
+const UNVERIFIABLE_CELL_TEXT = '\uD800（无法确认原值的文本）';
 
 async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256, decodeTextEscapes = false } = {}) {
   ensureSupportedFile(filePath);
