@@ -20,7 +20,7 @@ const { ROWS_POLICY } = require('../../src/main-process/toolbox-row-split/policy
 const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
 const { assertFilePlanFresh, assertFilePlanInputsFreshAsync, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
-const { pathsAlias } = require('../../src/main-process/toolbox-target-identity');
+const { normalizeTargetAliasKey, pathsAlias } = require('../../src/main-process/toolbox-target-identity');
 const { createTestPublicationHarness } = require('../../tests/helpers/publication-authority');
 const { toolboxRecoveryOutputFiles } = require('../../src/main-process/toolbox-archive-recovery');
 
@@ -84,7 +84,7 @@ async function runCase(memoryBytes, shouldSucceed) {
         }
         return fs.rmSync(file, options);
       } },
-      path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, assertFilePlanFresh, assertFilePlanInputsFreshAsync, normalizeFilePlanV1, createToolboxSplitReadOwner,
+      path, randomUUID, normalizeTargetAliasKey, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, assertFilePlanFresh, assertFilePlanInputsFreshAsync, normalizeFilePlanV1, createToolboxSplitReadOwner,
       trackedIpcHandle(channel, _scope, _label, value) { assert.equal(channel, 'toolbox:split:export'); contract = value; },
       app: { getPath: () => userDataDir }, mainWindow: null,
       showImportOpenDialog: async () => ({ canceled: false, filePaths: [outputDirectory] }),

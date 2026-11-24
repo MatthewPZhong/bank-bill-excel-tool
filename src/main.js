@@ -506,6 +506,7 @@ const {
   toolboxRecoveryOutputFiles: toolboxFinalOutputFiles
 } = require('./main-process/toolbox-archive-recovery');
 const {
+  normalizeTargetAliasKey,
   pathsAlias
 } = require('./main-process/toolbox-target-identity');
 const {
@@ -22626,10 +22627,9 @@ function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
     path.resolve(output.filePath),
     path.join(output.targetParentIdentity.canonicalRealPath, path.basename(output.filePath))
   ]);
-  // macOS / Windows 的卷通常不区分大小写：按大小写折叠后比较（只影响报错归类，Codex 第六轮）
-  const comparable = (value) => (process.platform === 'darwin' || process.platform === 'win32'
-    ? path.resolve(value).toLowerCase()
-    : path.resolve(value));
+  // 按工具箱既有的路径别名规则比较（macOS 不区分大小写与组合 / 分解字符，Windows 不区分大小写；只影响报错归类，
+  //   Codex 第六、七轮）
+  const comparable = (value) => normalizeTargetAliasKey(path.resolve(value));
   const comparableTargets = targetPaths.map(comparable);
   const isTargetOrAncestor = (errorPath) => {
     const resolved = comparable(errorPath);
@@ -23125,8 +23125,10 @@ function registerToolboxHandlers() {
             if (!overwriteChoice || overwriteChoice.response !== 1) {
               return { proceed: false, result: { status: 'cancelled' } };
             }
+            // 覆盖确认期间目标可能被新建或替换：确认后再核对整份计划。没有弹窗时冻结刚核对过全部目标、其后没有等待，
+            //   不再重复同步核对（执行前 TaskLifecycle 仍会核对），避免高延迟网络盘上阻塞其他 IPC（Codex 第七轮）
+            assertFilePlanFresh(frozenFilePlan);
           }
-          assertFilePlanFresh(frozenFilePlan);
           targetPlans = groups.map((group, index) => ({
             ...group,
             outputId: `split-${index + 1}`

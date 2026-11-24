@@ -65,6 +65,24 @@ test('多文件拆分：确认后沿用确认前冻结的同一 FilePlan，prepa
   assert.throws(() => assertFilePlanFresh(prepared.filePlan), { code: 'ARCHIVE_TARGET_CHANGED' });
 });
 
+// 没有覆盖确认时冻结刚核对过全部目标、其后没有等待：prepare 不再重复同步核对整份计划（执行前生命周期仍会核对）；
+//   有覆盖确认时确认后核对一次（Codex 第七轮）
+test('多文件拆分：只有弹出覆盖确认时才在确认后再核对整份计划（B57）', async (t) => {
+  for (const conflict of [false, true]) {
+    const env = setup(t);
+    if (conflict) fs.writeFileSync(path.join(env.output, 'A.xlsx'), 'old-A');
+    let freshnessChecks = 0;
+    // 只计整份计划（含输入）的核对；冻结时先只核对目标的那一次不计
+    const { contracts, calls } = loadHandlers(env, { assertFilePlanFresh: (plan) => {
+      if (plan.inputs.length) freshnessChecks += 1;
+      return assertFilePlanFresh(plan);
+    } });
+    const raw = await contracts.get('toolbox:split:export').prepare({}, { ...MULTI_PAYLOAD, sourceFilePath: env.source });
+    assert.equal(raw.proceed, true);
+    assert.deepEqual([calls.dialogs.length, freshnessChecks], conflict ? [1, 1] : [0, 0], conflict ? '有覆盖确认' : '无覆盖确认');
+  }
+});
+
 test('合表与单值拆分：保存框返回即冻结 FilePlan（B57）', async (t) => {
   const env = setup(t);
   const { contracts } = loadHandlers(env, {
@@ -515,4 +533,58 @@ test('assertFilePlanInputsFreshAsync：异步核对输入，口径与同步核�
   assert.throws(() => assertFilePlanFresh(plan), { code: 'ARCHIVE_INPUT_CHANGED' });
   fs.rmSync(env.source);
   await assert.rejects(assertFilePlanInputsFreshAsync(plan), { code: 'ARCHIVE_INPUT_CHANGED' });
+});
+
+// macOS 卷不区分组合 / 分解字符：输出目录用 NFD 拼写、输入目录用 NFC 拼写（同一目录）；完整计划规范化期间被移走又移回：
+//   仍报目标变化（中文提示），与工具箱既有的路径别名规则一致（Codex 第七轮）
+test('merge：输出目录与输入所在目录只差 Unicode 组合形式（同一目录）、规范化期间被移走又移回：报目标变化（B57）', async (t) => {
+  const base = setup(t);
+  const composed = path.join(base.root, 'crédit');
+  const decomposed = path.join(base.root, 'crédit');
+  fs.mkdirSync(composed);
+  if (!fs.existsSync(decomposed) || process.platform !== 'darwin') {
+    t.skip('前提不满足：临时卷区分 Unicode 组合形式');
+    return;
+  }
+  const source = path.join(composed, 'source.csv');
+  fs.copyFileSync(base.source, source);
+  const env = { ...base, source, output: decomposed };
+  const parked = path.join(base.root, 'credit-parked');
+  const sampling = duringFullPlanSampling(() => {
+    fs.renameSync(composed, parked);
+    return () => fs.renameSync(parked, composed);
+  });
+  const { calls, run } = loadHandlers(env, caseOverrides(env, 'merge', { normalizeFilePlanV1: sampling.normalizeFilePlanV1 }));
+  const { prepared, result } = await run(CASES.merge.channel, casePayload(env, 'merge'));
+  assert.equal(sampling.state.calls, 1);
+  assert.equal(prepared.proceed, false);
+  assert.equal(result.code, 'ARCHIVE_TARGET_CHANGED', JSON.stringify(result));
+  assert.equal(calls.publication, 0);
+});
+
+// 发布目标须与冻结计划的输出逐项对应（数量、顺序）：同目录两个原本都不存在的目标调换后，父目录身份与「不存在」快照都相同，
+//   共享发布器无法发现错配，须在包装层拒绝（Codex 第七轮）
+test('publishToolboxArtifacts：发布目标少一个或顺序调换时在调用共享发布器前拒绝，不结算', async () => {
+  const mainSource = fs.readFileSync(path.join(__dirname, '../../../src/main.js'), 'utf8');
+  const start = mainSource.indexOf('async function publishToolboxArtifacts(');
+  const end = mainSource.indexOf('async function acknowledgeToolboxPublicationReceipts', start);
+  const calls = { publication: 0, settle: 0, inputs: 0 };
+  const publishToolboxArtifacts = Function(
+    'path', 'randomUUID', 'app', 'assertFilePlanInputsFreshAsync', 'publishToolboxPublicationAsync',
+    `${mainSource.slice(start, end)}\nreturn publishToolboxArtifacts;`
+  )(path, () => 'id', { getPath: () => '/user-data' }, async () => { calls.inputs += 1; }, async () => {
+    calls.publication += 1;
+    return { taskId: 't', files: [] };
+  });
+  const plan = { inputs: [], outputs: [
+    { filePath: path.resolve('/out/A.xlsx'), artifactKey: 'a', targetParentIdentity: { inode: '1' } },
+    { filePath: path.resolve('/out/B.xlsx'), artifactKey: 'b', targetParentIdentity: { inode: '1' } }
+  ] };
+  const options = { fileEvidence: { filePlan: plan }, settleManifestArtifacts: async () => { calls.settle += 1; return { durable: true }; } };
+  await assert.rejects(publishToolboxArtifacts('split', [], [path.resolve('/out/A.xlsx')], {}, options), /数量不一致/);
+  await assert.rejects(publishToolboxArtifacts('split', [], [path.resolve('/out/B.xlsx'), path.resolve('/out/A.xlsx')], {}, options),
+    /工具箱发布目标与 FilePlan 输出不一致/);
+  await assert.rejects(publishToolboxArtifacts('split', [], [{ targetPath: path.resolve('/out/B.xlsx') }, { targetPath: path.resolve('/out/A.xlsx') }], {}, options),
+    /工具箱发布目标与 FilePlan 输出不一致/);
+  assert.deepEqual(calls, { publication: 0, settle: 0, inputs: 0 });
 });

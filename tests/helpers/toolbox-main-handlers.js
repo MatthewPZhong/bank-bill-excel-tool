@@ -17,7 +17,7 @@ const { mergeToolboxFilesToXlsx } = require('../../src/main-process/toolbox-merg
 const { exportToolboxFilter, exportToolboxMultiFilters } = require('../../src/main-process/toolbox-format-operations');
 const { normalizeMultiSplitGroups } = require('../../src/main-process/toolbox-multi-split');
 const { buildMergeFileName, buildSplitFileName } = require('../../src/main-process/toolbox');
-const { pathsAlias } = require('../../src/main-process/toolbox-target-identity');
+const { normalizeTargetAliasKey, pathsAlias } = require('../../src/main-process/toolbox-target-identity');
 const { TOOLBOX_GENERATION_ACTIONS } = require('../../src/main-process/toolbox-background/generation-contract');
 const { createTestPublicationHarness } = require('./publication-authority');
 
@@ -89,7 +89,8 @@ function loadHandlers(env, overrides = {}) {
   const readContext = { sourceFilePath: env.source, dataRowCount: 2,
     snapshot: sourceSnapshotFromStat(fs.statSync(env.source, { bigint: true })) };
   const scope = {
-    fs, os, path, randomUUID, pathsAlias: overrides.pathsAlias || pathsAlias, assertFilePlanFresh, assertFilePlanInputsFreshAsync,
+    fs, os, path, randomUUID, normalizeTargetAliasKey, pathsAlias: overrides.pathsAlias || pathsAlias,
+    assertFilePlanFresh: overrides.assertFilePlanFresh || assertFilePlanFresh, assertFilePlanInputsFreshAsync,
     normalizeFilePlanV1: overrides.normalizeFilePlanV1 || normalizeFilePlanV1,
     sourceSnapshotMatchesStat,
     TOOLBOX_GENERATION_ACTIONS,
