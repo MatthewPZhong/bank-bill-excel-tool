@@ -26,7 +26,7 @@ const { createTaskLifecycle } = require('../../src/main-process/archive-center/t
 const { createTaskPolicyRegistry } = require('../../src/main-process/execution-descriptors/composition');
 const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { artifactManifestFromFilePlan, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
-const { FileValidationError, extractHeaders, writeBalanceWorkbook } = require('../../src/backend/file-service');
+const { FileValidationError, assertBalanceRecordsWritable, extractHeaders, writeBalanceWorkbook } = require('../../src/backend/file-service');
 const { writeBalanceSeedRecords } = require('../../src/backend/balance-seed-store');
 const {
   ALL_BANKS_TEMPLATE_SCOPE,
@@ -76,7 +76,7 @@ function loadMainHandlers({ storageRoot, database }) {
   const errorResults = [];
   const scope = {
     fs, path, artifactManifestFromFilePlan, normalizeFilePlanV1,
-    FileValidationError, extractHeaders, writeBalanceWorkbook,
+    FileValidationError, assertBalanceRecordsWritable, extractHeaders, writeBalanceWorkbook,
     ALL_BANKS_TEMPLATE_SCOPE, assembleMonthlyBalance, toBalanceRows,
     NEW_ACCOUNT_EXPORT_NAME, normalizeNewAccountAccounts, prepareNewAccountGeneration, validateNewAccountAccounts,
     trackedIpcHandle: (channel, _moduleKey, _functionKey, contract) => contracts.set(channel, contract),
@@ -287,6 +287,8 @@ async function run() {
       assertEq(errorOptions.context, { accountCount: 2, moduleName: NEW_ACCOUNT_EXPORT_NAME }, `${label}.报错文件只记账号行数`);
       const exportDir = path.join(storageRoot, 'exports', '2026-11-10', 'new-account');
       assertEq(fs.existsSync(exportDir) ? fs.readdirSync(exportDir).length : 0, 1, `${label}.不新增导出文件`);
+      // 校验失败不建批、不占号（预留归档批次前预检最终记录）
+      assertNoBatch(service, { label, taskRunId, batchContext: run.batchContext, initialPlan: run.initialPlan });
     }
 
     // Step 3：月度余额「装配」——同一 deferred 注册，有种子时晋升并写出
@@ -347,6 +349,7 @@ async function run() {
       const exportsDir = path.join(storageRoot, 'exports', '2026-11-10', 'balance');
       const leftovers = fs.existsSync(exportsDir) ? fs.readdirSync(exportsDir).filter((name) => /2026-10|202610/.test(name)) : [];
       assertEq(leftovers, [], `${label}.不留下输出文件`);
+      assertNoBatch(service, { label, taskRunId, batchContext: run.batchContext, initialPlan: run.initialPlan });
       extraBigAccounts.length = 0;
     }
 

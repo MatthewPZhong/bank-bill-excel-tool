@@ -642,6 +642,7 @@ const {
   prepareWorkbookTextForWrite,
   readRows,
   readRowsWithMetadata,
+  assertBalanceRecordsWritable,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('./backend/file-service');
@@ -3435,27 +3436,24 @@ function resolveDirectBigAccountRecognition({
       (fileResult.accounts || []).map((account) => account.merchantId)
     );
 
-    // v3.2.22（B133 审查）：账号位置上有无法核对原值的长数字时不按未识别报错（只维护一个选项时普通未识别会直接失败），
-    //   也不按其他段的识别结果代替，交给用户选择
-    if (fileResult.hasUnverifiedLongNumber) {
-      return {
-        status: 'needs-selection',
-        candidates: expandedOptions,
-        message: '账单表头上方的账号超出精度范围、无法核对原值，请选择本次使用的大账号 / 币种。',
-        detailLines: [
-          `文件名：${fileName || 'N/A'}`,
-          `模板名：${normalizeCell(templateName) || 'N/A'}`
-        ]
-      };
-    }
-
-    if (identifiedMerchantIds.length === 0) {
-      return resolveRecognizedBigAccount({
+    // v3.2.22（B133 审查）：账号位置上有无法核对原值的长数字时，该文件按未识别处理（本函数只在至多一个维护选项时调用，
+    //   与普通未识别一样报错，不套用唯一选项；多个选项时由调用方的选择流程处理，该块不自动识别），不按其他段的识别结果
+    //   代替；报错时说明原因。不另走人工选择：选择窗口会覆盖同批每个文件、每个账号块的账号与币种，且结果会随文件顺序
+    //   变化（Codex 第四轮）
+    if (identifiedMerchantIds.length === 0 || fileResult.hasUnverifiedLongNumber) {
+      const unrecognized = resolveRecognizedBigAccount({
         extractedMerchantId: '',
         maintainedBigAccounts,
         sourceFileName: fileName,
         templateName
       });
+      if (!fileResult.hasUnverifiedLongNumber || unrecognized.status !== 'failed') return unrecognized;
+      return {
+        ...unrecognized,
+        message: '账单表头上方的账号超出精度范围（超过 15 位且存成了数字），无法核对原值，未自动识别大账号。'
+          + '请在原系统把账号导出为文本，或把账单另存为 xlsx 并将账号设为文本后重新导入。',
+        detailLines: Array.isArray(unrecognized.detailLines) ? unrecognized.detailLines.slice() : []
+      };
     }
 
     if (identifiedMerchantIds.length > 1) {
@@ -18552,6 +18550,8 @@ function registerFileHandlers() {
         kind: 'balance',
         outputFileName: publicFileName
       });
+      // 校验失败不建批、不占号：预留归档批次前先核对最终记录（写出边界仍兜底）
+      assertBalanceRecordsWritable({ records, templateFields: balanceTemplateFields });
       const promotionManifest = buildStatementDeferredOutputManifest(
         output.outputFilePath,
         'monthly-balance:assemble'
@@ -18791,6 +18791,8 @@ function registerNewAccountHandlers() {
         kind: 'new-account',
         outputFileName: generated.fileName
       });
+      // 校验失败不建批、不占号：预留归档批次前先核对最终记录（写出边界仍兜底）
+      assertBalanceRecordsWritable({ records: generated.records, templateFields: balanceTemplateFields });
       const promotionManifest = buildStatementDeferredOutputManifest(
         output.outputFilePath,
         'new-account:generate'

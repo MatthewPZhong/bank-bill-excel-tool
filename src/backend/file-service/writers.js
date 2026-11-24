@@ -308,6 +308,24 @@ function writeWorkbookRows({ rows, outputFilePath, sheetName = 'COMMON' }, forma
   return outputFilePath;
 }
 
+// 余额记录按表头列数截断 / 补齐（写出与预检同一口径）
+function normalizeBalanceRecords(records, columnCount) {
+  return (Array.isArray(records) ? records : []).map((row) => {
+    const normalizedRow = Array.isArray(row) ? row.slice(0, columnCount) : [];
+    while (normalizedRow.length < columnCount) normalizedRow.push('');
+    return normalizedRow;
+  });
+}
+
+// v3.2.22 B113（Codex 第四轮）：余额账单写出前的预检，不读模板：按写出时的位置（表头在第 1 行、记录从第 2 行起，按表头
+//   列数截断 / 补齐）核对无法写入 Excel 的字符，报错与写出边界同一口径。新开账户、月度余额在预留归档批次之前调用
+//   （校验失败不建批、不占号）；表头取自随程序发布的模板（单测确认），写出边界仍兜底
+function assertBalanceRecordsWritable({ records, templateFields = [] }) {
+  const columnCount = templateFields.length;
+  const worksheet = XLSX.utils.aoa_to_sheet([templateFields.slice(), ...normalizeBalanceRecords(records, columnCount)]);
+  assertWorkbookTextWritable(collectUnwritableWorkbookText({ SheetNames: ['Sheet1'], Sheets: { Sheet1: worksheet } }));
+}
+
 function writeBalanceWorkbook({
   templateFilePath,
   records,
@@ -353,15 +371,7 @@ function writeBalanceWorkbook({
     }
   }
 
-  const normalizedRecords = records.map((row) => {
-    const normalizedRow = Array.isArray(row) ? row.slice(0, columnCount) : [];
-
-    while (normalizedRow.length < columnCount) {
-      normalizedRow.push('');
-    }
-
-    return normalizedRow;
-  });
+  const normalizedRecords = normalizeBalanceRecords(records, columnCount);
 
   XLSX.utils.sheet_add_aoa(worksheet, normalizedRecords, { origin: 'A2' });
   applyBalanceFieldFormats(worksheet, headerFields, normalizedRecords, formatters);
@@ -377,6 +387,7 @@ function writeBalanceWorkbook({
 
 module.exports = {
   applyBalanceFieldFormats,
+  assertBalanceRecordsWritable,
   applyExportFieldFormats,
   buildNumericCellValue,
   prepareWorkbookTextForWrite,

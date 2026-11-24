@@ -107,6 +107,7 @@ const {
   mapEachCollectingCurrencyBigAccountIssues
 } = require('./file-service/currency-big-account');
 const {
+  assertBalanceRecordsWritable,
   prepareWorkbookTextForWrite,
   writeBalanceWorkbook: writeBalanceWorkbookInternal,
   writeWorkbookRows: writeWorkbookRowsInternal
@@ -2045,6 +2046,7 @@ module.exports = {
   roundAmountHighPrecision,
   sumAmounts,
   transformFileToWorkbook,
+  assertBalanceRecordsWritable,
   prepareWorkbookTextForWrite,
   writeBalanceWorkbook,
   writeWorkbookRows

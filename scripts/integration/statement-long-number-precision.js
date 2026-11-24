@@ -361,7 +361,8 @@ async function verifyBigAccountRecognitionRead(dir) {
   assertEq([basisRecognition.matches, basisRecognition.hasUnverifiedLongNumber], [[null], true],
     '⑤ 按识别依据识别（提取顺序、固定顺序）：该段不视为已识别');
 
-  // 只维护一个大账号 / 币种时，普通未识别直接报错；无法核对原值的长账号交给用户选择
+  // 只维护一个大账号 / 币种时（直接识别），无法核对原值的长账号与普通未识别一样报未识别、不自动套用唯一选项，并说明原因；
+  //   不另走人工选择（选择窗口会覆盖同批每个文件的账号与币种），与另一份普通未识别的文件同批时不随文件顺序变化
   const loadNamed = (name, deps) => loadMainFunction(name, deps);
   const uniqueNormalizedValues = loadNamed('uniqueNormalizedValues', { normalizeCell });
   const resolveDirect = loadNamed('resolveDirectBigAccountRecognition', {
@@ -374,8 +375,8 @@ async function verifyBigAccountRecognitionRead(dir) {
     normalizeCell,
     path
   });
-  const directFor = (filePath) => resolveDirect({
-    fileEntries: [{ filePath, matchedHeaders: HEADER }],
+  const directFor = (...filePaths) => resolveDirect({
+    fileEntries: filePaths.map((filePath) => ({ filePath, matchedHeaders: HEADER })),
     maintainedBigAccounts: [{ merchantId: '22221111', currencies: ['USD'] }],
     fallbackTemplateConfig: {},
     templateName: '测试模板'
@@ -383,10 +384,13 @@ async function verifyBigAccountRecognitionRead(dir) {
   const plainUnrecognized = await writeXlsxWithLiterals(path.join(dir, 'account-unrecognized.xlsx'), [
     ['账号', '3333'], [], HEADER, ['2026-11-01', 'USD', 100, 'R1', 'C1']
   ], {});
-  assertEq(directFor(plainUnrecognized).status, 'failed', '⑤ 对照：普通未识别且只维护一个选项时按未识别报错');
+  const plainDecision = directFor(plainUnrecognized);
+  assertEq([plainDecision.status, plainDecision.code], ['failed', 'BIG_ACCOUNT_NOT_RECOGNIZED'], '⑤ 对照：普通未识别且只维护一个选项时按未识别报错');
   const unverifiedDecision = directFor(commented);
-  assertEq([unverifiedDecision.status, (unverifiedDecision.candidates || []).map((item) => [item.merchantId, item.currency])],
-    ['needs-selection', [['22221111', 'USD']]], '⑤ 无法核对原值的长账号：只维护一个选项时也交给用户选择，不按未识别报错');
+  assertEq([unverifiedDecision.status, unverifiedDecision.code, /超出精度范围.*无法核对原值/.test(unverifiedDecision.message || '')],
+    ['failed', 'BIG_ACCOUNT_NOT_RECOGNIZED', true], '⑤ 无法核对原值的长账号：按未识别报错并说明原因，不套用唯一的维护选项');
+  assertEq([directFor(commented, plainUnrecognized).status, directFor(plainUnrecognized, commented).status], ['failed', 'failed'],
+    '⑤ 与普通未识别的文件同批：两种文件顺序结果相同');
 }
 
 async function main() {
