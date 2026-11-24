@@ -394,6 +394,36 @@ for (const kind of Object.keys(CASES)) {
   }
 }
 
+// 单值拆分零命中：生成器读到的是被替换、不再含所选值的源文件时报源文件已变化，不报「无匹配行」（Codex 第九轮）
+for (const channel of ['small', 'large']) {
+  test(`single（${channel === 'large' ? '大文件通道' : '普通'}）：生成期间源文件被替换为不含所选值的版本：报源文件已变化，不报无匹配行（B58-T3）`, async (t) => {
+    const env = setup(t);
+    const replaceSource = () => {
+      fs.writeFileSync(`${env.source}.tmp`, 'Name,Amount\nC,1\n');
+      fs.renameSync(`${env.source}.tmp`, env.source);
+    };
+    const { calls, contracts, execute } = loadHandlers(env, caseOverrides(env, 'single', channel === 'large' ? {
+      shouldUseLargeChannel: async () => true,
+      dispatchLargeSplit: () => {
+        replaceSource();
+        return { promise: Promise.resolve({ matchedCount: 0, inputDataRowCount: 1 }) };
+      }
+    } : {
+      exportToolboxFilter: async (...args) => {
+        replaceSource();
+        return exportToolboxFilter(...args);
+      }
+    }));
+    const contract = contracts.get(CASES.single.channel);
+    const prepared = await prepareIpcTaskInvocation(contract, {}, [casePayload(env, 'single')]);
+    assert.equal(prepared.proceed, true);
+    const result = await execute(contract, prepared);
+    assert.equal(result.code, 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', JSON.stringify(result));
+    assert.doesNotMatch(String(result.message), /无匹配行/);
+    assert.equal(calls.publication, 0);
+  });
+}
+
 // 不区分大小写的卷：输入在 out/ 下、输出目录选成 OUT/（同一目录）；完整计划规范化期间该目录被移走又移回，系统错误记的是
 //   out：仍报目标变化（中文提示），不透传英文系统错误（Codex 第六轮）
 test('merge：输出目录与输入所在目录大小写不同（同一目录）、规范化期间被移走又移回：报目标变化（B57）', async (t) => {
@@ -494,6 +524,19 @@ test('normalizeFilePlanV1 reuseFrozenOutputsOf：沿用本进程冻结的同一�
   ]) {
     assert.throws(() => normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [input], outputs }, { reuseFrozenOutputsOf: source }),
       { code: 'ARCHIVE_FILE_PLAN_INVALID' }, label);
+  }
+});
+
+test('normalizeFilePlanV1 reuseFrozenOutputsOf：只适用于 eager 计划，deferred / none 拒绝（Codex 第九轮）', (t) => {
+  const env = setup(t);
+  const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+  const frozen = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [],
+    outputs: [{ filePath: path.join(env.output, 'a.xlsx'), role: 'output', sourceOperation: 'toolbox:merge' }] });
+  for (const allocation of ['deferred', 'none']) {
+    for (const reuseFrozenOutputsOf of [{}, frozen]) {
+      assert.throws(() => normalizeFilePlanV1({ version: 1, allocation, inputs: [], outputs: [] }, { reuseFrozenOutputsOf }),
+        { code: 'ARCHIVE_FILE_PLAN_INVALID' }, allocation);
+    }
   }
 });
 

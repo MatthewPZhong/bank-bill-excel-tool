@@ -274,6 +274,10 @@ function normalizeFilePlanV1(value, options = {}) {
     }
   });
   if (allocation !== 'eager') {
+    // 沿用冻结输出只用于 eager 计划：其他分配方式没有输出可沿用，不静默丢弃（Codex 第九轮）
+    if (options.reuseFrozenOutputsOf !== undefined) {
+      throw planError('ARCHIVE_FILE_PLAN_INVALID', 'reuseFrozenOutputsOf 只适用于 eager filePlan');
+    }
     if (rawInputs.length || rawOutputs.length) {
       throw planError('ARCHIVE_FILE_PLAN_INVALID', 'deferred/none filePlan 必须为空');
     }

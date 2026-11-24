@@ -23441,6 +23441,8 @@ function registerToolboxHandlers() {
           ) || 0;
           if (matchedCount === 0) {
             // 0 命中：不弹保存框、不产用户文件（保留现文案，与小文件分支逐字节一致）。临时目录由 finally 清理。
+            //   先核对冻结的输入：生成期间源文件被替换时报源文件已变化，不把另一版本的结果当成本次筛选结果（Codex 第九轮）
+            await assertFilePlanInputsFreshAsync(taskContext.fileEvidence.filePlan);
             return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
           }
           const publishResult = await publishToolboxArtifacts(
@@ -23571,6 +23573,8 @@ function registerToolboxHandlers() {
           matchedCount = Number(generationResult.matchedCount) || 0;
           inputDataRowCount = Number(generationResult.inputDataRowCount) || 0;
           if (matchedCount === 0) {
+            // 同大文件分支：先核对冻结的输入（Codex 第九轮）
+            await assertFilePlanInputsFreshAsync(taskContext.fileEvidence.filePlan);
             return {
               status: 'failed',
               message: '所选值在源文件中无匹配行，未生成文件',
