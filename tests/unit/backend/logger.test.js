@@ -420,3 +420,44 @@ test('writeErrorReport：写入失败且删除失败时不留下正式名称的�
   assert.deepEqual(names.filter((name) => name.endsWith('.txt')), [], '不留下正式名称的残缺报告');
   assert.equal(names.length, 1, '只留下删不掉的临时文件');
 });
+
+// v3.2.22 B45（Codex 第十三轮）：硬链接发布后，临时名与正式报告指向同一份完整内容：删除临时名短暂占用时重试；
+//   重试后仍删不掉时报告照常发布、写告警日志，下次写报错文件时再删
+test('writeErrorReport：发布后删除临时名遇到短暂占用时重试，仍失败时记为待清理并在下次写报告时删除', (t) => {
+  const { writeErrorReport, getLogFilePath } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const payload = { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' };
+  const rmSync = fs.rmSync;
+  let failures = 0;
+  let busyPartials = 0;
+  fs.rmSync = (target, ...rest) => {
+    if (path.basename(String(target)).endsWith('.partial') && busyPartials < failures) {
+      busyPartials += 1;
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    }
+    return rmSync(target, ...rest);
+  };
+  t.after(() => { fs.rmSync = rmSync; });
+
+  failures = 1;
+  const first = writeErrorReport(root, payload);
+  const dir = path.dirname(first.filePath);
+  assert.deepEqual(fs.readdirSync(dir), [first.fileName], '第一次删除被占用：重试后只留正式报告');
+  assert.equal(first.pendingCleanupFiles, undefined);
+
+  busyPartials = 0;
+  failures = 100;
+  const second = writeErrorReport(root, { ...payload, message: '第二份' });
+  const leftover = fs.readdirSync(dir).filter((name) => name.endsWith('.partial'));
+  assert.equal(leftover.length, 1, '重试后仍删不掉：留下临时名');
+  assert.match(fs.readFileSync(second.filePath, 'utf8'), /第二份/, '报告照常发布');
+  assert.deepEqual(second.pendingCleanupFiles, [path.join(dir, leftover[0])]);
+  const warnings = fs.readFileSync(getLogFilePath(root, 'warning', new Date()), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(warnings.at(-1).details, [path.relative(root, path.join(dir, leftover[0]))], '告警日志记下待清理位置');
+
+  failures = 0;
+  const third = writeErrorReport(root, { ...payload, message: '第三份' });
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.endsWith('.partial')), [], '下次写报告时删除待清理的临时名');
+  assert.equal(third.pendingCleanupFiles, undefined);
+});

@@ -53,6 +53,30 @@ function removeQuietly(filePath) {
   }
 }
 
+// 临时文件删除：短暂占用（如 Windows 上被杀毒软件扫描）时有限重试；同步等待（报告由主进程同步写出）
+const PARTIAL_REMOVE_ATTEMPTS = 4;
+const PARTIAL_REMOVE_RETRY_DELAY_MS = 100;
+const PARTIAL_REMOVE_WAIT_CELL = new Int32Array(new SharedArrayBuffer(4));
+function removeWithRetry(filePath, attempts = PARTIAL_REMOVE_ATTEMPTS) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      fs.rmSync(filePath, { force: true });
+      return true;
+    } catch (_error) {
+      if (attempt >= attempts) return false;
+      Atomics.wait(PARTIAL_REMOVE_WAIT_CELL, 0, 0, PARTIAL_REMOVE_RETRY_DELAY_MS);
+    }
+  }
+}
+
+// 已发布报告的临时名重试后仍删不掉时记在这里，下次写报错文件时再删（Codex 第十三轮）
+const pendingPartialFiles = new Set();
+function retryPendingPartialFiles() {
+  for (const filePath of [...pendingPartialFiles]) {
+    if (removeWithRetry(filePath, 1)) pendingPartialFiles.delete(filePath);
+  }
+}
+
 // 以正式名称发布写好的临时文件，不覆盖已有的报告：硬链接在目标已存在时失败；不支持硬链接的卷改为确认目标不存在后改名
 //   （报告只由主进程同步写出，确认与改名之间不会插入本应用的同名报告）
 function publishReportFile(sourceFile, targetFile) {
@@ -69,7 +93,9 @@ function publishReportFile(sourceFile, targetFile) {
     fs.renameSync(sourceFile, targetFile);
     return true;
   }
-  removeQuietly(sourceFile);
+  // 硬链接发布后正式名与临时名指向同一份完整报告：临时名有限重试删除；仍删不掉时报告照常发布，临时名记为待清理
+  //   （下次写报错文件时再删，调用方写告警日志），不让完整报告的副本无人知晓地留下（Codex 第十三轮）
+  if (!removeWithRetry(sourceFile)) pendingPartialFiles.add(sourceFile);
   return true;
 }
 
@@ -168,13 +194,31 @@ function writeErrorReport(reportRoot, payload = {}) {
     sections.push('', '原始异常：', payload.originalError.stack || payload.originalError.message || String(payload.originalError));
   }
 
+  retryPendingPartialFiles();
   fs.mkdirSync(targetDir, { recursive: true });
+  const pendingBefore = new Set(pendingPartialFiles);
   const targetFile = writeNewReportFile(targetDir, baseName, `${sections.join('\n')}\n`);
+  const leftover = [...pendingPartialFiles].filter((filePath) => !pendingBefore.has(filePath));
+  if (leftover.length) {
+    // 临时名只含进程号与序号，不含模板名、步骤名或账号
+    try {
+      appendStructuredLog(reportRoot, {
+        level: 'warning',
+        source: 'main',
+        domain: 'error-report',
+        message: '报错文件已写出，但其临时副本未能删除，将在下次写报错文件时重试；也可手动删除',
+        details: leftover.map((filePath) => path.relative(reportRoot, filePath))
+      }, now);
+    } catch (_logError) {
+      // 告警日志写不出不影响报告本身
+    }
+  }
 
   return {
     filePath: targetFile,
     fileName: path.basename(targetFile),
-    createdAt: time
+    createdAt: time,
+    ...(leftover.length ? { pendingCleanupFiles: leftover } : {})
   };
 }
 
