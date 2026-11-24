@@ -1758,7 +1758,8 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
 //   故 detector 的 L1（连续子序列全等）/ L2（指纹命中率）/ 列宽守卫逻辑可直接复用、识别语义不变。
 //   maxColCount：流式解析每行的固定列宽上界（须 ≥ 任何候选表头可能的列数，避免宽表头被截断；detector 传足够大值）。
 //   返回 { rows, truncated }：rows 为前 N 个有意义行的 cell 数组；truncated 表示文件还有更多行（已达 maxRows 上限）。
-async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256 } = {}) {
+//   decodeTextEscapes：还原 OOXML 文本转义（与 SheetJS 读取同一口径；链接表的表头识别与预检传 true，与流式导入一致）
+async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256, decodeTextEscapes = false } = {}) {
   ensureSupportedFile(filePath);
 
   if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
@@ -1775,7 +1776,7 @@ async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256 } =
         rows.push(trimmed);
       }
     },
-    { colCount: maxColCount, maxRows }
+    { colCount: maxColCount, maxRows, decodeTextEscapes }
   );
 
   return { rows, truncated: !!truncated };

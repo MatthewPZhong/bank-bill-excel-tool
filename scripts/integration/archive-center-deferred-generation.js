@@ -320,6 +320,25 @@ async function run() {
       }
     }
 
+    // Step 3a（v3.2.22 B113，Codex 第七轮）：装配直接返回错误（月份无效）时同样失效上一期的待导出引用，再恢复为本期
+    {
+      const label = 'Step3a.装配直接返回错误';
+      assertTrue(Boolean(getExports().monthlyBalance), `${label}.前置：Step3 装配成功后有待导出的月度余额`);
+      const invalid = await runDeferred({
+        lifecycle, policyRegistry, contracts, taskRunId: 'deferred-monthly-invalid',
+        channel: 'monthly-balance:assemble',
+        payload: { templateScope: 'single', templateName: '测试银行-上海', year: 2026, month: 13 }
+      });
+      assertEq(invalid.result && invalid.result.errorCode, 'MONTHLY_BALANCE_INVALID_INPUT', `${label}.月份无效`);
+      assertEq(getExports().monthlyBalance, null, `${label}.不再保留上一期的待导出文件`);
+      const again = await runDeferred({
+        lifecycle, policyRegistry, contracts, taskRunId: 'deferred-monthly-again',
+        channel: 'monthly-balance:assemble',
+        payload: { templateScope: 'single', templateName: '测试银行-上海', year: 2026, month: 9 }
+      });
+      assertEq(again.result && again.result.status, 'ready', `${label}.重新装配成功`);
+    }
+
     // Step 3b（v3.2.22 B113）：余额记录含无法写入 Excel 的字符（如早期版本写入种子的账号）——按业务校验错误返回消息与逐处位置，
     //   不改报「装配月度余额账单失败」系统错误；不留下输出文件
     {

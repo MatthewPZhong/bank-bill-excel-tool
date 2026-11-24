@@ -13,6 +13,7 @@ const test = require('node:test');
 const XLSX = require('xlsx');
 
 const { buildMappedRows } = require('../../../../src/backend/file-service');
+const { collectUnwritableRowText } = require('../../../../src/backend/file-service/common');
 const {
   assertFeeFieldOutputWritable,
   normalizeFeeFieldMappings,
@@ -393,10 +394,11 @@ test('resolveFeeFieldMappingValue：按类型取值', () => {
   assert.equal(resolveFeeFieldMappingValue({ valueType: 'field', value: '参考号' }, () => 'ref\ud83d\ude00'), 'ref\ud83d\ude00');
 });
 
-test('assertFeeFieldOutputWritable：取自源列的输出值含无法写入 Excel 的字符或超过 32767 个字符时拒绝，列出源行、源列与目标字段', () => {
+test('assertFeeFieldOutputWritable：取自源列的输出值超过 32767 个字符时拒绝，列出源行、源列与目标字段；无法写入的字符留给生成前的检查', () => {
   const item = { templateField: 'Customer Ref', valueType: 'field', value: '参考号' };
+  // v3.2.22 B113（Codex 第七轮）：含无法写入 Excel 的字符的值不在映射时逐个拒绝，由生成前按最终明细汇总全批位置
   for (const bad of ['REF\uFFFE01', 'REF\uFFFF', 'ref\ud83d']) {
-    assert.throws(() => assertFeeFieldOutputWritable(item, bad, { sourceRowNumber: 5 }), /第 5 行「参考号」列的值含无法写入 Excel 的字符.*Customer Ref/);
+    assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, bad, { sourceRowNumber: 5 }));
   }
   assert.throws(() => assertFeeFieldOutputWritable(item, 'x'.repeat(32768), { sourceRowNumber: 6 }), /第 6 行「参考号」列的值超过 32767 个字符.*Customer Ref/);
   assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, 'x'.repeat(32767), { sourceRowNumber: 6 }));
@@ -431,8 +433,10 @@ test('源列取值校验只针对实际写出的费用账单行：合计行、�
     feeFieldMappings
   });
   assert.equal(mergedRows.length, 2, '合并为一行照常生成');
-  // 单独输出的费用账单行：拒绝并列出源行与列
-  assert.throws(() => mapFile(mergedCsv, { feeFieldMappings }), /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*Payee Name/);
+  // 单独输出的费用账单行：值原样留在明细行，由生成前按最终明细的检查列出源行与写进的列（v3.2.22 B113，Codex 第七轮）
+  const separateRows = mapFile(mergedCsv, { feeFieldMappings });
+  assert.deepEqual(collectUnwritableRowText(separateRows, { rowMetas: separateRows.rowMetas }),
+    { total: 1, labels: ['第 2 行写进「Payee Name」列的值'] });
   const longCsv = writeCsv('long.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', 'R'.repeat(32768)]]);
   assert.throws(() => mapFile(longCsv, { feeFieldMappings }), /第 2 行「记账日期」列的值超过 32767 个字符.*Payee Name/);
   // ValueDate 取源列：在实际写出的行上先校验原值（超长值不进入日期解析）再规范化；费用行作合并代表行时同样规范化
@@ -445,8 +449,9 @@ test('源列取值校验只针对实际写出的费用账单行：合计行、�
     feeFieldMappings: valueDateMappings
   });
   assert.deepEqual(feeRepresentativeRows.slice(1).map((row) => [row[2], row[6]]), [['98.5', '']], '合并代表行为费用行：ValueDate 无法识别时输出空（同主映射口径）');
-  // ValueDate 取源列：日期规范化会丢掉非法字符，须按规范化前的源值校验
+  // ValueDate 取源列：日期规范化会丢掉非法字符，含这类字符的原值不规范化、原样留给生成前的检查
   const dateCsv = writeCsv('date.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', '2026-11-03T10:00:00\uFFFE']]);
-  assert.throws(() => mapFile(dateCsv, { feeFieldMappings: [{ templateField: 'ValueDate', valueType: 'field', value: '记账日期' }] }),
-    /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*ValueDate/);
+  const dateRows = mapFile(dateCsv, { feeFieldMappings: [{ templateField: 'ValueDate', valueType: 'field', value: '记账日期' }] });
+  assert.deepEqual(collectUnwritableRowText(dateRows, { rowMetas: dateRows.rowMetas }),
+    { total: 1, labels: ['第 2 行写进「ValueDate」列的值'] });
 });

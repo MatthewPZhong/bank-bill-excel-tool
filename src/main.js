@@ -18478,6 +18478,9 @@ function registerFileHandlers() {
     }),
     async execute(_event, prepared, taskContext) {
     const payload = prepared.payload;
+    // v3.2.22 B113（Codex 第七轮）：新一轮装配开始即失效上一期的待导出引用（不删除已归档文件）：任何失败出口（输入无效、
+    //   余额模板缺失、记录无法写出等）都不再让导出拿到上一期的文件；装配成功时换成本期
+    lastGeneratedExports.monthlyBalance = null;
     try {
       const templateScopeRaw = payload && typeof payload.templateScope === 'string' ? payload.templateScope : '';
       const templateNameRaw = payload && typeof payload.templateName === 'string' ? payload.templateName : '';

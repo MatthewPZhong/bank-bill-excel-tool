@@ -145,15 +145,13 @@ function resolveFeeFieldMappingValue(item, readSourceCell) {
   return '';
 }
 
-// 最终写入明细的费用账单行里、取自源列的覆盖值须能原样写入工作表：含无法写入 Excel 的字符（U+FFFE、U+FFFF、
-//   未配对代理项）或超过单元格 32767 个字符上限时拒绝生成，列出源行、源列与目标字段，不截断、不交付被改写或
-//   无法打开的明细。只校验实际输出的行（合计行、合并时不作代表行的费用行不写出，不因其值拒绝整份账单）。
+// 最终写入明细的费用账单行里、取自源列的覆盖值超过单元格 32767 个字符上限时拒绝生成，列出源行、源列与目标字段，不截断。
+//   只校验实际输出的行（合计行、合并时不作代表行的费用行不写出，不因其值拒绝整份账单）。
+//   含无法写入 Excel 的字符（U+FFFE、U+FFFF、未配对代理项）的值照常写进明细行，由生成前按最终明细的检查与主映射的值一并
+//   列出全批位置（statement-generation.js assertStatementRowsWritable，v3.2.22 B113，Codex 第七轮）
 function assertFeeFieldOutputWritable(item, value, { sourceRowNumber } = {}) {
   if (!item || item.valueType !== 'field' || typeof value !== 'string' || !value) return;
   const location = `源文件${sourceRowNumber === undefined ? '' : `第 ${sourceRowNumber} 行`}「${item.value}」列的值`;
-  if (!isWorksheetWritableText(value)) {
-    fail(`费用账单「字段映射特殊处理」：${location}含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符），无法输出到「${item.templateField}」，请修正源文件后重新生成`);
-  }
   if (value.length > FEE_FIELD_MAPPING_INPUT_MAX_LENGTH) {
     fail(`费用账单「字段映射特殊处理」：${location}超过 ${FEE_FIELD_MAPPING_INPUT_MAX_LENGTH} 个字符（Excel 单元格上限），无法输出到「${item.templateField}」，请修正源文件后重新生成`);
   }

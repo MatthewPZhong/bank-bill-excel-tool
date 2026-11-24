@@ -7,6 +7,7 @@ const {
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,
   isUnverifiedLongNumber,
+  isWorksheetWritableText,
   normalizeCell
 } = require('./file-service/common');
 const {
@@ -1621,7 +1622,8 @@ function buildMappedRows({
         billSplitFeeFieldMappings.forEach((item, index) => {
           const rawValue = (entry.feeFieldRawValues || [])[index];
           assertFeeFieldOutputWritable(item, rawValue, { sourceRowNumber: entry.sourceRowNumber });
-          if (item.templateField === 'ValueDate') {
+          // 含无法写入 Excel 的字符的原值不按日期规范化（否则读成空值、不再被拒绝）：原样留在明细行，由生成前的检查列出位置
+          if (item.templateField === 'ValueDate' && !(typeof rawValue === 'string' && !isWorksheetWritableText(rawValue))) {
             entry.rowArray[item.targetIndex] = normalizeDateExportValue(normalizeCell(rawValue), { dateParseOrder }).value;
           }
         });

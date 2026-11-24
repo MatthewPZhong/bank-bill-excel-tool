@@ -33,7 +33,8 @@
 
 - **来源**：2026-11-23 `fix/statement-xlsx-io-boundary`（v3.2.22）修复 B113 时核对。工具箱 / VCC 写出用的 `src/backend/xlsx/excel-text.js` `encodeExcelStXstring` 已转义完整的字面 `_xHHHH_`，但 `_xHHHH` 后紧跟控制字符时不转义：内存往返实测 `REF_x0041` 后接回车写出为 `REF_x0041_x000D_`、读回为 `REFAx000D_`。单据对账 `recon-id-fix-io.js`（xlsx-js-style）与 ExcelJS 写出的模块（资金对账、平盘、重复入金匹配、VCC 财务OP 等）未逐个核实
 - **影响**：这些模块输出的流水号、参考号等文本恰含 `_x` + 4 位十六进制（后接 `_` 或控制字符）时，Excel 打开或再读取看到的值与原值不同
-- **关闭条件**：逐个写出路径实测往返；需要时在写出边界按 `_x005F_` 转义（与 `writers.js` `prepareWorkbookTextForWrite` 同口径，`encodeExcelStXstring` 补上后接控制字符的情形）；配真实工作簿回读回归
+- **补充（读取端，2026-11-24 Codex 第七轮）**：链接表的非流式读取（SheetJS，多工作表等文件）对跨富文本片段拼成的转义先拼接再还原（Excel 原样显示 `ID_x0041_`，读成 `IDA`）、对公式字符串（`t="str"`）里的非 ASCII 转义还原后再按 UTF-8 解码（`ID_x00E9_` 读成 `ID�`），不同的原值可能读成同一个 BizId；v3.2.21 起既有。流式读取在这些情形下已拒绝导入（`fix/statement-xlsx-io-boundary` D4b）；Excel 写出的文件不含这类转义，只见于手工生成的文件
+- **关闭条件**：逐个写出路径实测往返；需要时在写出边界按 `_x005F_` 转义（与 `writers.js` `prepareWorkbookTextForWrite` 同口径，`encodeExcelStXstring` 补上后接控制字符的情形）；配真实工作簿回读回归；链接表非流式读取遇到上述转义时同样拒绝或按 Excel 口径还原
 - **目标版本**：未定
 
 ### B131（P4 · 改进）「导出全部」另存为前命名日期重复解析：先全量校验账单日期，再对写出的行解析一遍

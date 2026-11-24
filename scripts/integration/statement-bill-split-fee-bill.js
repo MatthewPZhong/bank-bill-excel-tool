@@ -588,8 +588,29 @@ function verifyFeeFieldMapping(dir, database, main) {
   database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'field', value: '记账日期' }] });
   const xmlIllegalOut = path.join(dir, 'fm-xml-illegal.xlsx');
   assertThrows(() => generateFieldMapping(main, template, xmlIllegalCsv, xmlIllegalOut),
-    /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*Transaction Description/, '⑤ 取源列的值含禁止字符时拒绝生成并列出源行与列');
+    /^第 3 行「Transaction Description」列的值含无法写入 Excel 的字符/, '⑤ 取源列的值含禁止字符时写出边界兜底拒绝');
   assertTrue(!fs.existsSync(xmlIllegalOut), '⑤ 拒绝时不写出明细');
+  // v3.2.22 B113（Codex 第七轮）：映射时不再逐个拒绝，费用行取自源列的禁止字符随最终明细留到生成前的检查，与其他文件、
+  //   其他组的位置一并列出（按源行号）：两份源文件各一处，共 2 处
+  const { collectUnwritableRowText, assertNoUnwritableRowText } = require('../../src/backend/file-service/common');
+  const xmlIllegalCsv2 = path.join(dir, 'field-mapping-xml-illegal-2.csv');
+  fs.writeFileSync(xmlIllegalCsv2, [FM_HEADERS.join(','), '2026-11-02,USD,50,2,货款,ok', '2026-11-03,USD,60,3,货款,REF\uFFFF02'].join('\n'), 'utf8');
+  const sharedUnwritable = { total: 0, labels: [] };
+  for (const source of [xmlIllegalCsv, xmlIllegalCsv2]) {
+    const mapped = buildMappedRows({ inputFilePath: source, orderedTargetFields: FM_FIELDS, mappingByField: FM_MAPPING,
+      expectedSourceHeaders: FM_HEADERS, billSplitMerge: main.buildBillSplitMergeConfig(template, SPLIT_MAPPINGS) });
+    collectUnwritableRowText(mapped, { rowMetas: mapped.rowMetas || [], found: sharedUnwritable });
+  }
+  let aggregated = null;
+  try {
+    assertNoUnwritableRowText(sharedUnwritable);
+  } catch (error) {
+    aggregated = error;
+  }
+  assertEq(aggregated && [aggregated.message, aggregated.detailLines],
+    ['源文件第 2 行写进「Transaction Description」列的值含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）等 2 处，请按值的来源修正源文件或模板的大账号、固定值配置后重新生成',
+      ['第 2 行写进「Transaction Description」列的值', '第 3 行写进「Transaction Description」列的值']],
+    '⑤ 费用行取自源列的禁止字符从源文件映射起随最终明细汇总，列出两份文件的源行');
 
   // v3.2.22 B113：形如 _xHHHH_ 的字面文本在写出边界转义（_x005F_），真实 CSV 生成、写出、读回原样保留：
   //   费用行取自源列的值、固定文本，与主映射取到的摘要两条路径都覆盖（不分大小写；含与回车相连的情形）

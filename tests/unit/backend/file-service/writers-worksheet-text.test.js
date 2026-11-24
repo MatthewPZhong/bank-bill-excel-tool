@@ -220,3 +220,57 @@ test('writeWorkbookRows 写出后经链接表流式导入：字面 _xHHHH_ 与�
   await readXlsxStreamed(outputFilePath, (cells) => raw.push(cells), { colCount: 2 });
   assert.equal(raw[1][0], 'TX_x005F_x0041_', '默认不还原（既有调用方行为不变）');
 });
+
+// v3.2.22 B113（Codex 第七轮）：链接表的表头识别与流式导入按同一口径还原（写出端转义后的表头仍能识别）；还原后无法确认原值的格
+//   （转义跨富文本片段拼成、表示非 ASCII 字符、还原为未配对的代理项）拒绝导入，不让不同的原值落成同一个键或与非流式读取不同
+test('链接表：表头识别与流式导入同样还原转义；无法确认原值的转义拒绝导入并给出行号与列名', async (t) => {
+  const JSZip = require('jszip');
+  const { streamLinkedRowsToInsert } = require('../../../../src/main-process/linked-table-stream-source');
+  const { detectTableType } = require('../../../../src/main-process/table-type-detector');
+  const dir = createTempDir(t);
+  const headerFile = path.join(dir, 'header.xlsx');
+  writeWorkbookRows({ rows: [['BizId', 'Note_x0041'], ['TX1', 'n']], outputFilePath: headerFile });
+  const signature = { tableKey: 'bank-statement', structureExact: true, expectedHeaders: ['BizId', 'Note_x0041'] };
+  const detected = await detectTableType(headerFile, [signature]);
+  assert.deepEqual([detected.status, detected.tableKey, detected.streamingEligible], ['matched', 'bank-statement', true], '写出端转义后的表头仍能识别');
+  assert.deepEqual(await streamLinkedRowsToInsert(headerFile, signature, () => {}), { matched: true });
+
+  const build = async (name, rowXml, sharedStrings) => {
+    const filePath = path.join(dir, `${name}.xlsx`);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['BizId', '备注']]), 'S');
+    XLSX.writeFile(workbook, filePath, { bookSST: true });
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+    zip.file('xl/worksheets/sheet1.xml', (await zip.file('xl/worksheets/sheet1.xml').async('string'))
+      .replace(/<dimension ref="[^"]*"\/>/, '<dimension ref="A1:B5"/>')
+      .replace(/<sheetData>[\s\S]*<\/sheetData>|<sheetData\/>/, `<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>${rowXml}</sheetData>`));
+    zip.file('xl/sharedStrings.xml', '<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + `<si><t>BizId</t></si><si><t>备注</t></si>${sharedStrings}</sst>`);
+    fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+    return filePath;
+  };
+  const linked = { expectedHeaders: ['BizId', '备注'] };
+  const rejected = [
+    ['共享字符串富文本拼成转义', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><r><t>ID_x00</t></r><r><t>41_</t></r></si>'],
+    ['内联富文本拼成转义', '<row r="5"><c r="A5" t="inlineStr"><is><r><t>ID_x00</t></r><r><t>41_</t></r></is></c></row>', ''],
+    ['公式字符串的非 ASCII 转义', '<row r="5"><c r="A5" t="str"><v>ID_x00E9_</v></c></row>', ''],
+    ['未配对的代理项', '<row r="5"><c r="A5" t="str"><v>ID_xD800_</v></c></row>', ''],
+    ['字符引用的未配对代理项', '<row r="5"><c r="A5" t="str"><v>ID&#xD800;</v></c></row>', '']
+  ];
+  for (const [label, rowXml, sharedStrings] of rejected) {
+    const filePath = await build(label, rowXml, sharedStrings);
+    const inserted = [];
+    await assert.rejects(streamLinkedRowsToInsert(filePath, linked, (row) => inserted.push(row)), (error) => (
+      error.code === 'FILE_READ' && /^源文件第 5 行「BizId」列的文本含无法确认原值的 Excel 文本转义（_xHHHH_）或不完整的 Unicode 字符/.test(error.message)
+        && !error.message.includes('ID_')
+    ), label);
+    assert.deepEqual(inserted, [], `${label}：不入库`);
+  }
+  // Excel 写出的转义（字面下划线、控制字符，各在一个文本段内）照常还原，与非流式读取一致
+  const accepted = await build('accepted', '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="str"><v>A_x000D_B</v></c></row>',
+    '<si><r><t>TX_x005F_x0041_</t></r><r><t>-1</t></r></si>');
+  const inserted = [];
+  assert.deepEqual(await streamLinkedRowsToInsert(accepted, linked, (row) => inserted.push(row)), { matched: true });
+  assert.deepEqual(inserted.map((row) => [row.BizId, row['备注']]), [['TX_x0041_-1', 'A\rB']]);
+  assert.deepEqual(readRows(accepted)[1], ['TX_x0041_-1', 'A\rB'], '与非流式读取一致');
+});

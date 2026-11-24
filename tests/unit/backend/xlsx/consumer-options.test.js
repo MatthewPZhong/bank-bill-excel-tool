@@ -75,7 +75,7 @@ test('消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合�
     const { readMeaningfulRowsHead } = source('backend/file-service/readers');
     assert.deepEqual(await readMeaningfulRowsHead(filename, 1, { maxColCount: 2 }),
       { rows: [['列A', '列B']], truncated: true });
-    assert.deepEqual(calls.at(-1), { colCount: 2, maxRows: 1 });
+    assert.deepEqual(calls.at(-1), { colCount: 2, maxRows: 1, decodeTextEscapes: false });
     const { streamLinkedRowsToInsert } = source('main-process/linked-table-stream-source');
     const rows = [];
     assert.deepEqual(await streamLinkedRowsToInsert(filename, { expectedHeaders: ['列A', '列B'] }, (row) => rows.push(row)), { matched: true });

@@ -211,7 +211,9 @@ async function readSheetMeaningfulRows(filePath, sheetName, useStreaming) {
   if (useStreaming) {
     try {
       const result = await readers.readMeaningfulRowsHead(filePath, HEAD_STREAM_PHYSICAL_ROWS, {
-        maxColCount: HEAD_STREAM_MAX_COL_COUNT
+        maxColCount: HEAD_STREAM_MAX_COL_COUNT,
+        // v3.2.22 B113：与链接表流式导入同样还原 OOXML 文本转义（表头与入库按同一口径读取）
+        decodeTextEscapes: true
       });
       const rows = Array.isArray(result.rows) ? result.rows : [];
       return rows.length > 0 ? rows : null;

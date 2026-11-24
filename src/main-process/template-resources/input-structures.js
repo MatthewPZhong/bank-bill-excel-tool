@@ -104,7 +104,7 @@ function linkedRuntimeHeaders(headerRow) {
     const sheetJs = pick(readRowsWithMetadata(filePath, []).rows);
     let streamed = sheetJs;
     try {
-      streamed = pick((await readMeaningfulRowsHead(filePath, headerRow + 20)).rows);
+      streamed = pick((await readMeaningfulRowsHead(filePath, headerRow + 20, { decodeTextEscapes: true })).rows);
     } catch (_error) { /* 非单表 xlsx：导入时不走流式读取 */ }
     if (JSON.stringify(streamed) === JSON.stringify(sheetJs)) return [sheetJs];
     // 两种读法结果不同：导入文件格式不同时读出的列名不同，不一致的列标出两种结果（必与快照不同，预检不通过）。
