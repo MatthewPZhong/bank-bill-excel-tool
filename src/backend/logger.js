@@ -128,7 +128,8 @@ const LOG_LEVEL_ALIASES = Object.freeze({ warn: 'warning' });
 
 function normalizeLogLevel(level) {
   const value = String(level || 'info').toLowerCase();
-  return LOG_LEVEL_ALIASES[value] || value;
+  // 只认别名表自身的键：调用方透传的级别（如 app:report-log）是 constructor、__proto__ 时原样保留
+  return Object.hasOwn(LOG_LEVEL_ALIASES, value) ? LOG_LEVEL_ALIASES[value] : value;
 }
 
 function getLogFilePath(storageRoot, level, date = new Date()) {

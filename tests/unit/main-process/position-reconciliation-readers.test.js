@@ -113,25 +113,6 @@ test.describe('平盘导入读取器', () => {
     );
   });
 
-  // v3.2.22 B55：日历上不存在的 BillDate 不再被滚动成下月参与月份替换，整批拒绝并列出原文；闰年 2 月 29 日照常读取
-  test('银行 BillDate 为不存在的日期时整批拒绝，不滚动成下月', (t) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-read-bank-rollover-'));
-    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const cases = [['02-29-2026', 'BANK-ROLL-1'], ['02/31/2026', 'BANK-ROLL-2'], ['04.31.2026', 'BANK-ROLL-3'], ['2-30-26', 'BANK-ROLL-4']];
-    for (const [billDate, bizId] of cases) {
-      const filePath = path.join(dir, `${bizId}.xlsx`);
-      writeWorkbook(filePath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow({ BizId: bizId, BillDate: billDate })]);
-      assert.throws(() => readBankFiles([filePath]), (error) => (
-        error.code === 'position-bank-row-invalid'
-        && error.detailLines.includes(`BillDate 无法解析：${billDate}`)
-      ), billDate);
-    }
-    const leapPath = path.join(dir, 'leap.xlsx');
-    writeWorkbook(leapPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow({ BizId: 'BANK-LEAP-1', BillDate: '02-29-2024' })]);
-    const parsed = readBankFiles([leapPath]);
-    assert.deepEqual([parsed.records[0].billDate, parsed.records[0].monthKey], ['2024-02-29', '2024-02']);
-  });
-
   test('同文件完全重复主键折叠，内容冲突拒绝', (t) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-duplicate-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

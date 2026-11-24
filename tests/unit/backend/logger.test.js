@@ -290,12 +290,21 @@ test.describe("level 'warn' 归为 warning（B114）", () => {
     assert.deepEqual(readJsonLines(getLogFilePath(root, 'info', now)), []);
   });
 
+  test('未知级别与原型属性名原样写入 level 字段（落 info.log）', (t) => {
+    const root = mkTmpRoot();
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const now = new Date(2026, 10, 23, 9, 0, 0);
+    for (const level of ['constructor', '__proto__', 'debug']) appendStructuredLog(root, { level, message: level }, now);
+    assert.deepEqual(readJsonLines(getLogFilePath(root, 'info', now)).map((record) => record.level), ['constructor', '__proto__', 'debug']);
+  });
+
   test('getLogFilePath：warn 落 warning.log，其他未知值仍兜底 info.log', () => {
     const root = mkTmpRoot();
     try {
       assert.equal(path.basename(getLogFilePath(root, 'warn')), 'warning.log');
       assert.equal(path.basename(getLogFilePath(root, 'debug')), 'info.log');
       assert.equal(path.basename(getLogFilePath(root, undefined)), 'info.log');
+      assert.equal(path.basename(getLogFilePath(root, 'constructor')), 'info.log');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

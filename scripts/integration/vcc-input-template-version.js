@@ -4,6 +4,7 @@
 //         入库对应回内置列序（content_hash 与内置结构同值导入一致），数据集导出重读存档原件按导入时结构核验血缘；
 //         恢复默认后已导入数据仍按记录的结构导出，同一文件再预检不通过；
 //         v3.2.15 B42：恢复默认会与同组另一张表当前结构相同时被阻止，已处于相同状态（v3.2.14 可能留下）时导入拒绝识别。
+//         v3.2.22 B60：升级前已启用的含换行表头版本保持当前，其他来源照常完成交接，该来源仍在写入前被交接拒绝。
 //
 // 预检 / 导入在 worker 中执行的部分在本进程直接调用同一函数（inspectWorkbookImportPlan、importFiles）；
 //   存档按 tests/helpers/vcc-review-export.js 的方式登记 ready 原件与交接元数据。
@@ -28,6 +29,7 @@ const { mapDetailRow } = require('../../src/backend/vcc-financial-op/row-mapper'
 const { EXPORT_KINDS, writeDatasetWorkbook } = require('../../src/main-process/vcc-financial-op-dataset-writer');
 const { resolveVccSourceStructures } = require('../../src/main-process/vcc-financial-op-source-structures');
 const { createTemplateResourceService } = require('../../src/main-process/template-resources/service');
+const { runTemplateInspection } = require('../../src/main-process/template-resources/inspection-runner');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const RECHARGE = getSourceDefinition(T.RECHARGE).headers;
@@ -36,9 +38,9 @@ const RECHARGE_V2 = [...RECHARGE.filter((header) => header !== 'fee').map((heade
 const ROW = { 订单号: 'IT-0001', BillDate: '2026-06-09', 业务部门: 'VCC', 对手部门: 'OPS', 业务子类型: '充值', 出入方向: 'in',
   公司主体: '甲', 我方币种: 'USD', 我方到账金额: '10.25', 业务场景: '改名列的值', 新增列: '不导入', 备注: '备注值' };
 
-function writeWorkbook(filePath, headers, rows = []) {
+function writeWorkbook(filePath, headers, rows = [], sheetName = '充值') {
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([headers, ...rows.map((row) => headers.map((header) => row[header] ?? ''))]), '充值');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([headers, ...rows.map((row) => headers.map((header) => row[header] ?? ''))]), sheetName);
   XLSX.writeFile(workbook, filePath);
   return filePath;
 }
@@ -167,6 +169,44 @@ async function run() {
       assert.throws(() => resolveImportPlan(conflicted, { planId: conflicted.planId, subjectBySourceId: {}, excludedSheetIds: [] }),
         { code: 'vcc-sheet-header-ambiguous' });
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_sources').get().n, before);
+    }],
+    ['B60：升级前已启用的含换行表头版本保持当前；其他来源照常完成交接，该来源仍在写入前被交接拒绝', async () => {
+      // 独立主库：用不检查控制字符的预检（模拟 v3.2.21）导入并启用含换行表头的充值清退版本，再用同一主库新建服务（模拟升级）
+      const legacyRoot = path.join(temporary, 'legacy-b60');
+      fs.mkdirSync(legacyRoot, { recursive: true });
+      const legacyDatabase = new AppDatabase(path.join(legacyRoot, 'tool-data.sqlite'));
+      legacyDatabase.init();
+      try {
+        const legacyRunner = (payload) => runTemplateInspection({ ...payload, context: { ...payload.context, importingNewVersion: false } });
+        const legacy = createTemplateResourceService({ appRoot: ROOT, appVersion: '3.2.21', userDataRoot: legacyRoot,
+          store: legacyDatabase, runInspection: legacyRunner });
+        const legacyHeaders = [...RECHARGE.filter((header) => header !== '备注'), '备注\n说明'];
+        const templateFile = writeWorkbook(path.join(files, 'VCC充值清退明细-旧版换行表头.xlsx'), legacyHeaders);
+        legacy.rememberPickedFile(templateFile);
+        const prepared = await legacy.prepareImport({ resourceId: 'vcc-recharge-refund', filePath: templateFile });
+        assert.equal(prepared.status, 'success', prepared.message);
+        assert.notEqual(prepared.verdict, 'fail', JSON.stringify(prepared.checks));
+        assert.equal((await legacy.commitImport({ importToken: prepared.importToken, enable: true })).status, 'success');
+
+        const upgraded = createTemplateResourceService({ appRoot: ROOT, appVersion: 'integration', userDataRoot: legacyRoot, store: legacyDatabase });
+        const structures = await resolveVccSourceStructures(upgraded);
+        assert.deepEqual(structures, { [T.RECHARGE]: { headers: legacyHeaders, versionLabel: 'V2' } }, '升级后旧版本仍为当前，不中止识别');
+        const handoff = async (filePath) => {
+          const plan = await inspectWorkbookImportPlan([filePath], { sourceStructures: structures });
+          assert.equal(plan.sources[0].status, 'ready', JSON.stringify(plan.sources[0].diagnostics));
+          return buildMemberFiles(resolveImportPlan(plan, { planId: plan.planId, subjectBySourceId: {}, excludedSheetIds: [] }));
+        };
+        const feeHeaders = getSourceDefinition(T.FEE_FX).headers;
+        const feeFile = writeWorkbook(path.join(files, 'VCC费用及换汇明细-升级后.xlsx'), feeHeaders,
+          [Object.fromEntries(feeHeaders.map((header) => [header, ROW[header] ?? '']))], '费用');
+        const members = await handoff(feeFile);
+        assert.deepEqual(members.map((file) => file.fileName), [path.basename(feeFile)], '费用及换汇明细照常完成交接');
+        const legacyFile = writeWorkbook(path.join(files, 'VCC充值清退明细-旧版换行表头-业务.xlsx'), legacyHeaders,
+          [{ ...ROW, 场景: ROW.业务场景, '备注\n说明': ROW.备注 }]);
+        await assert.rejects(handoff(legacyFile), { code: 'vcc-import-handoff-mismatch' }, '旧版本来源仍在写入前被交接拒绝');
+      } finally {
+        legacyDatabase.close();
+      }
     }]
   ];
 
