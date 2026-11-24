@@ -35,7 +35,11 @@ const POSITION_BANK_ROW_FIELDS = Object.freeze([
 ]);
 // 结果导出 / 回导、银行数据导出的列：审计列 + 银行行字段。
 const POSITION_BANK_HEADERS = Object.freeze([...AUDIT_HEADERS, ...POSITION_BANK_ROW_FIELDS]);
-const POSITION_SCHEMA_VERSION = 2;
+// 侧库结构版本。低于当前值的库在启动时丢弃重建（不迁移）。
+// 2：v3.2.22 开发期间的首版单遍导入结构（未随正式版本发布）。
+// 3：来源记录标识改按带类型的字段表示计算（日期单元格与同内容文本不再同标识）；
+//    与 2 的标识算法不能在同一个库里混用，否则同一条含日期的记录重导时查不到旧记录而重复入库。
+const POSITION_SCHEMA_VERSION = 3;
 const BANK_SHEET_NAME = '渠道对账单';
 
 const SOURCE_TYPES = Object.freeze({

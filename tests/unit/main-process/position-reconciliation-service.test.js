@@ -35,6 +35,7 @@ const {
   BANK_SHEET_NAME,
   POSITION_DB_RELATIVE_PATH,
   POSITION_BANK_HEADERS,
+  POSITION_SCHEMA_VERSION,
   SOURCE_DEFINITIONS,
   SOURCE_REQUIRED_FIELDS,
   SOURCE_TYPES,
@@ -3522,6 +3523,16 @@ test('旧版本结构的侧库：store 拒绝接管；启动清理整体丢弃�
   fs.writeFileSync(emptyPath, '');
   assert.equal(discardOutdatedPositionSideDb(emptyDir), false);
   assert.equal(fs.existsSync(emptyPath), true);
+
+  // 结构版本标记低于当前值的库（如开发期间用旧记录标识算法写过数据的版本 2）同样整体丢弃：
+  // 两种来源记录标识不能在同一个库里混用，否则含日期的同一条记录重导时查不到旧记录而重复入库。
+  const previousVersion = new DatabaseSync(dbPath);
+  previousVersion.prepare(
+    "UPDATE position_meta SET value = ? WHERE key = 'position_schema_version'"
+  ).run(String(POSITION_SCHEMA_VERSION - 1));
+  previousVersion.close();
+  assert.equal(discardOutdatedPositionSideDb(userDataDir), true);
+  assert.equal(fs.existsSync(dbPath), false);
 
   // 只有零散的 position_ 表、或结构版本标记损坏的库：结构无法识别，保留文件并由 store 阻断，不当旧库删除。
   for (const [label, schema] of [

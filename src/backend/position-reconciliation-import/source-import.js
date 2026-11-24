@@ -199,6 +199,22 @@ function failedResult(descriptor, error) {
   };
 }
 
+// 本次导入里每个文件出现过的过滤业务单号（事务内临时表，随回滚点撤销）。
+const FILTERED_KEY_TABLE = 'position_import_filtered_keys';
+
+function createFilteredKeyTable(db) {
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS ${FILTERED_KEY_TABLE} (
+      id INTEGER PRIMARY KEY,
+      raw_version INTEGER NOT NULL,
+      source_type TEXT NOT NULL,
+      business_key TEXT NOT NULL,
+      UNIQUE (raw_version, source_type, business_key)
+    );
+    DELETE FROM ${FILTERED_KEY_TABLE};
+  `);
+}
+
 function sourceStatements(db) {
   return {
     findSource: db.prepare(`
@@ -247,16 +263,22 @@ function sourceStatements(db) {
       INSERT INTO ${FILTERED_PAYLOAD_TABLE}(filtered_id, file_index, fields_json)
       VALUES (?, ?, ?)
     `),
+    // 每个文件出现过的过滤业务单号，折叠之前就登记：与别的文件完全相同的过滤行只保留一条过滤记录，
+    // 但冲突要按「哪些文件含这条过滤行」判定，不能只算在先读到的那个文件头上。
+    noteFilteredKey: db.prepare(`
+      INSERT OR IGNORE INTO ${FILTERED_KEY_TABLE}(raw_version, source_type, business_key)
+      VALUES (?, ?, ?)
+    `),
     // 某个文件的过滤行里，业务单号已存在正常记录的那些。
     filteredCollisions: db.prepare(`
       SELECT filtered.business_key AS businessKey,
              source.raw_version AS rawVersion,
              source.source_row_number AS rowNumber
-      FROM position_filtered_source_rows filtered
+      FROM ${FILTERED_KEY_TABLE} filtered
       JOIN position_source_rows source
         ON source.source_type = filtered.source_type
        AND source.business_key = filtered.business_key
-      WHERE filtered.raw_version = ? AND filtered.resolved_at IS NULL
+      WHERE filtered.raw_version = ?
       ORDER BY filtered.id, source.id
       LIMIT ${MAX_COLLISION_DETAIL_LINES}
     `),
@@ -376,6 +398,7 @@ async function importSourceFile({
 
         const rowHash = sourceRecordKeyOf(fields);
         if (classification.disposition === 'filtered') {
+          statements.noteFilteredKey.run(rawVersion, sourceType, validation.businessKey);
           const active = statements.findActiveFiltered.get(sourceType, rowHash);
           if (active && batch.versions.has(Number(active.rawVersion))) {
             stats.collapsedDuplicateRows += 1;
@@ -678,6 +701,7 @@ async function runPositionSourceImport(input = {}) {
         const previousMaxFilteredId = Number(filteredSequence && filteredSequence.seq || 0);
         // 过滤行内容的临时表先建好再准备语句；每轮尝试回到回滚点时它随之清空。
         createFilteredPayloadTable(db);
+        createFilteredKeyTable(db);
         const statements = sourceStatements(db);
         // 全部读完才能判定要整份拒绝的文件（过滤行与正常记录同单号、异常报告写不出来）：
         // 记下来后整体回到起点重读其余文件。正常情况下每个文件只读一遍。
@@ -753,9 +777,10 @@ async function runPositionSourceImport(input = {}) {
           const acceptedOutcomes = outcomes.filter((item) => item.stats && !item.account);
           // 过滤行与正常记录（同批任一文件或库内已有）同单号的文件整份拒绝。必须等全部文件读完、
           // 所有通过文件级校验的正常记录都在库里时一次判定，被拒文件的集合才与文件顺序无关。
+          // 按文件登记的过滤业务单号判，不看 filteredRows：与别的文件完全相同的过滤行被折叠后，
+          // 后读到的文件 filteredRows 可能为 0，但它同样含这条过滤行。
           const retroactive = new Map();
           for (const item of acceptedOutcomes) {
-            if (Number(item.stats.filteredRows) === 0) continue;
             const collisions = statements.filteredCollisions.all(item.stats.rawVersion);
             if (collisions.length === 0) continue;
             const error = collisionError(item.descriptor, collisions, batch.fileIndexByVersion);
@@ -935,7 +960,12 @@ async function runPositionSourceImport(input = {}) {
 
         // 事务保持未提交：等待授权期间其他连接看到的仍是旧数据。
         assertNotCancelled(cancelToken);
-        grant = normalizeApplyGrant(await input.awaitApplyGrant(ready), {
+        const pendingGrant = input.awaitApplyGrant(ready);
+        // 就绪结果一发出，Main 就可能把这些暂存文件登记进待完成操作与存档清单（确认写入的任务
+        // 先登记、后授权，登记之后仍可能拒绝授权）。此后无论授权被拒、被取消还是提交失败，
+        // 暂存目录都归 Main 回收：调度层按「待完成操作 / 未结存档来源」保护规则清理，导入进程不再删除。
+        keepJobRoot = true;
+        grant = normalizeApplyGrant(await pendingGrant, {
           jobId,
           archiveManifestHash,
           baseCheckpoint,
@@ -944,9 +974,6 @@ async function runPositionSourceImport(input = {}) {
         if (grant.preflightOnly || acceptedFiles.length === 0) {
           throw new NothingToCommit(ready);
         }
-        // 拿到写入授权即表示 Main 已把这些暂存文件登记进待完成操作与存档清单：
-        // 此后无论提交成败，暂存目录都由 Main 按存档状态回收，导入进程不再删除。
-        keepJobRoot = true;
         for (const file of acceptedFiles) await assertStagedFileUntouched(file);
         // 授权后导入进程已进入不可取消阶段；这里再核一次，防止取消与授权同时到达时仍然提交。
         assertNotCancelled(cancelToken);
@@ -1012,6 +1039,7 @@ async function runPositionSourceImport(input = {}) {
 
     if (mutation.nothingToCommit) {
       // 只有账户表待确认（或全部被拒）：库未改动；账户表的暂存文件留到用户确认或取消。
+      // 这是正常结束（Main 不会走失败清理），没有待确认账户表时由导入进程自己删除暂存目录。
       const ready = mutation.nothingToCommit;
       keepJobRoot = Boolean(ready.accountConfirmationDescriptor);
       const confirmation = ready.orderedFileResults.filter(
@@ -1069,7 +1097,7 @@ async function runPositionSourceImport(input = {}) {
       try { db.close(); } catch (_closeError) { /* 关闭失败不覆盖结果 */ }
     }
     if (!committed && !keepJobRoot) {
-      // 未提交、未拿到写入授权且没有待确认的账户表：暂存目录不再需要。
+      // 就绪结果发出之前就失败，或没有任何需要提交 / 待确认的文件：暂存目录不再需要。
       await fs.promises.rm(jobRoot, {
         recursive: true,
         force: true,

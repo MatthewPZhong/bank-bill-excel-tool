@@ -103,8 +103,25 @@ function reasonSummary(value) {
     .join('；');
 }
 
+// 读取器按本地时间解释 Excel 日期序号（2026-07-20 01:30 的单元格读成本地 01:30 的 Date），
+// ExcelJS 写出时却按 UTC 时刻换算序号：直接写会偏移一个时区，东八区的 01:30 会落到前一天 17:30。
+// 写出前把本地的年月日时分秒搬到 UTC 上，报告里的日期时间与来源单元格一致。只用于写报告，不改变导入解析口径。
+function excelWallClockDate(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return value;
+  return new Date(Date.UTC(
+    value.getFullYear(),
+    value.getMonth(),
+    value.getDate(),
+    value.getHours(),
+    value.getMinutes(),
+    value.getSeconds(),
+    value.getMilliseconds()
+  ));
+}
+
 function excelValueForHeader(header, value) {
   const normalized = value ?? '';
+  if (normalized instanceof Date) return excelWallClockDate(normalized);
   if (normalized === '' || !TEXT_HEADER_PATTERN.test(String(header))) return normalized;
   return { richText: [{ text: String(normalized) }] };
 }
@@ -310,6 +327,7 @@ module.exports = {
   createFilteredPayloadTable,
   detailHeadersFor,
   excelValueForHeader,
+  excelWallClockDate,
   reportDetailValues,
   writePositionAnomalyReport
 };

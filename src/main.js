@@ -21823,11 +21823,21 @@ function registerPositionReconciliationHandlers() {
             taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)
           );
         });
-        // 模块锁被占时 applyBankImport 没有执行：同样要回滚等待中的导入。
+        // 模块锁被占时 applyBankImport 没有执行：同样要回滚等待中的导入。此时存档清单已登记这些暂存文件，
+        // 导入进程只回滚事务、不删暂存；文件留给本任务的存档结算，结算后由收尾流程回收。
         if (result && result.status === 'busy') {
           await getPositionReconciliationService().abandonPreparedBankImport(token);
         }
         return result;
+      }
+    },
+    {
+      // 导入进程在上一步（选择文件）已经开着未提交的事务等确认。确认这一步无论在哪里结束——
+      // 包括 prepare 之前的 Recovery Hold 检查就被拒、此时 onAbandon 还没登记——只要令牌没有被
+      // applyBankImport 用掉，就按令牌回滚并释放侧库写锁；令牌已用掉时这里什么都不做。
+      afterInvocation: async (_event, token) => {
+        if (!positionReconciliationService) return;
+        await positionReconciliationService.abandonPreparedBankImport(token);
       }
     }
   );
@@ -23846,10 +23856,29 @@ function supportIpcHandle(channel, label, handler) {
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
 }
 
-function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
+// afterInvocation：本次调用结束后（成功、失败、被拒都算）执行的领域收尾，用于释放上一步 IPC 留下、
+// 而本次调用可能在 prepare 之前就结束因而无从登记 onAbandon 的资源。收尾失败只记日志，不改变原结果。
+function trackedIpcHandle(channel, moduleKey, functionKey, handler, { afterInvocation = null } = {}) {
   const meta = { channel, moduleKey, functionKey };
   ipcMain.handle(channel, async (event, ...args) => {
-    const result = await runArchiveAwareOperation(meta, event, args, handler);
+    let result;
+    try {
+      result = await runArchiveAwareOperation(meta, event, args, handler);
+    } finally {
+      if (typeof afterInvocation === 'function') {
+        try {
+          await afterInvocation(event, ...args);
+        } catch (error) {
+          appendActivityLogEntry({
+            level: 'warning',
+            source: 'main',
+            domain: 'ipc-task',
+            message: `[${channel}] 调用结束后的资源收尾失败`,
+            details: [error && error.message ? error.message : String(error)]
+          });
+        }
+      }
+    }
     if (isSuccessfulTrackedResult(result, moduleKey)) {
       tickUsageStats(moduleKey, functionKey);
     }

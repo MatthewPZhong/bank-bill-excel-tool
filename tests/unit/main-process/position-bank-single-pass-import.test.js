@@ -41,12 +41,13 @@ function writeBank(filePath, rows) {
   return filePath;
 }
 
-function setup(t) {
+function setup(t, options = {}) {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-bank-single-pass-'));
   let sequence = 0;
   const service = createPositionReconciliationService({
     userDataDir, templatePath: TEMPLATE_PATH, positionImportEngine: 'streaming',
-    operationTokenProvider: () => `position-bank-single-pass-${++sequence}`
+    operationTokenProvider: () => `position-bank-single-pass-${++sequence}`,
+    ...options
   });
   // 先关库再删目录（Windows 上顺序反了会 EBUSY）。
   t.after(() => { service.close(); fs.rmSync(userDataDir, { recursive: true, force: true }); });
@@ -222,6 +223,31 @@ test('确认写入的任务未接管时按令牌放弃：等待中的导入回�
   );
   await importFile(service, writeBank(path.join(userDataDir, 'again.xlsx'), [bankRow({ BizId: 'NEW-2' })]));
   assert.deepEqual(storedBizIds(service), ['DBS/2026-07/NEW-2']);
+});
+
+test('存档清单已登记暂存文件后放弃导入：只回滚事务并释放写锁，暂存文件留给存档结算', async (t) => {
+  // 确认写入的任务先把暂存文件登记进待完成操作，再去拿模块锁；锁被占时放弃导入不能删掉已登记的文件。
+  let pendingFiles = [];
+  const { service, userDataDir } = setup(t, { protectedStagingPaths: () => pendingFiles });
+  const before = service.store.persistenceCheckpoint();
+  const prepared = await service.prepareBankImport([
+    writeBank(path.join(userDataDir, 'new.xlsx'), [bankRow({ BizId: 'NEW-1' })])
+  ]);
+  const staged = service.bankImportArchiveIntent(prepared.token).map((file) => file.filePath);
+  assert.equal(staged.length, 1);
+  pendingFiles = staged;
+
+  await service.abandonPreparedBankImport(prepared.token);
+
+  service.assertNoImportHoldingWriteLock();
+  assert.deepEqual(storedBizIds(service), []);
+  assert.deepEqual(service.store.persistenceCheckpoint(), before);
+  assert.equal(fs.existsSync(staged[0]), true, '已登记进存档清单的暂存原件必须保留');
+
+  // 待完成操作收口后不再受保护：按原有回收路径删除。
+  pendingFiles = [];
+  await service.cleanupUnprotectedStagingPathsAsync([path.dirname(path.dirname(staged[0]))]);
+  assert.equal(fs.existsSync(staged[0]), false);
 });
 
 test('文件存在非法行：整批拒绝并提示行号，已有数据不变', async (t) => {

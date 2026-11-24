@@ -475,7 +475,12 @@ async function runPositionBankImport(input = {}) {
         };
         // 事务保持未提交：等待确认期间其他连接看到的仍是旧数据。
         assertNotCancelled(cancelToken);
-        grant = normalizeApplyGrant(await input.awaitApplyGrant(ready), {
+        const pendingGrant = input.awaitApplyGrant(ready);
+        // 就绪结果一发出，Main 就可能把这些暂存文件登记进待完成操作与存档清单（确认写入的任务
+        // 先登记、后授权，登记之后仍可能拒绝授权）。此后无论授权被拒、被取消还是提交失败，
+        // 暂存目录都归 Main 回收：调度层按「待完成操作 / 未结存档来源」保护规则清理，导入进程不再删除。
+        handedOff = true;
+        grant = normalizeApplyGrant(await pendingGrant, {
           jobId,
           baseCheckpoint,
           fileCount: acceptedFiles.length
@@ -486,9 +491,6 @@ async function runPositionBankImport(input = {}) {
             archivePath: path.resolve(String(grant.archivePaths[index] || file.archivePath))
           }));
         }
-        // 拿到写入授权即表示 Main 已把这些暂存文件登记进待完成操作与存档清单：
-        // 此后无论提交成败，暂存目录都由 Main 按存档状态回收，导入进程不再删除。
-        handedOff = true;
         for (const file of acceptedFiles) await assertStagedFileUntouched(file);
         // 授权后导入进程已进入不可取消阶段；这里再核一次，防止取消与授权同时到达时仍然提交。
         assertNotCancelled(cancelToken);

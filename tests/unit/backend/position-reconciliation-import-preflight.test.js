@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -1180,7 +1181,7 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
   });
   // ── 链接原始表单遍导入（v3.2.22）：经真实导入进程 ──────────────────────────────
 
-  test('链接原始表等待写入授权时取消：事务回滚，暂存清理，ready 只带清单不带数据行', async (t) => {
+  test('链接原始表等待写入授权时取消：事务回滚，暂存由调度层清理，ready 只带清单不带数据行', async (t) => {
     const dir = tempDir(t, 'position-source-awaiting-cancel-');
     const side = createSideDb(dir);
     const filePath = sourceFile(
@@ -1219,7 +1220,7 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
     );
   });
 
-  test('链接原始表写入授权失败：导入进程回滚并清理暂存', async (t) => {
+  test('链接原始表写入授权失败：导入进程回滚，暂存由调度层清理', async (t) => {
     const dir = tempDir(t, 'position-source-auth-reject-');
     const side = createSideDb(dir);
     const filePath = sourceFile(
@@ -1434,7 +1435,11 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
     await assert.rejects(attempt('grant-preflight-only', (grant) => ({ ...grant, preflightOnly: true })), notDurable);
     assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
     assert.equal(countRows(side.sideDbPath, 'position_raw_files'), 0);
-    assert.deepEqual(fs.readdirSync(path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH)), []);
+    // 就绪结果发出后暂存归 Main：授权不一致时导入进程只回滚，暂存由 Main 的调度层按保护规则回收。
+    assert.deepEqual(
+      fs.readdirSync(path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH)).sort(),
+      ['grant-batch', 'grant-checkpoint', 'grant-manifest', 'grant-preflight-only', 'grant-token']
+    );
 
     const { result } = await attempt('grant-ok', (grant) => grant);
     assert.equal(result.successCount, 1);
@@ -1599,6 +1604,47 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
     }
   });
 
+  test('跨文件完全相同的过滤行按「含这条过滤行的每个文件」判冲突：被拒文件与文件顺序无关', async (t) => {
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const filteredOf = (key) => ({ ...base, 调拨单号: key, 调拨状态: '处理中', 付款金额: '' });
+    // A：正常 Y + 过滤 X；B：与 A 完全相同的过滤 X；C：正常 X + 过滤 Y。
+    // 过滤 X 只保留一条过滤记录（先读到的文件名下），但 A、B 都含它、都与 C 的正常 X 冲突。
+    const orders = { 'a-b-c': ['a', 'b', 'c'], 'b-a-c': ['b', 'a', 'c'], 'c-b-a': ['c', 'b', 'a'] };
+    for (const [order, names] of Object.entries(orders)) {
+      const dir = tempDir(t, `position-source-shared-filtered-${order}-`);
+      const side = createSideDb(dir);
+      const files = {
+        a: sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [{ ...base, 调拨单号: 'FT-Y' }, filteredOf('FT-X')], 'a.xlsx'),
+        b: sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [filteredOf('FT-X')], 'b.xlsx'),
+        c: sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [{ ...base, 调拨单号: 'FT-X' }, filteredOf('FT-Y')], 'c.xlsx')
+      };
+      const jobId = `shared-filtered-${order}`;
+      const { result } = await importSources({
+        dir, files: names.map((name) => files[name]), ...side, jobId,
+        grant: (ready) => ({ jobId, archiveManifestHash: ready.archiveManifestHash, preflightOnly: true })
+      });
+      assert.equal(result.status, 'failed', order);
+      assert.deepEqual(
+        result.results.map((item) => item.code),
+        ['position-filtered-key-collision', 'position-filtered-key-collision', 'position-filtered-key-collision'],
+        order
+      );
+      assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0, order);
+      assert.equal(countRows(side.sideDbPath, 'position_filtered_source_rows'), 0, order);
+      assert.equal(countRows(side.sideDbPath, 'position_raw_files'), 0, order);
+    }
+
+    // 没有冲突时，跨文件相同的过滤行仍只留一条记录，两份文件都接受。
+    const dir = tempDir(t, 'position-source-shared-filtered-accepted-');
+    const side = createSideDb(dir);
+    const first = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [{ ...base, 调拨单号: 'FT-OK' }, filteredOf('FT-F')], 'first.xlsx');
+    const second = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [filteredOf('FT-F')], 'second.xlsx');
+    const accepted = await importSources({ dir, files: [first, second], ...side, jobId: 'shared-filtered-accepted' });
+    assert.deepEqual(accepted.result.results.map((item) => item.status), ['ok', 'ok']);
+    assert.deepEqual(accepted.result.results.map((item) => item.filteredRowCount), [1, 0]);
+    assert.equal(countRows(side.sideDbPath, 'position_filtered_source_rows'), 1);
+  });
+
   test('写库时的数据库错误不当成单个坏文件：整批回滚，其余文件也不提交', async (t) => {
     const dir = tempDir(t, 'position-source-sqlite-failure-');
     const side = createSideDb(dir);
@@ -1683,6 +1729,61 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
     );
   });
 
+  test('就绪结果发出后授权被拒：导入进程只回滚不删暂存，调度层按保护规则回收', async (t) => {
+    // 导入进程自身：授权被拒后暂存文件仍在（此时 Main 可能已把它登记进存档清单）。
+    const dir = tempDir(t, 'position-source-reject-keeps-staging-');
+    const side = createSideDb(dir);
+    const file = sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]]);
+    const rejection = Object.assign(new Error('授权被拒'), { code: 'position-side-db-mismatch' });
+    await assert.rejects(
+      importSources({ dir, files: [file], ...side, jobId: 'reject-keeps-staging', grant: () => { throw rejection; } }),
+      (error) => error === rejection
+    );
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    const stagedFile = path.join(
+      dir, 'worker-user-data', STAGING_RELATIVE_PATH, 'reject-keeps-staging', '1', path.basename(file)
+    );
+    assert.equal(fs.existsSync(stagedFile), true);
+
+    const bankDir = tempDir(t, 'position-bank-reject-keeps-staging-');
+    const bankSide = createSideDb(bankDir, 'bank-reject');
+    const bankPath = path.join(bankDir, 'bank.xlsx');
+    writeWorkbook(bankPath, [{ name: BANK_SHEET_NAME, headers: POSITION_BANK_HEADERS, rows: [bankRow()] }]);
+    await assert.rejects(
+      runPositionBankImport({
+        jobId: 'bank-reject-keeps-staging', files: [bankPath],
+        userDataDir: path.join(bankDir, 'worker-user-data'),
+        sideDbPath: bankSide.sideDbPath, expectedCheckpoint: bankSide.checkpoint,
+        awaitApplyGrant: async () => { throw rejection; }
+      }),
+      (error) => error === rejection
+    );
+    assert.equal(countRows(bankSide.sideDbPath, 'position_bank_rows'), 0);
+    const stagedBank = path.join(
+      bankDir, 'worker-user-data', STAGING_RELATIVE_PATH, 'bank-reject-keeps-staging', '1', 'bank.xlsx'
+    );
+    assert.equal(fs.existsSync(stagedBank), true);
+
+    // 经调度层：暂存文件已被待完成操作引用时保留，未被引用时删除。
+    for (const protectedByPending of [true, false]) {
+      const jobDir = tempDir(t, `position-source-reject-dispatch-${protectedByPending}-`);
+      const jobSide = createSideDb(jobDir);
+      const input = sourceFile(jobDir, SOURCE_TYPES.GATEWAY_OUTBOUND, [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]]);
+      let stagedPaths = [];
+      const job = dispatchPositionImportPreflight(sourceWorkerInput(jobDir, jobSide, [input], {
+        onPreflightReady: (ready) => {
+          stagedPaths = ready.acceptedOrdinaryInputFiles.map((item) => item.archivePath);
+        },
+        authorizeApply: () => { throw rejection; },
+        protectedStagingPaths: () => (protectedByPending ? stagedPaths : [])
+      }));
+      await assert.rejects(job.promise, (error) => error && error.code === 'position-side-db-mismatch');
+      assert.equal(stagedPaths.length, 1);
+      assert.equal(fs.existsSync(stagedPaths[0]), protectedByPending, String(protectedByPending));
+      assert.equal(countRows(jobSide.sideDbPath, 'position_source_rows'), 0);
+    }
+  });
+
   test('来源记录标识、相等判断与落库对日期单元格用同一套表示；异常报告写出日期而不是内部标记', async (t) => {
     const date = new Date(Date.UTC(2026, 6, 20, 3, 4, 5));
     const asDate = { 调拨单号: 'FT-1', 交易时间: date };
@@ -1701,8 +1802,14 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
     const side = createSideDb(dir);
     const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
     const file = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [
-      { ...base, 调拨单号: 'FT-DATE', 调拨状态: '处理中', 付款金额: '', 交易时间: new Date(2026, 6, 20) }
+      { ...base, 调拨单号: 'FT-DATE', 调拨状态: '处理中', 付款金额: '', 交易时间: new Date(2026, 6, 20, 1, 30) }
     ]);
+    // 来源单元格的日期序号（与时区无关的原值）。
+    const sourceSheet = XLSX.readFile(file)
+      .Sheets[`${SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].sourceName}-数据`];
+    const sourceHeaderRow = XLSX.utils.sheet_to_json(sourceSheet, { header: 1, raw: true });
+    const sourceSerial = sourceHeaderRow[1][sourceHeaderRow[0].indexOf('交易时间')];
+    assert.equal(typeof sourceSerial, 'number');
     const { result } = await importSources({ dir, files: [file], ...side, jobId: 'report-date-job' });
     assert.equal(result.results[0].filteredRowCount, 1, JSON.stringify(result.results[0]));
     const workbook = XLSX.readFile(result.anomalyReport.filePath, { cellDates: true });
@@ -1712,6 +1819,39 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
     const cell = detail[1][column];
     assert.ok(cell instanceof Date, `交易时间应写成日期，实际：${JSON.stringify(cell)}`);
     assert.equal(JSON.stringify(detail).includes('__position_reconciliation_type__'), false);
+    // 报告里的日期序号与来源单元格相同：不因读取按本地时间、写出按 UTC 而偏移一个时区。
+    const rawDetail = XLSX.utils.sheet_to_json(
+      XLSX.readFile(result.anomalyReport.filePath).Sheets['调拨异常明细'],
+      { header: 1, raw: true }
+    );
+    assert.ok(
+      Math.abs(rawDetail[1][column] - sourceSerial) < 1e-6,
+      `报告序号 ${rawDetail[1][column]} 应等于来源序号 ${sourceSerial}`
+    );
+  });
+
+  test('异常报告日期在非 UTC 时区保留来源的日历日期与时间（固定东八区验证）', () => {
+    // 本机或 CI 是 UTC 时上面的往返断言恒成立，这里在子进程里固定时区验证换算本身。
+    const script = `
+      const { excelValueForHeader } = require(${JSON.stringify(
+        path.resolve(__dirname, '../../../src/backend/position-reconciliation-import/anomaly-report.js')
+      )});
+      const local = new Date(2026, 6, 20, 1, 30, 15);
+      process.stdout.write(JSON.stringify({
+        offset: local.getTimezoneOffset(),
+        written: excelValueForHeader('交易时间', local).toISOString(),
+        text: excelValueForHeader('备注', 'x')
+      }));
+    `;
+    const child = spawnSync(process.execPath, ['-e', script], {
+      env: { ...process.env, TZ: 'Asia/Shanghai' },
+      encoding: 'utf8'
+    });
+    assert.equal(child.status, 0, child.stderr);
+    const output = JSON.parse(child.stdout);
+    if (output.offset !== -480) return; // 运行环境不支持按 TZ 切换时区时无法验证
+    assert.equal(output.written, '2026-07-20T01:30:15.000Z');
+    assert.equal(output.text, 'x');
   });
 
   test('单遍导入的磁盘门禁按暂存文件大小估算行数据与 WAL 增长，空间不足时在写库前拒绝', async (t) => {
