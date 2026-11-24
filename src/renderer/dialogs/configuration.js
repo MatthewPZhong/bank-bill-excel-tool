@@ -201,7 +201,8 @@
     //
     // 参数：
     //   onAssembleReady(summary) —— 装配成功后由调用方（handleExportBalance 分流）接收 summary 更新 state
-    //   onAssembleFailed(result) —— 装配失败（status === 'error'）时调用，调用方据此更新状态框（如报错文件可导出）
+    //   onAssembleFailed(result) —— 装配未成功（出错或无数据）时调用，调用方据此更新状态框：出错时报错文件可导出，无数据时清掉上一次
+    //     尝试的报错状态（Codex 第十轮）
     function createMonthlyBalanceExportDialog({ onAssembleReady, onAssembleFailed } = {}) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -353,7 +354,7 @@
           return;
         }
         if (result && result.status === 'empty') {
-
+          if (typeof onAssembleFailed === 'function') onAssembleFailed(result);
           pushAlert(overlay, () => createAlertDialog(result.message || '该模板 / 月份范围内无余额数据', {
             onConfirm: null
           }));
@@ -361,7 +362,7 @@
         }
         // status === 'error' 或其它失败；业务校验错误（如记录含无法写入 Excel 的字符）一并列出逐处位置（v3.2.22 B113）。
         //   状态框同步失败结果：主进程已生成报错文件时，关掉弹窗后点击状态框可导出（Codex 第六轮）
-        if (result && result.status === 'error' && typeof onAssembleFailed === 'function') onAssembleFailed(result);
+        if (typeof onAssembleFailed === 'function') onAssembleFailed(result || {});
         const lines = [result?.message || '装配月度余额账单失败']
           .concat(Array.isArray(result?.detailLines) ? result.detailLines : []);
         const text = lines.map((line) => String(line).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])).join('<br/>');

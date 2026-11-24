@@ -495,10 +495,12 @@ async function handleOpenAccountMappings() {
           state.monthlyBalanceReady=true;state.monthlyBalancePreview=structuredClone(summary);
           setStatus('月度余额账单已生成（共 '+summary.count+' 条记录），可点击"导出余额"另存为文件','success',{errorReportReady:false});
         },onAssembleFailed(result){
-          // v3.2.22 B113：装配失败时状态框同步结果，报错文件可从状态框导出
+          // v3.2.22 B113：装配未成功时状态框同步结果：出错且已生成报错文件时可从状态框导出；无数据或其他失败时关闭报错导出，
+          //   不留上一次尝试的报错状态（Codex 第六、十轮）
           if(!live(version))return;
           state.monthlyBalanceReady=false;state.monthlyBalancePreview=null;
-          setStatus(result.message||'装配月度余额账单失败','error',{errorReportReady:Boolean(result.errorReportReady)});
+          if(result.status==='empty')setStatus(result.message||'该模板 / 月份范围内无余额数据','info',{errorReportReady:false});
+          else setStatus(result.message||'装配月度余额账单失败','error',{errorReportReady:result.status==='error'&&Boolean(result.errorReportReady)});
         }}));
       }
       return perform('monthly',()=>api.monthlyBalance.export());
