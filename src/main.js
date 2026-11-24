@@ -13625,6 +13625,44 @@ function createRestoredStatementRuntimeFailureResult(error, { step, errorCode })
   };
 }
 
+// v3.2.22 B45（D7）：还原不完整（STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE）。报错文件尽力写入：导出所在的数据目录已满或只读
+//   （正是还原失败的常见原因）时写报错文件也会失败，此时仍返回给出未还原数量与恢复清单位置的消息，不让写报错文件的异常
+//   盖掉恢复指引；活动日志尽力只记错误代码。
+function createRollbackIncompleteErrorResult(options) {
+  const reportBefore = lastErrorReport;
+  try {
+    return createErrorResult(options);
+  } catch (_reportError) {
+    // 报错文件已写出、之后写活动日志失败：照常指向本次的报错文件
+    if (lastErrorReport && lastErrorReport !== reportBefore) {
+      return {
+        status: 'error',
+        message: options.message,
+        errorReportReady: true,
+        errorReportFileName: lastErrorReport.fileName
+      };
+    }
+    try {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'statement',
+        message: `${options.step}失败，且有文件未能自动还原（报错文件未能写出）`,
+        details: [`错误代码：${options.errorCode}`]
+      });
+    } catch (_logError) {
+      // 尽力而为
+    }
+    return {
+      status: 'error',
+      message: options.message,
+      errorCode: options.errorCode,
+      detailLines: Array.isArray(options.detailLines) ? options.detailLines.slice() : [],
+      errorReportReady: false
+    };
+  }
+}
+
 function generateMultiTemplateGroupFiles({
   fileEntries,
   fallbackTemplateConfig,
@@ -16530,11 +16568,12 @@ async function handleFilenameMappingImport(prepared) {
     if (error instanceof FileValidationError) {
       // v3.2.16：币种未维护大账号需要把文件 / 币种 / 行号带回界面弹窗（spec D1）；
       //   v3.2.21：渠道余额方式冲突、出余额的交易缺账单日期或 MerchantId 同样带回明细
+      //   v3.2.22 B45：还原不完整时报错文件写不出也返回恢复指引
       const buildResult = String(error.code || '').startsWith('CURRENCY_BIG_ACCOUNT_')
         || error.code === 'CHANNEL_BALANCE_MODE_MISMATCH'
         || error.code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE'
         ? createDetailedErrorResult
-        : createErrorResult;
+        : (error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? createRollbackIncompleteErrorResult : createErrorResult);
       return buildResult({
         step: '导入网银明细文件',
         message: error.message,
@@ -18065,7 +18104,7 @@ function registerFileHandlers() {
           || error.code === 'CHANNEL_BALANCE_MODE_MISMATCH'
           || error.code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE'
           ? createDetailedErrorResult
-          : createErrorResult;
+          : (error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? createRollbackIncompleteErrorResult : createErrorResult);
         return buildResult({
           step: '选择大账号',
           message: error.message,

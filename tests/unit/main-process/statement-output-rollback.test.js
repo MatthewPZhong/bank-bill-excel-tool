@@ -252,3 +252,98 @@ test('failBatch：全部还原时原错误打上标记；还原不完整时改�
   assert.ok(!error.detailLines.some((line) => line.includes('new.xlsx')), '错误明细不含文件路径');
   assert.match(fs.readFileSync(outcome.manifestPath, 'utf8'), /new\.xlsx\n {3}本次新建的文件（导入前不存在）\n {3}原因：系统错误 EPERM/);
 });
+
+// ---------- 第三轮审查：写出与还原的文件身份核对 ----------
+
+test('写出期间已知文件被其他程序替换：写后文件编号与写前不同即停止，不认作本批文件，回滚不覆盖', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'detail.xlsx');
+  fs.writeFileSync(target, 'before');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  assert.throws(() => journal.write(target, () => {
+    fs.writeFileSync(target, 'batch');
+    fs.writeFileSync(`${target}.tmp`, 'sync-client');
+    fs.renameSync(`${target}.tmp`, target);
+  }), { code: 'STATEMENT_OUTPUT_CHANGED_EXTERNALLY' });
+  const outcome = journal.rollback();
+  assert.deepEqual(outcome.failures.map((item) => item.reason), ['写出后已被其他程序修改或替换，未自动处理']);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'sync-client');
+});
+
+test('写出回调抛错时原有文件已被移走：不在原路径新建、不报完整还原，保留备份交给人工', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'seed.json');
+  fs.writeFileSync(target, 'before');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  assert.throws(() => journal.write(target, () => {
+    fs.renameSync(target, path.join(root, 'moved.json'));
+    throw new Error('EBUSY');
+  }));
+  const outcome = journal.rollback();
+  assert.equal(outcome.restored, false);
+  assert.deepEqual(outcome.failures.map((item) => item.reason), ['原有文件已被其他程序移走或删除，未自动重建']);
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.readFileSync(path.join(outcome.backupDirectory, outcome.failures[0].backupName), 'utf8'), 'before');
+});
+
+test('经硬链接别名写过的路径在回滚前被另存替换：主路径照常还原，别名列入恢复清单，不报完整还原', (t) => {
+  const { root, staging } = setup(t);
+  const seed = path.join(root, 'HSBC.json');
+  const alias = path.join(root, 'hsbc-alias.json');
+  fs.writeFileSync(seed, 'before');
+  fs.linkSync(seed, alias);
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  journal.write(seed, writeText(seed, 'group-1'));
+  journal.write(alias, writeText(alias, 'group-2'));
+  fs.writeFileSync(`${alias}.tmp`, 'sync-client');
+  fs.renameSync(`${alias}.tmp`, alias);
+  const outcome = journal.rollback();
+  assert.equal(outcome.restored, false);
+  assert.deepEqual(outcome.failures.map((item) => [path.basename(item.filePath), item.reason]),
+    [['hsbc-alias.json', '写出后已被其他程序修改或替换，未自动处理']]);
+  assert.equal(fs.readFileSync(seed, 'utf8'), 'before');
+  assert.equal(fs.readFileSync(alias, 'utf8'), 'sync-client');
+  assert.ok(fs.existsSync(path.join(outcome.backupDirectory, outcome.failures[0].backupName)), '保留备份供人工恢复');
+});
+
+test('还原时核对与写回针对同一个文件：比较之后路径被替换，不截断、不覆盖新文件', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'balance.xlsx');
+  fs.writeFileSync(target, 'before');
+  let swapOnWriteOpen = false;
+  const fsImpl = { ...fs, openSync(filePath, flags, ...rest) {
+    if (swapOnWriteOpen && flags === 'r+' && path.resolve(filePath) === target) {
+      swapOnWriteOpen = false;
+      fs.writeFileSync(`${target}.tmp`, 'sync-client');
+      fs.renameSync(`${target}.tmp`, target);
+    }
+    return fs.openSync(filePath, flags, ...rest);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(target, writeText(target, 'batch'));
+  swapOnWriteOpen = true;
+  const outcome = journal.rollback();
+  assert.equal(outcome.restored, false);
+  assert.deepEqual(outcome.failures.map((item) => item.reason), ['写出后已被其他程序修改或替换，未自动处理']);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'sync-client');
+});
+
+test('文件系统不提供文件编号（ino 为 0）时按路径区分，不把同卷不同文件当成同一个', (t) => {
+  const { root, staging } = setup(t);
+  const zeroIno = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino: 0n });
+  const fsImpl = {
+    ...fs,
+    lstatSync: (...args) => { const stat = fs.lstatSync(...args); return stat && args[1] && args[1].bigint ? zeroIno(stat) : stat; },
+    fstatSync: (...args) => { const stat = fs.fstatSync(...args); return args[1] && args[1].bigint ? zeroIno(stat) : stat; }
+  };
+  const first = path.join(root, 'a.xlsx');
+  const second = path.join(root, 'b.xlsx');
+  fs.writeFileSync(first, 'A-before');
+  fs.writeFileSync(second, 'B-before');
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  journal.write(first, writeText(first, 'A-batch'));
+  journal.write(second, writeText(second, 'B-batch'));
+  const outcome = journal.rollback();
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.deepEqual([fs.readFileSync(first, 'utf8'), fs.readFileSync(second, 'utf8')], ['A-before', 'B-before']);
+});

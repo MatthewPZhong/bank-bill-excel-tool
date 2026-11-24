@@ -1902,7 +1902,7 @@ function verifyOutputPathConcatenationConflict(dir) {
 //    会话条目、批次与导出缓存用真实实现（realSession）。
 function verifyMultiTemplateGenerationRollback(dir) {
   const faults = { writeCalls: 0, failWriteAt: 0, balanceCalls: 0, failBalanceAt: 0, mergeCalls: 0, failMergeAt: 0,
-    seedCalls: 0, failSeedAt: 0 };
+    seedCalls: 0, failSeedAt: 0, replaceSeedAfter: 0 };
   const busy = (what) => Object.assign(new Error(`EBUSY: resource busy or locked（注入：${what}被占用）`), { code: 'EBUSY' });
   const env = createEnvironment(dir, 'step20', {
     realSession: true,
@@ -1914,7 +1914,9 @@ function verifyMultiTemplateGenerationRollback(dir) {
         realStore({ ...input, seedRecords: input.seedRecords.slice(0, 1) });
         throw Object.assign(new Error('ENOSPC: no space left on device（注入：种子写入）'), { code: 'ENOSPC' });
       }
-      return realStore(input);
+      const stored = realStore(input);
+      if (faults.replaceSeedAfter && faults.seedCalls === faults.replaceSeedAfter) faults.onSeedReplaced();
+      return stored;
     },
     writeWorkbookRows: (options, write) => {
       faults.writeCalls += 1;
@@ -2053,6 +2055,30 @@ function verifyMultiTemplateGenerationRollback(dir) {
     [['M001', '2026-08-31', '100'], ['M001', '2026-09-01', '113'], ['M002', '2026-08-31', '200'], ['M002', '2026-09-01', '223'],
       ['M002', '2026-09-02', '228']], 'Step20.种子写入失败后重试：余额按链计算');
 
+  // （5d）同一组逐笔写种子时，前一笔写成后种子被其他程序（如同步盘）另存替换：下一笔不再写入、不覆盖对方的文件，
+  //   其余输出照常还原，按还原不完整报告（种子交给人工）；会话不提交
+  const beforeSeedReplace = snapshot();
+  const seedBytesBeforeReplace = fs.readFileSync(seedFile);
+  const externalSeed = '{"external":"sync-client"}\n';
+  faults.seedCalls = 0;
+  faults.replaceSeedAfter = 2; // 第一组 M001 一笔、第二组 M002 第一笔之后
+  faults.onSeedReplaced = () => {
+    fs.writeFileSync(`${seedFile}.sync`, externalSeed);
+    fs.renameSync(`${seedFile}.sync`, seedFile);
+  };
+  const replacedError = run(seedFaultSources());
+  faults.replaceSeedAfter = 0;
+  assertEq(replacedError && replacedError.code, 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE', 'Step20.逐笔写种子期间种子被替换：停止并报还原不完整');
+  assertEq(faults.seedCalls, 2, 'Step20.种子被替换后不再写下一笔');
+  assertEq(fs.readFileSync(seedFile, 'utf8'), externalSeed, 'Step20.不覆盖其他程序替换后的种子');
+  const { [path.relative(env.storageRoot, seedFile)]: _replacedSeed, ...restAfterReplace } = snapshot();
+  const { [path.relative(env.storageRoot, seedFile)]: _seedBefore, ...restBeforeReplace } = beforeSeedReplace;
+  assertEq(restAfterReplace, restBeforeReplace, 'Step20.种子被替换时其余输出照常还原');
+  assertEq(env.removedSessionPaths.length, 3, 'Step20.种子被替换时不替换旧会话条目（仍为 5b 重试成功后的 3 次）');
+  const replacedLocation = String(replacedError && replacedError.context && replacedError.context.rollbackLocation || '');
+  if (replacedLocation.startsWith('恢复清单：')) fs.rmSync(path.dirname(replacedLocation.slice('恢复清单：'.length)), { recursive: true, force: true });
+  fs.writeFileSync(seedFile, seedBytesBeforeReplace); // 人工按恢复清单处理后的状态，供后续步骤使用
+
   // （5c）第二组的余额种子路径是文件夹：首次读取种子前拦下、整批回滚，不转成「余额生成失败」告警提交第一组的新种子与缺组的余额
   const templateE = env.defineTemplate('目录种子-E', 'B');
   const directorySeed = path.join(env.storageRoot, 'balance-seeds', '目录种子.json');
@@ -2139,10 +2165,9 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     return journal.failBatch(error);
   };
   const previousReport = { fileName: '上一批的报错文件.txt' };
-  const runExecute = async (thrown, { logFails = false } = {}) => {
-    const sideEffects = [];
+  const createScope = (sideEffects, thrown, { logFails = false, reportFails = false, extra = {} } = {}) => {
     const record = (name) => () => { sideEffects.push(name); };
-    const scope = createMainScope({
+    return createMainScope({
       ...env.mainDeps,
       ...env.fns,
       fileImportInProgress: false,
@@ -2162,10 +2187,36 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
         if (logFails) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
       },
       archiveOperationContext: { getStore: () => null },
-      createErrorReport: ({ message }) => ({ fileName: `本次-${message.length}.txt` }),
-      lastErrorReport: previousReport
+      createErrorReport: ({ message }) => {
+        // 导出所在的数据目录已满：报错文件也写不出
+        if (reportFails) throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+        return { fileName: `本次-${message.length}.txt` };
+      },
+      lastErrorReport: previousReport,
+      ...extra
     });
+  };
+  const runExecute = async (thrown, options = {}) => {
+    const sideEffects = [];
+    const scope = createScope(sideEffects, thrown, options);
     const result = await scope.handleFilenameMappingImport({ previewOnly: false, statementImportPlan: { kind: 'filename-mapping' } });
+    return { result, cleared: sideEffects.includes('clearGeneratedExports'), report: scope.lastErrorReport };
+  };
+  // 完成大账号选择后的执行入口：生成前后的同一处理（在会话准备处注入写出期间的失败）
+  const runSelectionExecute = async (thrown, options = {}) => {
+    const sideEffects = [];
+    const scope = createScope(sideEffects, thrown, { ...options, extra: {
+      checkImportConfigGuard: () => null,
+      statementImportSessions: new Map(),
+      requirePendingBigAccountSelection: () => ({
+        templateId: 1, template: { name: '按文件名映射' }, mappings: [], orderedTargetFields: [], fileEntries: []
+      }),
+      getOrCreateStatementImportSession: () => { throw thrown; }
+    } });
+    const handler = scope.nested('completeBigAccountSelectionHandler');
+    const result = await handler.execute(null, {
+      contextId: 'step20b', isFixedMode: false, normalizedAssignments: [], rememberOrder: false
+    }, { fileEvidence: { filePlan: { inputs: [] } } });
     return { result, cleared: sideEffects.includes('clearGeneratedExports'), report: scope.lastErrorReport };
   };
   const busy = failedError(Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })).error;
@@ -2177,6 +2228,11 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     `Step20b.已完整还原的系统异常${logFails ? '（写日志失败）' : ''}：按未生效的导入返回，不清空上一批的导出缓存、不替换上一批的报错文件`);
     assertTrue(/已还原为导入前的状态/.test(restored.result.message), `Step20b.提示已还原：${restored.result.message}`);
   }
+  const selectionRestored = await runSelectionExecute(busy);
+  assertEq([selectionRestored.result.status, selectionRestored.result.preservesSession, selectionRestored.result.errorCode,
+    selectionRestored.result.errorReportReady, selectionRestored.cleared, selectionRestored.report],
+  ['error', true, 'BIG_ACCOUNT_SELECTION_RUNTIME', false, false, previousReport],
+  'Step20b.完成大账号选择后执行期写出失败、已完整还原：同样按未生效的导入返回，保留上一批的导出缓存与报错文件');
   const plain = await runExecute(Object.assign(new Error('EBUSY'), { code: 'EBUSY' }));
   assertEq([plain.result.preservesSession, plain.cleared], [undefined, true], 'Step20b.未经回滚的异常仍按失败的导入清空');
   const business = await runExecute(failedError(new FileValidationError('FILE_READ', '合并失败', { detailLines: ['明细'] })).error);
@@ -2189,6 +2245,15 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
   assertTrue(incomplete.result.message.includes('有 1 个已写出的文件未能自动还原')
     && incomplete.result.message.includes(`恢复清单：${outcome.manifestPath}`),
   `Step20b.还原不完整时界面消息给出数量与恢复清单位置：${incomplete.result.message}`);
+  // 报错文件也写不出（数据目录已满，正是还原失败的常见原因）：仍返回恢复指引，不被写报错文件的异常盖掉
+  for (const [label, run] of [['导入入口', runExecute], ['完成大账号选择', runSelectionExecute]]) {
+    const unreported = await run(incompleteError, { reportFails: true });
+    assertEq([unreported.result.status, unreported.result.errorCode, unreported.result.errorReportReady, unreported.report],
+      ['error', 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE', false, previousReport],
+      `Step20b.${label}：还原不完整且报错文件写不出时仍返回业务错误，不替换上一批的报错文件`);
+    assertTrue(unreported.result.message.includes(`恢复清单：${outcome.manifestPath}`),
+      `Step20b.${label}：报错文件写不出时消息仍给出恢复清单位置：${unreported.result.message}`);
+  }
   fs.rmSync(outcome.backupDirectory, { recursive: true, force: true });
 }
 

@@ -499,14 +499,20 @@ function createStatementGenerationHelpers(deps) {
             templateFields: balanceTemplateFields,
             outputFilePath: balanceOutput.outputFilePath
           }));
-          const storeSeeds = () => storeGeneratedBalanceSeeds({
-            templateName: statementOutputName(config),
-            seedRecords: balanceResult.seedRecords
-          });
-          if (Array.isArray(balanceResult.seedRecords) && balanceResult.seedRecords.length) {
-            writeThrough(getBalanceSeedFilePath(seedStorageRoot, templateBankName), storeSeeds);
+          const seedRecords = Array.isArray(balanceResult.seedRecords) ? balanceResult.seedRecords : [];
+          if (journaled && seedRecords.length) {
+            // 逐笔写种子（每笔都重读、重写同一份 JSON）：每笔都经写出记录，写前核对身份、写后记下，
+            //   前一笔写成后种子被其他程序替换时不再写入（spec D5）
+            const seedFilePath = getBalanceSeedFilePath(seedStorageRoot, templateBankName);
+            seedRecords.forEach((record) => writeThrough(seedFilePath, () => storeGeneratedBalanceSeeds({
+              templateName: statementOutputName(config),
+              seedRecords: [record]
+            })));
           } else {
-            storeSeeds();
+            storeGeneratedBalanceSeeds({
+              templateName: statementOutputName(config),
+              seedRecords
+            });
           }
         } catch (writeError) {
           if (journaled) throw new StatementOutputWriteFailure(writeError);
