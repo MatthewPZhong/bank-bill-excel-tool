@@ -1201,3 +1201,41 @@ for (const persistent of [false, true]) {
     assert.equal(fs.existsSync(upper), false, '本批新建的文件已删除');
   });
 }
+
+// v3.2.22 B45（Codex 第十八轮）：写出回调正常返回后，读取写后状态短暂失败：有限重试后记下身份，不把已写成的新文件留给人工；
+//   持续失败时原样抛出，按无法确认是否写成交给人工
+for (const persistent of [false, true]) {
+  test(`新建文件写成后读取写后状态${persistent ? '持续' : '一次'}失败：${persistent ? '原样抛出、留给人工' : '重试后记下身份，回滚删除'}`, (t) => {
+    const { root, staging } = setup(t);
+    const fresh = path.join(root, 'fresh.json');
+    let failures = 0;
+    const fsImpl = {
+      ...fs,
+      lstatSync: (target, ...rest) => {
+        if (path.resolve(String(target)) === fresh && failures > 0) {
+          failures -= 1;
+          throw Object.assign(new Error('EIO: i/o error, lstat'), { code: 'EIO' });
+        }
+        return fs.lstatSync(target, ...rest);
+      }
+    };
+    const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+    const writeFresh = () => {
+      fs.writeFileSync(fresh, 'group-1');
+      failures = persistent ? Infinity : 1;
+    };
+    if (persistent) {
+      assert.throws(() => journal.write(fresh, writeFresh), { code: 'EIO' });
+      failures = 0;
+      const outcome = journal.rollback();
+      assert.equal(outcome.restored, false);
+      assert.deepEqual(outcome.failures.map((failure) => failure.filePath), [fresh]);
+      assert.equal(fs.readFileSync(fresh, 'utf8'), 'group-1', '无法确认是否写成：不自动删除');
+      return;
+    }
+    journal.write(fresh, writeFresh);
+    const outcome = journal.rollback();
+    assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+    assert.equal(fs.existsSync(fresh), false, '本批新建的文件已删除');
+  });
+}

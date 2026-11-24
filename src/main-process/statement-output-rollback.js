@@ -373,6 +373,19 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   }
 
   // 写出回调在改动目标之前失败：FILE_READ（读余额模板、逐笔写种子前重读种子失败）按「余额生成失败」告警，本批继续（spec D3）
+  // 写出回调已正常返回后读取写后状态：短暂的读取失败（EIO、EBUSY 等）有限重试，不重跑写出回调；仍失败时原样抛出，
+  //   回滚时按写出回调抛错、无法确认是否写成处理（Codex 第十八轮 P2：否则一次读取失败就把已写成的新文件留给人工）
+  function lstatAfterWrite(resolved) {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return lstatOrNull(fsImpl, resolved);
+      } catch (error) {
+        if (attempt >= BACKUP_REMOVE_ATTEMPTS) throw error;
+        Atomics.wait(RETRY_WAIT_CELL, 0, 0, BACKUP_REMOVE_RETRY_DELAY_MS);
+      }
+    }
+  }
+
   function isReadBeforeWriteError(error) {
     return error instanceof FileValidationError && error.code === 'FILE_READ';
   }
@@ -404,7 +417,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       }
       throw error;
     }
-    const written = lstatOrNull(fsImpl, resolved);
+    const written = lstatAfterWrite(resolved);
     const keyAfter = fileKeyOf(written, resolved, fsImpl);
     // 写前、写后的真实路径任一次解析失败时不能确认换了文件，不按被替换处理（Codex 第十五轮）
     if (keyBefore && confirmedDifferentFiles(keyAfter, keyBefore)) {
