@@ -3044,24 +3044,31 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
 //   生成时的识别依据（buildBigAccountRecognitionBasis）在窗口内逐行取原文，口径相同。
 //   headerRowNumbers 为 findHeaderRowNumbersInRawRows 的结果（下标 + 1）。返回新数组，保留 firstRowNumber。
 //   v3.2.22（B133 审查）：没有原文、仍是读取库读成的超出安全整数范围的数字（二进制 .xls、原文无法核对的 XLSX 等）末几位
-//   可能已变，可能精确命中维护列表里的另一个账号，不作为自动识别的依据：换成空值，按未识别处理、由用户选择大账号
-//   （buildBigAccountRecognitionBasis 同一口径）
+//   可能已变，可能精确命中维护列表里的另一个账号，不作为识别的依据：换成空值，并记下所在行（不可枚举属性
+//   unverifiedRowIndexes）。识别窗口里有这样的数字时，无法排除它就是本段的账号，整段不自动识别（精确、模糊命中与账户映射
+//   桥接都不用），由用户选择大账号（buildBigAccountRecognitionBasis 同一口径，见 resolveDirectBigAccountRecognition）。
+//   判定就地内联（测试夹具按函数源码加载，不另加自由标识符）
 function applyBigAccountRecognitionSourceText(rawRows, headerRowNumbers) {
   const sourceText = rawRows && rawRows.sourceText instanceof Map ? rawRows.sourceText : null;
   const headerIndexes = new Set((headerRowNumbers || []).map((rowNumber) => rowNumber - 1));
+  const unverifiedRowIndexes = new Set();
   const rows = rawRows.map((row, index) => {
     if (headerIndexes.has(index) || !Array.isArray(row)) return row;
     const rowText = sourceText ? sourceText.get(index) : null;
     return row.map((cell, columnIndex) => {
       if (rowText && rowText.has(columnIndex)) return rowText.get(columnIndex);
-      return typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell) ? '' : cell;
+      if (!(typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell))) return cell;
+      unverifiedRowIndexes.add(index);
+      return '';
     });
   });
   if (rawRows.firstRowNumber !== undefined) {
     Object.defineProperty(rows, 'firstRowNumber', { value: rawRows.firstRowNumber, enumerable: false });
   }
+  Object.defineProperty(rows, 'unverifiedRowIndexes', { value: unverifiedRowIndexes, enumerable: false });
   return rows;
 }
+
 
 function buildBigAccountRecognitionBasis({
   rawRows,
@@ -3086,17 +3093,21 @@ function buildBigAccountRecognitionBasis({
     const previousBoundary = index === 0 ? 0 : headerRowNumbers[index - 1];
     const startIndex = Math.max(previousBoundary, headerRowNumber - 10);
     const endIndex = headerRowNumber - 2;
+    let unverifiedLongNumber = false;
     const candidateRowsWithSource = rows
       .slice(startIndex, Math.max(startIndex, endIndex + 1))
       .map((row, candidateIndex) => {
         const rowText = sourceText && sourceText.get(startIndex + candidateIndex);
         return {
           sourceRow: startIndex + candidateIndex + 1 + rowNumberOffset,
-          // v3.2.22（B133 审查）：没有原文、无法核对原值的长整数不参与识别（与 applyBigAccountRecognitionSourceText 同一口径）
+          // v3.2.22（B133 审查）：没有原文、无法核对原值的长整数不参与识别，有这样的数字时整段不自动识别、不按账户映射
+          //   桥接（与 applyBigAccountRecognitionSourceText 同一口径）
           cells: (Array.isArray(row) ? row : [])
             .map((cell, columnIndex) => {
               if (rowText && rowText.has(columnIndex)) return normalizeCell(rowText.get(columnIndex));
-              return typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell) ? '' : normalizeCell(cell);
+              if (!(typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell))) return normalizeCell(cell);
+              unverifiedLongNumber = true;
+              return '';
             })
             .filter((cell) => cell !== '')
         };
@@ -3106,7 +3117,7 @@ function buildBigAccountRecognitionBasis({
     const exactBridgeCandidates = [];
     const fuzzyBridgeCandidates = [];
     const seenBridgeCandidates = new Set();
-    for (let rowIndex = candidateRowsWithSource.length - 1; rowIndex >= 0; rowIndex -= 1) {
+    for (let rowIndex = unverifiedLongNumber ? -1 : candidateRowsWithSource.length - 1; rowIndex >= 0; rowIndex -= 1) {
       const candidateRow = candidateRowsWithSource[rowIndex];
       for (const cellText of candidateRow.cells) {
         for (const mapping of bridgeMappings) {
@@ -3127,7 +3138,8 @@ function buildBigAccountRecognitionBasis({
       headerRowNumber: headerRowNumber + rowNumberOffset,
       candidateRows: Object.freeze(candidateRowsWithSource.map(
         (candidateRow) => Object.freeze(candidateRow.cells)
-      ))
+      )),
+      ...(unverifiedLongNumber ? { unverifiedLongNumber: true } : {})
     });
   });
   return Object.freeze({
@@ -3214,17 +3226,19 @@ function identifyAccountsFromRecognitionBasis({
   const headerWindows = basis && Array.isArray(basis.headerWindows)
     ? basis.headerWindows
     : [];
-  const matches = headerWindows.map((window) => findBigAccountMatchInRows(
+  // v3.2.22（B133 审查）：窗口里有无法核对原值的长整数时该段不自动识别（见 applyBigAccountRecognitionSourceText）
+  const matches = headerWindows.map((window) => (window.unverifiedLongNumber ? null : findBigAccountMatchInRows(
       window.candidateRows,
       0,
       window.candidateRows.length - 1,
       allMerchantIds,
       allowSubstringMatch
-    ));
+    )));
   return {
     accounts: matches.filter(Boolean),
     isSingleAccount: headerWindows.length <= 1,
-    matches
+    matches,
+    hasUnverifiedLongNumber: headerWindows.some((window) => window.unverifiedLongNumber === true)
   };
 }
 
@@ -3281,6 +3295,11 @@ function identifyAccountsFromFile({
 
   const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
+  let hasUnverifiedLongNumber = false;
+  // 下标区间内是否有无法核对原值的长整数（见 applyBigAccountRecognitionSourceText）
+  const unverifiedIndexes = rawRows.unverifiedRowIndexes instanceof Set ? Array.from(rawRows.unverifiedRowIndexes) : [];
+  const hasUnverifiedRecognitionRow = (startIndex, endIndex) => unverifiedIndexes
+    .some((index) => index >= startIndex && index <= endIndex);
 
   headerRowNumbers.forEach((headerRowNum, idx) => {
     // 只搜索 header 前面有限行（避免搜到上一个账户的交易数据行里的账户号）
@@ -3288,6 +3307,10 @@ function identifyAccountsFromFile({
     const prevBoundary = idx === 0 ? 0 : headerRowNumbers[idx - 1];
     const narrowStart = Math.max(prevBoundary, headerRowNum - 10);
     const candidateEndIdx = headerRowNum - 2;
+    if (hasUnverifiedRecognitionRow(narrowStart, candidateEndIdx)) {
+      hasUnverifiedLongNumber = true;
+      return;
+    }
     const match = findBigAccountMatchInRows(
       rawRows,
       narrowStart,
@@ -3301,19 +3324,23 @@ function identifyAccountsFromFile({
   });
 
   if (headerRowNumbers.length === 0) {
-    const match = findBigAccountMatchInRows(
-      rawRows,
-      0,
-      rawRows.length - 1,
-      allMerchantIds,
-      allowSubstringMatch
-    );
-    if (match) {
-      identified.push(match);
+    if (hasUnverifiedRecognitionRow(0, rawRows.length - 1)) {
+      hasUnverifiedLongNumber = true;
+    } else {
+      const match = findBigAccountMatchInRows(
+        rawRows,
+        0,
+        rawRows.length - 1,
+        allMerchantIds,
+        allowSubstringMatch
+      );
+      if (match) {
+        identified.push(match);
+      }
     }
   }
 
-  return { accounts: identified, isSingleAccount };
+  return { accounts: identified, isSingleAccount, hasUnverifiedLongNumber };
 }
 
 function isMultiBigAccountMapping(mappings = []) {
@@ -3407,6 +3434,20 @@ function resolveDirectBigAccountRecognition({
     const identifiedMerchantIds = uniqueNormalizedValues(
       (fileResult.accounts || []).map((account) => account.merchantId)
     );
+
+    // v3.2.22（B133 审查）：账号位置上有无法核对原值的长数字时不按未识别报错（只维护一个选项时普通未识别会直接失败），
+    //   也不按其他段的识别结果代替，交给用户选择
+    if (fileResult.hasUnverifiedLongNumber) {
+      return {
+        status: 'needs-selection',
+        candidates: expandedOptions,
+        message: '账单表头上方的账号超出精度范围、无法核对原值，请选择本次使用的大账号 / 币种。',
+        detailLines: [
+          `文件名：${fileName || 'N/A'}`,
+          `模板名：${normalizeCell(templateName) || 'N/A'}`
+        ]
+      };
+    }
 
     if (identifiedMerchantIds.length === 0) {
       return resolveRecognizedBigAccount({

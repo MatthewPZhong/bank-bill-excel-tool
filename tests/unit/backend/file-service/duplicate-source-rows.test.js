@@ -379,7 +379,7 @@ function patchUncachedTextFormula(buffer, cellRef, formulaXml) {
 
 // v3.2.22 B133：工作表原文含注释或标签内有制表符等写法时（读取库可能按注释里的行取值），与长数字还原同一判定，
 //   整张表不参与查重：两行内容相同也不进删除清单（否则用户确认后会少一行明细）
-test('buildMappedRows：工作表原文含注释或标签内有制表符时整张表不参与查重', (t) => {
+test('buildMappedRows：工作表原文含注释掉的标签或标签内有制表符时整张表不参与查重', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-source-rows-markup-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const sheet = XLSX.utils.aoa_to_sheet([
@@ -413,8 +413,16 @@ test('buildMappedRows：工作表原文含注释或标签内有制表符时整�
     return { keys: mapped.rowMetas.map((meta) => Boolean(meta.sourceRowKey)), dropPlan: scanDuplicateSourceRows([{ filePath, detailRows: mapped }]).dropPlan };
   };
   assert.deepEqual(scan('plain.xlsx', base), { keys: [true, true], dropPlan: [[3]] }, '对照：原文无特殊写法时第 3 行判为重复');
+  // 不含尖括号的注释、CDATA 正文里的制表符不是标签，两边读到的结构相同，照常查重（Codex 第三轮）
   for (const [fileName, transform] of [
-    ['comment.xlsx', (xml) => xml.replace('<sheetData>', '<!-- 旧数据 --><sheetData>')],
+    ['plain-comment.xlsx', (xml) => xml.replace('<sheetData>', '<!-- 旧数据 --><sheetData>')],
+    ['cdata-tab.xlsx', (xml) => xml.replace('<sheetData>', '<!-- 备注 --><sheetData>').replace('</worksheet>', '<extLst><![CDATA[fee	ref]]></extLst></worksheet>')]
+  ]) {
+    assert.deepEqual(scan(fileName, patchSheet(transform)), { keys: [true, true], dropPlan: [[3]] }, fileName);
+  }
+  for (const [fileName, transform] of [
+    ['comment.xlsx', (xml) => xml.replace('<sheetData>', '<!-- 旧数据 <row r="9"/> --><sheetData>')],
+    ['unclosed-cdata.xlsx', (xml) => xml.replace('<sheetData>', '<![CDATA[ 未闭合 <sheetData>')],
     ['tab.xlsx', (xml) => xml.replace('<sheetData>', '<sheetData\t>')],
     // 属性值里的 > 不是标签结尾，其后的制表符同样识别
     ['quoted-gt.xlsx', (xml) => xml.replace('<sheetData>', '<sheetData a=">"\tb="1">')]

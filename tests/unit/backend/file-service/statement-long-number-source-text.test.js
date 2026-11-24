@@ -1447,3 +1447,24 @@ test('XLSX：工作表标签的属性值含 > 、其后有制表符时不还原�
   assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740992'], '不还原');
   assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
 });
+
+// Codex 第三轮：不含尖括号的注释、CDATA 正文里的制表符不是标签，读取库与本模块读到的结构相同，照常还原（对照：注释掉的
+//   标签仍不还原，见上方用例）
+test('XLSX：普通注释（不含尖括号）与 CDATA 正文里的制表符不影响还原', async (t) => {
+  const dir = createTempDir(t);
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 5]];
+  for (const [fileName, transform] of [
+    ['plain-comment.xlsx', (xml) => xml.replace('<sheetData>', '<!-- 手工注释 --><sheetData>')],
+    ['cell-comment.xlsx', (xml) => xml.replace(`<v>${SERIAL}</v>`, `<v>${SERIAL}<!-- 旧值 --></v>`)],
+    ['cdata-tab.xlsx', (xml) => xml.replace('</worksheet>', '<extLst><![CDATA[fee\tref]]></extLst></worksheet>')]
+  ]) {
+    const filePath = await writeXlsxWithLiterals(path.join(dir, fileName), rows, { 1111: SERIAL }, (xml) => {
+      const changed = transform(xml);
+      assert.notEqual(changed, xml, `${fileName} 已改写`);
+      return changed;
+    });
+    const mapped = map(filePath);
+    assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), [SERIAL], `${fileName} 按原文还原`);
+    assert.deepEqual(longNumberIssues(mapped), [], `${fileName} 不提示`);
+  }
+});

@@ -97,9 +97,11 @@ function prepareWorkbookTextForWrite(workbook) {
     Object.keys(worksheet).forEach((address) => {
       if (address[0] === '!') return;
       const cell = worksheet[address];
-      if (cell && typeof cell.v === 'string' && cell.v.includes('_')) {
-        cell.v = cell.v.replace(WORKSHEET_LITERAL_ESCAPE_PATTERN, '_x005F_');
-      }
+      if (!cell || typeof cell.v !== 'string' || !cell.v.includes('_')) return;
+      const escaped = cell.v.replace(WORKSHEET_LITERAL_ESCAPE_PATTERN, '_x005F_');
+      // 换成当前地址的单元格副本：aoa_to_sheet 保留调用方传入的单元格对象引用，原地改写会改到调用方的行数据，
+      //   同一对象出现在多格时还会被转义多次（Codex 第三轮）
+      if (escaped !== cell.v) worksheet[address] = { ...cell, v: escaped };
     });
   });
 }

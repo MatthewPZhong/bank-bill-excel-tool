@@ -25,7 +25,7 @@ const {
   writeWorkbookRows
 } = require('../../src/backend/file-service');
 const { buildExpectedHeaderCandidates, normalizeCell } = require('../../src/backend/file-service/common');
-const { matchMerchantIds } = require('../../src/main-process/big-account-recognition');
+const { matchMerchantIds, normalizeMaintainedBigAccounts, resolveRecognizedBigAccount } = require('../../src/main-process/big-account-recognition');
 
 const MAIN_SOURCE = fs.readFileSync(path.join(__dirname, '../../src/main.js'), 'utf8');
 const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true });
@@ -257,7 +257,7 @@ async function verifyBigAccountRecognitionRead(dir) {
     allMerchantIds: ['6222021234567890000', CARD],
     allowSubstringMatch: true
   });
-  assertEq(identified, { accounts: [{ merchantId: CARD, matchType: 'exact' }], isSingleAccount: true },
+  assertEq(identified, { accounts: [{ merchantId: CARD, matchType: 'exact' }], isSingleAccount: true, hasUnverifiedLongNumber: false },
     '⑤ 导入识别：表头上方的长账号按原文精确匹配，不再匹配近似值');
 
   // 生成时按映射读取同一份表构造识别依据（onWorkbookRows）
@@ -294,26 +294,43 @@ async function verifyBigAccountRecognitionRead(dir) {
     { sourceRow: 1, clearingAccountId: 'ACC-SUFFIX' }
   ]], '⑤ 账户映射按原文命中，精确命中排在后缀的模糊命中之前');
 
-  // v3.2.22（B133 审查）：工作表原文无法核对（如含 XML 注释）时不还原，表头上方的长账号只剩近似值：不作为自动识别的依据，
-  //   不能精确命中维护列表里与近似值相同的另一个账号（9007199254740993 读成 9007199254740992），按未识别处理
+  // v3.2.22（B133 审查）：工作表原文无法核对（如含注释掉的标签）时不还原，表头上方的长账号只剩近似值（9007199254740993 读成
+  //   9007199254740992）。该段无法排除它就是本段的账号：不精确命中近似值相同的另一个账号，也不改用同窗口其他单元格
+  //   （分行号 2222）模糊命中别的账号、不按账户映射桥接，整段不自动识别；只维护一个选项时也交给用户选择，不按未识别报错。
+  //   普通注释（不含尖括号）两边读到的结构相同，照常按原文识别（对照）
   const UNVERIFIED_ACCOUNT = '9007199254740993';
-  const commented = await writeXlsxWithLiterals(path.join(dir, 'account-commented.xlsx'), [
-    ['账号', 2222],
-    [],
-    HEADER,
-    ['2026-11-01', 'USD', 100, 'R1', 'C1']
-  ], { 2222: UNVERIFIED_ACCOUNT });
-  const zip = await JSZip.loadAsync(fs.readFileSync(commented));
-  const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
-  zip.file('xl/worksheets/sheet1.xml', sheetXml.replace('<sheetData>', '<sheetData><!-- 手工注释 -->'));
-  fs.writeFileSync(commented, await zip.generateAsync({ type: 'nodebuffer' }));
-  assertEq(readRows(commented, { blankrows: true })[0][1], Number(UNVERIFIED_ACCOUNT), '⑤ 前置：账号读成近似值');
+  const ROUNDED_ACCOUNT = String(Number(UNVERIFIED_ACCOUNT));
+  const writeCommented = async (name, comment) => {
+    const filePath = await writeXlsxWithLiterals(path.join(dir, name), [
+      ['账号', 1111, '分行', '2222'],
+      [],
+      HEADER,
+      ['2026-11-01', 'USD', 100, 'R1', 'C1']
+    ], { 1111: UNVERIFIED_ACCOUNT });
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+    const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    zip.file('xl/worksheets/sheet1.xml', sheetXml.replace('<sheetData>', `${comment}<sheetData>`));
+    fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+    return filePath;
+  };
+  const plainCommented = await writeCommented('account-plain-comment.xlsx', '<!-- 手工注释 -->');
   assertEq(identifyAccountsFromFile({
+    filePath: plainCommented,
+    expectedSourceHeaders: HEADER,
+    allMerchantIds: [UNVERIFIED_ACCOUNT, ROUNDED_ACCOUNT, '22221111'],
+    allowSubstringMatch: true
+  }), { accounts: [{ merchantId: UNVERIFIED_ACCOUNT, matchType: 'exact' }], isSingleAccount: true, hasUnverifiedLongNumber: false },
+  '⑤ 对照：普通注释照常还原，按原文精确命中');
+  const commented = await writeCommented('account-commented.xlsx', '<!-- 旧版本：<legacy/> -->');
+  assertEq(readRows(commented, { blankrows: true })[0][1], Number(UNVERIFIED_ACCOUNT), '⑤ 前置：注释含标签时不还原，账号读成近似值');
+  const unverifiedIdentified = identifyAccountsFromFile({
     filePath: commented,
     expectedSourceHeaders: HEADER,
-    allMerchantIds: [String(Number(UNVERIFIED_ACCOUNT))],
+    allMerchantIds: [ROUNDED_ACCOUNT, '22221111'],
     allowSubstringMatch: true
-  }), { accounts: [], isSingleAccount: true }, '⑤ 导入识别：无法核对原值的长账号不精确命中近似值相同的另一个账号');
+  });
+  assertEq(unverifiedIdentified, { accounts: [], isSingleAccount: true, hasUnverifiedLongNumber: true },
+    '⑤ 导入识别：无法核对原值的长账号所在段不自动识别（不精确命中近似值，也不按分行号模糊命中别的账号）');
   let commentedBasis = null;
   buildMappedRows({
     inputFilePath: commented,
@@ -325,14 +342,51 @@ async function verifyBigAccountRecognitionRead(dir) {
         commentedBasis = buildBigAccountRecognitionBasis({
           rawRows,
           expectedSourceHeaders: HEADER,
-          accountMappingByBankId: { [String(Number(UNVERIFIED_ACCOUNT))]: { clearingAccountId: 'ACC-ROUNDED' } }
+          accountMappingByBankId: {
+            [ROUNDED_ACCOUNT]: { clearingAccountId: 'ACC-ROUNDED' },
+            22221111: { clearingAccountId: 'ACC-BRANCH' }
+          }
         });
       }
     }
   });
-  assertEq(commentedBasis && commentedBasis.headerWindows.map((window) => window.candidateRows), [[['账号'], []]],
-    '⑤ 生成时的识别窗口不含无法核对原值的长账号');
-  assertEq(commentedBasis && commentedBasis.bridgeCandidatesByBlock, [[]], '⑤ 账户映射不按近似值命中');
+  assertEq(commentedBasis && commentedBasis.headerWindows.map((window) => [window.candidateRows, window.unverifiedLongNumber]),
+    [[[['账号', '分行', '2222'], []], true]], '⑤ 生成时的识别窗口不含无法核对原值的长账号，并标记该段');
+  assertEq(commentedBasis && commentedBasis.bridgeCandidatesByBlock, [[]], '⑤ 该段不按账户映射桥接（近似值与分行号都不命中）');
+  const identifyAccountsFromRecognitionBasis = loadMainFunction('identifyAccountsFromRecognitionBasis', { findBigAccountMatchInRows });
+  const basisRecognition = identifyAccountsFromRecognitionBasis({
+    basis: commentedBasis,
+    allMerchantIds: [ROUNDED_ACCOUNT, '22221111']
+  });
+  assertEq([basisRecognition.matches, basisRecognition.hasUnverifiedLongNumber], [[null], true],
+    '⑤ 按识别依据识别（提取顺序、固定顺序）：该段不视为已识别');
+
+  // 只维护一个大账号 / 币种时，普通未识别直接报错；无法核对原值的长账号交给用户选择
+  const loadNamed = (name, deps) => loadMainFunction(name, deps);
+  const uniqueNormalizedValues = loadNamed('uniqueNormalizedValues', { normalizeCell });
+  const resolveDirect = loadNamed('resolveDirectBigAccountRecognition', {
+    expandBigAccountConfigurations: loadNamed('expandBigAccountConfigurations', { normalizeMaintainedBigAccounts }),
+    uniqueNormalizedValues,
+    getEntryTemplateConfig: () => ({ exportMappings: [], template: { headers: HEADER } }),
+    isMultiBigAccountMapping: () => true,
+    identifyAccountsFromFile,
+    resolveRecognizedBigAccount,
+    normalizeCell,
+    path
+  });
+  const directFor = (filePath) => resolveDirect({
+    fileEntries: [{ filePath, matchedHeaders: HEADER }],
+    maintainedBigAccounts: [{ merchantId: '22221111', currencies: ['USD'] }],
+    fallbackTemplateConfig: {},
+    templateName: '测试模板'
+  });
+  const plainUnrecognized = await writeXlsxWithLiterals(path.join(dir, 'account-unrecognized.xlsx'), [
+    ['账号', '3333'], [], HEADER, ['2026-11-01', 'USD', 100, 'R1', 'C1']
+  ], {});
+  assertEq(directFor(plainUnrecognized).status, 'failed', '⑤ 对照：普通未识别且只维护一个选项时按未识别报错');
+  const unverifiedDecision = directFor(commented);
+  assertEq([unverifiedDecision.status, (unverifiedDecision.candidates || []).map((item) => [item.merchantId, item.currency])],
+    ['needs-selection', [['22221111', 'USD']]], '⑤ 无法核对原值的长账号：只维护一个选项时也交给用户选择，不按未识别报错');
 }
 
 async function main() {

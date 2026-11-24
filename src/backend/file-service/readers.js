@@ -364,15 +364,25 @@ function stripXmlComments(text) {
 }
 
 // 读取库与本模块对下列写法的解析口径不同，无法证明两边读的是同一张表、同一行（B133）：
-//   - XML 注释：读取库不跳过注释（注释里的 <sheet>、关系、<row>、<c> 都会被解析），本模块按有效内容定位；
+//   - 内容含尖括号的 XML 注释或 CDATA：读取库不跳过注释（注释里的 <sheet>、关系、<row>、<c> 都会被解析），本模块按
+//     有效内容定位；未闭合的注释或 CDATA 同样无法核对；
 //   - 标签内出现空格、回车、换行以外的空白（制表符等）：读取库（parsexmltag）只把这三种当作标签名的结束，
 //     认不出 <Relationship\t…> 这类标签，本模块的正则却认得出。
 //   Excel、WPS 与银行系统不会生成这些写法；出现时整张表不还原，按无法核对原值提示，也不参与重复账单过滤。
+//   内容不含尖括号的注释、CDATA 里没有标签，两边读到的结构相同，照常还原（Codex 第三轮：一律不还原会让普通注释的文件
+//   只剩近似值），检查标签内空白时也不把其中的文字（如 CDATA 正文里的制表符）当作标签。
 //   标签按引号边界识别（属性值里的 > 不是标签结尾），属性值内的这类空白同样算在内
 const UNVERIFIABLE_TAG_WHITESPACE = /<(?:[^\s>"']|[ \r\n]|"[^"]*"|'[^']*')*?(?:[^\S \r\n]|"[^"]*?[^\S \r\n]|'[^']*?[^\S \r\n])/;
 function hasUnverifiableXmlMarkup(text) {
-  const source = String(text);
-  return source.includes('<!--') || UNVERIFIABLE_TAG_WHITESPACE.test(source);
+  let markupInside = false;
+  const outside = String(text).replace(/<!--([\s\S]*?)-->|<!\[CDATA\[([\s\S]*?)\]\]>/g, (_match, comment, cdata) => {
+    if (/[<>]/.test(comment !== undefined ? comment : cdata)) markupInside = true;
+    return '';
+  });
+  return markupInside
+    || outside.includes('<!--')
+    || outside.includes('<![CDATA[')
+    || UNVERIFIABLE_TAG_WHITESPACE.test(outside);
 }
 
 // OOXML 关系命名空间（过渡与严格两种写法）
@@ -1130,9 +1140,11 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
   const wanted = new Set(candidates.map(({ r, c }) => `${r}:${c}`));
   const literals = new Map();
   const duplicated = new Set();
-  // 含注释或标签内有制表符等写法时，读取库可能按注释里的行、单元格取值（与本模块取到的原文不是同一行），整张表不给原文（B133）
-  const text = xml.toString('utf8');
-  if (hasUnverifiableXmlMarkup(text)) return null;
+  // 含注释掉的标签或标签内有制表符等写法时，读取库可能按注释里的行、单元格取值（与本模块取到的原文不是同一行），整张表不给
+  //   原文（B133）。其余注释不含标签，按 XML 语义去掉后取原文（与 v3.2.21 相同；还原前仍核对原文与读取库的值相等）
+  const rawText = xml.toString('utf8');
+  if (hasUnverifiableXmlMarkup(rawText)) return null;
+  const text = stripXmlComments(rawText);
   // 各 <row> 的起点与行号（没有 r 属性时按前一行顺推，与读取库相同）
   const rowStarts = [];
   const rowTagPattern = /<(?:[\w.-]+:)?row\b([^>]*?)\/?>/g;

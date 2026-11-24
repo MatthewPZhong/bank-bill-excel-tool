@@ -48,6 +48,15 @@ test('writeWorkbookRows：字面 _xHHHH_ 写出读回原样保留（含表头）
   assert.deepEqual(back.slice(1).map((row) => row[0]), ESCAPE_LIKE);
 });
 
+test('writeWorkbookRows：同一单元格对象出现在多格时各格只转义一次，调用方的对象不被改写', (t) => {
+  const dir = createTempDir(t);
+  const shared = { t: 's', v: 'FEE_x0041_' };
+  const outputFilePath = path.join(dir, 'shared.xlsx');
+  writeWorkbookRows({ rows: [['Ref'], [shared], [shared]], outputFilePath });
+  assert.deepEqual(readRows(outputFilePath).slice(1), [['FEE_x0041_'], ['FEE_x0041_']]);
+  assert.deepEqual(shared, { t: 's', v: 'FEE_x0041_' });
+});
+
 test('writeBalanceWorkbook：模板表头与记录中的字面 _xHHHH_ 写出读回原样保留', (t) => {
   const dir = createTempDir(t);
   const templateFilePath = path.join(dir, 'template.xlsx');
@@ -119,15 +128,28 @@ test('多张工作表时位置带表名', () => {
 });
 
 // 余额账单模板随程序发布（assets），原有文字随余额账单写出，生成时不在运行时读取核对（spec D3）：这里确认它能原样写出、读回。
-//   读取库只能正确还原 U+0080 以下的 _xHHHH_ 转义（_x00E9_ 读成「�」），模板 XML 里不能有更高的转义
+//   读取库只能正确还原 U+0080 以下的 _xHHHH_ 转义（_x00E9_ 读成「�」），且不区分 x 的大小写，模板 XML 里不能有更高的转义
+const lossyEscapesIn = (xml) => [...String(xml).matchAll(/_[xX]([0-9A-Fa-f]{4})_/g)]
+  .filter((match) => parseInt(match[1], 16) >= 0x80)
+  .map((match) => match[0]);
+
+test('模板转义检查覆盖读取库会改写的两种大小写写法', () => {
+  const sheetXml = (value) => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+    + `<row r="1"><c r="A1" t="inlineStr"><is><t>${value}</t></is></c></row></sheetData></worksheet>`;
+  for (const escape of ['_x00E9_', '_X00E9_']) {
+    assert.deepEqual(lossyEscapesIn(sheetXml(escape)), [escape], `${escape} 被检查发现`);
+  }
+  assert.deepEqual(lossyEscapesIn(sheetXml('_x0041_ _X0042_')), [], 'U+0080 以下的转义读取库能正确还原，不算');
+});
+
 test('随程序发布的余额账单模板：文字可原样写出读回，没有读取时会被改写的转义', (t) => {
   const templatePath = path.join(__dirname, '../../../../assets/余额账单模版.xlsx');
   const container = XLSX.CFB.read(fs.readFileSync(templatePath), { type: 'buffer' });
   container.FullPaths.forEach((fullPath, index) => {
     if (!/xl\/(sharedStrings\.xml|worksheets\/[^/]+\.xml)$/i.test(fullPath)) return;
     const xml = Buffer.from(container.FileIndex[index].content || []).toString('utf8');
-    const lossy = [...xml.matchAll(/_x([0-9A-Fa-f]{4})_/g)].filter((match) => parseInt(match[1], 16) >= 0x80);
-    assert.deepEqual(lossy.map((match) => match[0]), [], fullPath);
+    assert.deepEqual(lossyEscapesIn(xml), [], fullPath);
   });
   const dir = createTempDir(t);
   const template = XLSX.readFile(templatePath);
