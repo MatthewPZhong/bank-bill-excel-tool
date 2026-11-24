@@ -11,7 +11,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const ExcelJS = require('exceljs');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
-const { assertFilePlanFresh, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
+const { assertFilePlanFresh, assertFilePlanInputsFreshAsync, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
 const { prepareIpcTaskInvocation } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { mergeToolboxFilesToXlsx } = require('../../src/main-process/toolbox-merge-io');
 const { exportToolboxFilter, exportToolboxMultiFilters } = require('../../src/main-process/toolbox-format-operations');
@@ -89,7 +89,7 @@ function loadHandlers(env, overrides = {}) {
   const readContext = { sourceFilePath: env.source, dataRowCount: 2,
     snapshot: sourceSnapshotFromStat(fs.statSync(env.source, { bigint: true })) };
   const scope = {
-    fs, os, path, randomUUID, pathsAlias: overrides.pathsAlias || pathsAlias, assertFilePlanFresh,
+    fs, os, path, randomUUID, pathsAlias: overrides.pathsAlias || pathsAlias, assertFilePlanFresh, assertFilePlanInputsFreshAsync,
     normalizeFilePlanV1: overrides.normalizeFilePlanV1 || normalizeFilePlanV1,
     sourceSnapshotMatchesStat,
     TOOLBOX_GENERATION_ACTIONS,

@@ -18,7 +18,7 @@ const {
 } = require('../../src/main-process/execution-descriptors/composition');
 const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
-const { assertFilePlanFresh, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
+const { assertFilePlanFresh, assertFilePlanInputsFreshAsync, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
 const { pathsAlias } = require('../../src/main-process/toolbox-target-identity');
 const {
   createBackgroundExecutionRuntime
@@ -97,7 +97,7 @@ async function run() {
     let contract;
     const activity = [];
     const scope = {
-      fs, path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, assertFilePlanFresh, normalizeFilePlanV1, createToolboxSplitReadOwner,
+      fs, path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, assertFilePlanFresh, assertFilePlanInputsFreshAsync, normalizeFilePlanV1, createToolboxSplitReadOwner,
       trackedIpcHandle: (channel, _scope, _label, value) => {
         assert.equal(channel, 'toolbox:split:export');
         contract = value;

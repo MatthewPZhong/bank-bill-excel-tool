@@ -376,6 +376,58 @@ for (const kind of Object.keys(CASES)) {
   }
 }
 
+// 不区分大小写的卷：输入在 out/ 下、输出目录选成 OUT/（同一目录）；完整计划规范化期间该目录被移走又移回，系统错误记的是
+//   out：仍报目标变化（中文提示），不透传英文系统错误（Codex 第六轮）
+test('merge：输出目录与输入所在目录大小写不同（同一目录）、规范化期间被移走又移回：报目标变化（B57）', async (t) => {
+  const base = setup(t);
+  const upper = path.join(base.root, 'OUT');
+  if (!fs.existsSync(upper)) {
+    t.skip('前提不满足：临时卷区分大小写');
+    return;
+  }
+  const source = path.join(base.output, 'source.csv');
+  fs.copyFileSync(base.source, source);
+  const env = { ...base, source, output: upper };
+  const parked = path.join(base.root, 'out-parked');
+  const sampling = duringFullPlanSampling(() => {
+    fs.renameSync(base.output, parked);
+    return () => fs.renameSync(parked, base.output);
+  });
+  const { calls, run } = loadHandlers(env, caseOverrides(env, 'merge', { normalizeFilePlanV1: sampling.normalizeFilePlanV1 }));
+  const { prepared, result } = await run(CASES.merge.channel, casePayload(env, 'merge'));
+  assert.equal(sampling.state.calls, 1);
+  assert.equal(prepared.proceed, false);
+  assert.equal(result.code, 'ARCHIVE_TARGET_CHANGED', JSON.stringify(result));
+  assert.match(result.message, /输出目标在任务确认后已变化/);
+  assert.equal(calls.publication, 0);
+});
+
+// 合表选两份源文件、只在生成后替换第二份：发布前核对覆盖全部输入（Codex 第六轮）
+test('merge：两份源文件只有第二份在生成后、发布前被替换时不发布（B58-T3）', async (t) => {
+  const env = setup(t);
+  const second = path.join(env.root, 'source-2.csv');
+  fs.writeFileSync(second, 'Name,Amount\nC,3\n');
+  const { calls, contracts, execute } = loadHandlers(env, caseOverrides(env, 'merge', {
+    showImportOpenDialog: async (scopeName) => ({ canceled: false, filePaths: scopeName === 'toolbox' ? [env.source, second] : [env.output] }),
+    toolboxMergeFilesToXlsx: async (...args) => {
+      const generated = await mergeToolboxFilesToXlsx(...args);
+      fs.writeFileSync(`${second}.tmp`, 'Name,Amount\nC,999\n');
+      fs.renameSync(`${second}.tmp`, second);
+      return generated;
+    }
+  }));
+  const contract = contracts.get(CASES.merge.channel);
+  const prepared = await prepareIpcTaskInvocation(contract, {}, []);
+  assert.equal(prepared.proceed, true);
+  assert.equal(prepared.filePlan.inputs.length, 2, '前置：计划含两份输入');
+  const result = await execute(contract, prepared);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.code, 'ARCHIVE_INPUT_CHANGED', JSON.stringify(result));
+  assert.equal(calls.publication, 0);
+  assert.equal(calls.settle, 0);
+  assert.deepEqual(fs.readdirSync(env.output).filter((name) => !name.startsWith('.')), []);
+});
+
 test('normalizeFilePlanV1 reuseFrozenOutputsOf：沿用本进程冻结的同一组输出证据，来源不明或输出不一致时拒绝', (t) => {
   const env = setup(t);
   const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
@@ -414,4 +466,53 @@ test('normalizeFilePlanV1 reuseFrozenOutputsOf：按冻结输出逐项核对声�
   ]) {
     assert.throws(() => reuse(outputs), { code: 'ARCHIVE_FILE_PLAN_INVALID' }, label);
   }
+});
+
+test('normalizeFilePlanV1 reuseFrozenOutputsOf：省略文件名时沿用冻结值；冻结项带预先生成的产物证据时不沿用（Codex 第六轮）', async (t) => {
+  const env = setup(t);
+  const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+  const input = { filePath: env.source, role: 'input', sourceOperation: 'toolbox:merge:input' };
+  const named = { filePath: path.join(env.output, 'result.xlsx'), originalName: '月报.xlsx', role: 'output', sourceOperation: 'toolbox:merge:output' };
+  const frozenNamed = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs: [named] });
+  const { originalName: _omitted, ...withoutName } = named;
+  const reused = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [input], outputs: [withoutName] },
+    { reuseFrozenOutputsOf: frozenNamed });
+  assert.equal(reused.outputs[0].originalName, '月报.xlsx', '省略文件名时沿用冻结值');
+
+  const { captureStagedInputEvidenceAsync } = require('../../../src/main-process/position-reconciliation/input-staging');
+  const { positionOutputFilePlanEvidence } = require('../../../src/main-process/position-reconciliation/archive-file-plan-evidence');
+  const reportPath = path.join(env.userDataDir, 'run-data/position-reconciliation/import-staging/report-job/anomaly-report/平盘来源异常数据_report-job.xlsx');
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  fs.writeFileSync(reportPath, 'synthetic pre-generated report');
+  const evidence = await captureStagedInputEvidenceAsync(reportPath);
+  const report = { filePath: reportPath, role: 'output', sourceOperation: 'position-reconciliation:source:prepare-import' };
+  const frozenReport = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs: [{ ...report,
+    ...positionOutputFilePlanEvidence({ artifactKey: 'source-import-anomaly-report', sourceSnapshot: evidence.stagedSnapshot,
+      expectedSha256: evidence.stagedSha256, sizeBytes: evidence.stagedSizeBytes }) }] });
+  assert.ok(frozenReport.outputs[0].preGeneratedOutput, '前置：冻结项带预先生成的产物证据');
+  assert.throws(() => normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [input], outputs: [report] },
+    { reuseFrozenOutputsOf: frozenReport }), { code: 'ARCHIVE_FILE_PLAN_INVALID' });
+});
+
+test('assertFilePlanInputsFreshAsync：异步核对输入，口径与同步核对一致', async (t) => {
+  const env = setup(t);
+  const { normalizeFilePlanV1, assertFilePlanInputsFreshAsync } = require('../../../src/main-process/archive-center/file-plan');
+  const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager',
+    inputs: [{ filePath: env.source, role: 'input', sourceOperation: 'toolbox:merge:input' }], outputs: [] });
+  await assertFilePlanInputsFreshAsync(plan);
+  let syncCalls = 0;
+  const lstatSync = fs.lstatSync;
+  fs.lstatSync = (...args) => { syncCalls += 1; return lstatSync(...args); };
+  try {
+    await assertFilePlanInputsFreshAsync(plan);
+  } finally {
+    fs.lstatSync = lstatSync;
+  }
+  assert.equal(syncCalls, 0, '不在主进程同步访问文件系统');
+  fs.writeFileSync(`${env.source}.new`, 'replaced');
+  fs.renameSync(`${env.source}.new`, env.source);
+  await assert.rejects(assertFilePlanInputsFreshAsync(plan), { code: 'ARCHIVE_INPUT_CHANGED' });
+  assert.throws(() => assertFilePlanFresh(plan), { code: 'ARCHIVE_INPUT_CHANGED' });
+  fs.rmSync(env.source);
+  await assert.rejects(assertFilePlanInputsFreshAsync(plan), { code: 'ARCHIVE_INPUT_CHANGED' });
 });

@@ -226,6 +226,7 @@ function assertNoAliasConflict(inputs, outputs, options) {
 //   不重新采样，计划携带的就是用户确认时的目标版本。只接受本进程登记过的冻结计划；按冻结输出的下标逐项核对声明（拒绝空槽），
 //   路径、角色、来源操作、显式给出的文件名与 artifactKey 须与冻结值一致（与普通规范化同样的约束），不支持预先生成的输出
 function reuseFrozenOutputs(frozenPlan, rawOutputs) {
+  // 省略文件名时沿用冻结值，显式给出时须一致；冻结项本身带预先生成的产物证据（平盘异常报告等）时不沿用（Codex 第六轮）
   const mismatch = () => planError('ARCHIVE_FILE_PLAN_INVALID', '沿用的输出证据必须来自本进程冻结的同一组输出');
   if (!frozenPlan || !normalizedFilePlans.has(frozenPlan) || frozenPlan.outputs.length !== rawOutputs.length) throw mismatch();
   for (let index = 0; index < frozenPlan.outputs.length; index += 1) {
@@ -235,11 +236,12 @@ function reuseFrozenOutputs(frozenPlan, rawOutputs) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw mismatch();
     const filePath = absolutePath(raw.filePath, 'output.filePath');
     if (filePath !== frozen.filePath
-        || path.basename(requiredText(raw.originalName || filePath, 'originalName')) !== frozen.originalName
+        || (raw.originalName !== undefined && path.basename(requiredText(raw.originalName, 'originalName')) !== frozen.originalName)
         || requiredText(raw.role, 'role') !== frozen.role
         || requiredText(raw.sourceOperation, 'sourceOperation') !== frozen.sourceOperation
         || (raw.artifactKey !== undefined && requiredText(raw.artifactKey, 'artifactKey') !== frozen.artifactKey)
-        || raw.preGeneratedOutput !== undefined) {
+        || raw.preGeneratedOutput !== undefined
+        || frozen.preGeneratedOutput !== undefined) {
       throw mismatch();
     }
   }
@@ -307,24 +309,47 @@ function assertNormalizedFilePlanV1(plan) {
   return plan;
 }
 
+function inputFreshnessFailure(input) {
+  const freshnessFailure = input.freshnessFailure || {
+    code: 'ARCHIVE_INPUT_CHANGED',
+    message: '输入文件在任务确认后已变化'
+  };
+  return planError(freshnessFailure.code, freshnessFailure.message);
+}
+
+function assertInputStatFresh(input, stat) {
+  if (stat.isSymbolicLink()
+      || !stat.isFile()
+      || !sourceSnapshotMatchesStat(input.sourceSnapshot, stat)) {
+    throw inputFreshnessFailure(input);
+  }
+}
+
+// v3.2.22 B58（Codex 第六轮）：只核对输入、异步访问文件系统（与 assertFilePlanFresh 的输入核对同一口径）。供主进程在
+//   发布前等待核对：输入在网络盘上断连或高延迟时不阻塞主进程处理其他 IPC
+async function assertFilePlanInputsFreshAsync(plan, options = {}) {
+  const lstat = options.lstat || ((filePath) => fs.promises.lstat(filePath, { bigint: true }));
+  for (const input of plan.inputs) {
+    let stat;
+    try {
+      stat = await lstat(input.filePath);
+    } catch (_error) {
+      throw inputFreshnessFailure(input);
+    }
+    assertInputStatFresh(input, stat);
+  }
+}
+
 function assertFilePlanFresh(plan, options = {}) {
   const fsImpl = options.fsImpl || fs;
   for (const input of plan.inputs) {
-    const freshnessFailure = input.freshnessFailure || {
-      code: 'ARCHIVE_INPUT_CHANGED',
-      message: '输入文件在任务确认后已变化'
-    };
     let stat;
     try {
       stat = fsImpl.lstatSync(input.filePath, { bigint: true });
     } catch (_error) {
-      throw planError(freshnessFailure.code, freshnessFailure.message);
+      throw inputFreshnessFailure(input);
     }
-    if (stat.isSymbolicLink()
-        || !stat.isFile()
-        || !sourceSnapshotMatchesStat(input.sourceSnapshot, stat)) {
-      throw planError(freshnessFailure.code, freshnessFailure.message);
-    }
+    assertInputStatFresh(input, stat);
   }
   for (const output of plan.outputs) {
     if (output.targetParentIdentity) {
@@ -385,6 +410,7 @@ function artifactManifestFromFilePlan(plan) {
 
 module.exports = {
   assertFilePlanFresh,
+  assertFilePlanInputsFreshAsync,
   assertNormalizedFilePlanV1,
   artifactKeyOf,
   artifactManifestFromFilePlan,

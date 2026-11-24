@@ -120,6 +120,7 @@ const {
 const {
   artifactManifestFromFilePlan,
   assertFilePlanFresh,
+  assertFilePlanInputsFreshAsync,
   normalizeFilePlanV1
 } = require('./main-process/archive-center/file-plan');
 const {
@@ -22447,7 +22448,8 @@ async function publishToolboxArtifacts(
         throw new Error('工具箱发布目标与 FilePlan 输出不一致');
       }
     });
-    assertFilePlanFresh({ inputs: plan.inputs, outputs: [] });
+    // 异步核对：输入在网络盘上断连或高延迟时不阻塞主进程（Codex 第六轮）
+    await assertFilePlanInputsFreshAsync(plan);
   }
   const publication = await publishToolboxPublicationAsync({
     taskId: `toolbox-${kind}-${Date.now()}-${randomUUID()}`,
@@ -22624,10 +22626,15 @@ function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
     path.resolve(output.filePath),
     path.join(output.targetParentIdentity.canonicalRealPath, path.basename(output.filePath))
   ]);
+  // macOS / Windows 的卷通常不区分大小写：按大小写折叠后比较（只影响报错归类，Codex 第六轮）
+  const comparable = (value) => (process.platform === 'darwin' || process.platform === 'win32'
+    ? path.resolve(value).toLowerCase()
+    : path.resolve(value));
+  const comparableTargets = targetPaths.map(comparable);
   const isTargetOrAncestor = (errorPath) => {
-    const resolved = path.resolve(errorPath);
-    return targetPaths.some((targetPath) => targetPath === resolved
-      || targetPath.startsWith(resolved.endsWith(path.sep) ? resolved : resolved + path.sep));
+    const resolved = comparable(errorPath);
+    const prefix = resolved.endsWith(path.sep) ? resolved : resolved + path.sep;
+    return comparableTargets.some((targetPath) => targetPath === resolved || targetPath.startsWith(prefix));
   };
   let plan;
   try {
