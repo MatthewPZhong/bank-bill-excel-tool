@@ -20,6 +20,42 @@
 
 ## 未实施
 
+### B147（P2 · 未做）v3.2.22 平盘单遍导入未做 Windows 实机、真实大文件与人工点按验收，资金红线项待人工复核
+
+- **来源**：v3.2.22 `feat/position-single-pass-import`（[spec](../changes/v3.2.22/feat/position-single-pass-import/spec.md) / [techdoc](../changes/v3.2.22/feat/position-single-pass-import/techdoc.md) §6、§7）
+- **影响**：性能数据来自本机（macOS）100 万行合成样本（银行 173MB、链接原始表 146MB）；未在 Windows 实机、真实 1.2GB 银行对账单上验证耗时、内存与磁盘占用（100 万行链接原始表导入时侧库 + 临时文件峰值 2.67GB）。界面只做了脚本驱动的真实应用实测与截图，未人工点按。techdoc §6 列出的资金红线项（旧结构侧库启动即丢弃、覆盖替换实现路径、导出列变化、链接原始表判重范围收窄为必用列、整批一次提交等）尚未人工复核
+- **关闭条件**：Windows 实机用真实大文件各导入一次银行对账单与链接原始表并记录耗时 / 内存 / 磁盘；人工走一遍导入、覆盖确认、取消、账户表确认、导出；techdoc §6 逐项人工确认
+- **目标版本**：v3.2.22（发版前）
+
+### B146（P3 · 改进）平盘导入的原始文件进入存档中心时仍要再复制，链接原始表还会按「原件 + 暂存副本」登记两条输入
+
+- **来源**：v3.2.22 `feat/position-single-pass-import`（[spec](../changes/v3.2.22/feat/position-single-pass-import/spec.md) / [techdoc](../changes/v3.2.22/feat/position-single-pass-import/techdoc.md) §2）
+- **影响**：只影响性能与存档条目数，最终存档内容按 SHA-256 寻址只留一份。① 银行对账单字节读 3 遍：暂存复制 + 哈希、解析、存档中心入库复制 + 哈希；② 链接原始表导入的文件计划（`interactive-task-preflight.js`）把用户所选原件与暂存副本都登记为输入，同一份文件在一个存档批次里出现两条输入、入库复制 + 哈希做两次（v3.2.21 起如此，本次未改）。1.2GB 文件每多一遍约数秒到十几秒，随磁盘而定
+- **已核实并修复（v3.2.22）**：导入结束后暂存副本一直留到 7 天后的启动清理——存档完成时的回收被尚未清除的「待完成操作」记录挡住，记录清除后又没有再触发回收。现在任务收尾清除记录后补一次回收，真实应用实测导入、账户确认、重导后暂存目录为空；待确认的账户表文件保留到确认或取消
+- **推荐**：存档服务对「带 SHA-256 凭证、位于模块暂存目录、同一卷」的输入改用硬链接接管，跨卷时回退复制；链接原始表的文件计划只登记暂存副本（被拒文件仍登记原件）。前者涉及共享的 `archive-center/archive-service.js`，后者改变存档批次里的输入条目，需单独评估
+- **触发实施时机**：真实 1.2GB 文件实测显示存档这一步占比明显时
+
+### B145（P2 · 已知问题）平盘运行阶段在主进程全量加载并逐行校验，百万行时界面卡顿
+
+- **来源**：v3.2.22 `feat/position-single-pass-import` 排查（[spec](../changes/v3.2.22/feat/position-single-pass-import/spec.md) / [techdoc](../changes/v3.2.22/feat/position-single-pass-import/techdoc.md)）
+- **影响**：`service.run()` 在主进程把范围内全部银行行与链接行读进内存后同步执行匹配；`store.getRun()`（`status()`、导出、确认都会调用）每次都读出该运行的全部结果行、解析 JSON 并逐行重算完整性摘要。导入变快后，百万行范围的运行、打开面板、导出仍会长时间无响应。v3.2.22 只把银行行改成列式存储并去掉一份结果 JSON，没有改这两处
+- **关闭条件**：运行搬到子进程或改为分批；`getRun` 的全量校验改为按需（运行创建 / 确认 / 回导时）或增量，面板状态查询不再全量读运行行；补百万行级的耗时记录
+- **目标版本**：未定
+
+### B144（P3 · 改进）平盘导入改用字节级扫描器并只解码需要的列
+
+- **来源**：v3.2.22 `feat/position-single-pass-import`（[spec](../changes/v3.2.22/feat/position-single-pass-import/spec.md) / [techdoc](../changes/v3.2.22/feat/position-single-pass-import/techdoc.md) §1）
+- **影响**：只影响性能。100 万行 × 46 列样本上，现用扫描器纯解析 10.5 秒，`big-table-import/row-scanner.js` 只取 15 列时 4.4 秒；文件用共享字符串且超出内存预算时差距更大（少查三分之二的字符串）
+- **推荐**：字节级扫描器不带单元格样式，数值日期（BillDate）无法判定；需补「类型 + 样式号」输出与行 / 列样式继承，并用现有等价性测试（`npm run test:position-import:parity`）证明日期、金额、长编号取值与现用读取器一致后再切换
+- **触发实施时机**：真实大文件导入耗时仍不可接受时
+
+### B143（P3 · 顺延）平盘进程内旧导入路径与停用命令常量仍在仓库
+
+- **来源**：v3.2.22 `feat/position-single-pass-import`（[spec](../changes/v3.2.22/feat/position-single-pass-import/spec.md) / [techdoc](../changes/v3.2.22/feat/position-single-pass-import/techdoc.md) §3）
+- **影响**：生产只走单遍导入（`BANK_IMPORT` / `SOURCE_IMPORT`），两段式导入、导入账本、预检、独立结构迁移进程已删除。仍保留、生产不调用的代码：进程内旧导入路径（`service.prepareLegacyBankImport` / `prepareLegacySourceImport` 等、`store.applySourceImport`、`store.replaceBankScopes`、`readers.readBankFiles` / `readSourceFiles`），约 4000 行服务测试靠它搭数据；`BANK_PREPARE` / `BANK_APPLY` / `SOURCE_PREPARE_AND_APPLY` / `ENSURE_LARGE_IMPORT_INDEXES` 四个命令常量（导入进程收到即拒绝），前三个只为未启用的后台 managed 适配器保留引用（见 B37）
+- **关闭条件**：服务测试改用单遍导入或测试辅助直接写库后删除进程内旧路径；managed 适配器改接单遍导入或删除后去掉四个常量
+- **目标版本**：未定
+
 ### B141（P2 · 已知问题）网银账单生成：无法核对原值的长数字仍按近似值参与账户映射与预处理过滤（资金口径 · 须人工复核）
 
 - **来源**：2026-11-23 `fix/statement-xlsx-io-boundary`（v3.2.22）Codex 第三轮审查 P1 ×2。B133 修复后，手工改写过 XML 的 XLSX（注释里带标签、标签内有制表符等）整张表不还原长数字；这类文件与二进制 .xls、伪装成 .xls 的文本 / HTML 等既有无法核对的来源一样，交易行里超出安全整数的数字只剩读取库的近似值（如 `9007199254740993` 读成 `9007199254740992`）
@@ -487,7 +523,7 @@
 ### B53（P1 · 已知问题）平盘：合法 Excel 数字日期在上海时区落到前一天，1904 工作簿偏移约四年（资金口径 · 须定历史兼容）
 
 - **来源**：深审平盘 R01；真实流式 Worker 与 side-DB 复现
-- **影响**：`position-reconciliation-import/xlsx-reader.js` 以本地 1899-12-30 为纪元，时区补偿只精确到分钟，上海时区该日偏移 +08:05:43，`46204`（2026-07-01）读成 2026-06-30 23:59:17；`sheetJsSerialDate` 不接收 `date1904`。银行按 Channel + 月份替换时选中错误月份的旧数据（已复现六月旧行被替换）
+- **影响**：`position-reconciliation-import/xlsx-reader.js` 以本地 1899-12-30 为纪元，时区补偿只精确到分钟，上海时区该日偏移 +08:05:43，`46204`（2026-07-01）读成 2026-06-30 23:59:17；`sheetJsSerialDate` 不接收 `date1904`。银行按 Channel + 月份替换时选中错误月份的旧数据（已复现六月旧行被替换）。2026-11-23 补充（v3.2.22 `feat/position-single-pass-import`）：导入解析口径未改，本条仍然成立；仅来源异常报告与运行过滤数据导出在写出日期时改为按来源日期序号还原（`excelSerialOfSheetJsDate`），报告里的日期不再带这 43 秒偏差，修本条时须一并核对该逆运算
 - **关闭条件**：以业务日历日期为准修正（UTC / 上海 × 1900 / 1904 × 月初 / 年初 / 午夜 / 带时间矩阵），断言 bill_date、month_key、预检 scope 与实际替换集合；修复前确定历史已存日期的兼容策略（修复后重导旧文件会落到不同月份，不能直接批量改写历史）。须人工核查真实数据是否使用数字日期单元格及受影响范围
 - **目标版本**：v3.2.22（暂定；须先定兼容策略；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
 
@@ -587,6 +623,7 @@
 - **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §6 K2）；编号接续 `release/v3.2.14` 的 B35
 - **影响**：`background-execution/adapters/position-import-adapter.js`（生产 `production.enabled: false`）启动来源导入时不传 `contractOptions.sourceStructures`，启用了用户结构版本时仍按内置结构识别；选中文件全部被拒时 `authorizeApply` 落到未配置的授权器并抛错，不返回逐文件原因。当前生产不受影响
 - **关闭条件**：启用该路径前，准备阶段按当前结构冻结并传入 Worker，全部失败时返回逐文件失败结果；补对应回归测试
+- **v3.2.22 补充**：银行对账单改为单遍导入（`BANK_IMPORT`）后，该适配器的 `bank-prepare` / `bank-apply` 两个 intents 指向的两段式命令已停用（导入进程收到即拒绝）；链接原始表改为单遍导入（`SOURCE_IMPORT`）后，`source-prepare-and-apply` intent 指向的 `SOURCE_PREPARE_AND_APPLY` 同样已停用。启用该路径前需改接单遍导入，或随 B143 删除
 - **目标版本**：未定（随 managed 导入启用）
 
 ### B36（P2 · 已知问题）平盘启用后在已有数据上切换链接原始表结构，重导的重叠记录可能被再次自动匹配（资金口径）
@@ -862,6 +899,14 @@
 - **触发实施**：下次新增场景算法（C4 / C5 等新场景类）时一并加
 
 ## 已完成
+
+### B142（P2 · 顺延）平盘导入改造第三步：链接原始表 / 账户表改为单遍导入并只存交互字段
+
+- **来源**：v3.2.22 `feat/position-single-pass-import`（[spec](../changes/v3.2.22/feat/position-single-pass-import/spec.md) / [techdoc](../changes/v3.2.22/feat/position-single-pass-import/techdoc.md) §3.2、§3.4）；2026-11-23 用户要求第二步完成后暂停
+- **影响**：链接原始表与清结算银行账户表仍是「暂存 → 预检全量解析 + 账本 + 逐行哈希 → 再次全量解析写入」，并保存整行 `raw_json` 与 `row_hash`；百万行来源文件仍然慢，且未登记原始账单版本号
+- **关闭条件**：来源导入按银行对账单同一模型改造（单遍、无账本、无行哈希、登记版本号、只存 `SOURCE_REQUIRED_FIELDS`），同业务单号重复行改用字段逐值比较判定；链接表 / 原始表导出与异常数据报告改为交互字段 + 版本号 / 行号；补回归并做对账专项审查
+- **目标版本**：v3.2.22（暂定）
+- **关闭**：v3.2.22（`feat/position-single-pass-import`）。链接原始表与账户表改为单遍导入（`SOURCE_IMPORT`），只存必用列与原始版本号 / 行号，整批一个事务；账户表确认后重读同一份暂存文件整表替换。记录标识沿用「内容相同折叠、同单号不同内容各自保留」，未采用「拒绝」（spec A3）。100 万行网关出账订单导入 139 秒 → 26 秒；单测、集成、真实应用实测通过（techdoc §7）
 
 ### B133（P1 · 已知问题）手工改写结构的 XLSX 中，长数字还原的原文可能取自读取库实际读取之外的工作表或行（资金口径 · 须人工复核）
 

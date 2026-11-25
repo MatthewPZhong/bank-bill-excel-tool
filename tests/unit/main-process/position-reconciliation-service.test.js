@@ -1,6 +1,7 @@
 'use strict';
 
 const test = require('node:test');
+const { insertBankRowFixture } = require('../../helpers/position-bank-rows');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -13,16 +14,10 @@ const {
   assertEngineResultSet
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
-  SCHEMA: POSITION_RECONCILIATION_SCHEMA,
   POSITION_DB_INITIALIZATION_MODES,
-  createPositionReconciliationStore
+  createPositionReconciliationStore,
+  discardOutdatedPositionSideDb
 } = require('../../../src/main-process/position-reconciliation/store');
-const {
-  ensurePositionLargeImportSchemaAtPath
-} = require('../../../src/main-process/position-reconciliation/large-import-schema');
-const {
-  dispatchPositionLargeImportSchemaMigration
-} = require('../../../src/main-process/position-reconciliation/import-dispatch');
 const {
   positionCommittedRecoveryArchiveFiles,
   requirePositionPendingArchiveFiles
@@ -40,7 +35,9 @@ const {
   BANK_SHEET_NAME,
   POSITION_DB_RELATIVE_PATH,
   POSITION_BANK_HEADERS,
+  POSITION_SCHEMA_VERSION,
   SOURCE_DEFINITIONS,
+  SOURCE_REQUIRED_FIELDS,
   SOURCE_TYPES,
   SOURCE_DISPLAY_ORDER
 } = require('../../../src/main-process/position-reconciliation/constants');
@@ -165,42 +162,6 @@ const LEGACY_POSITION_TABLES = Object.freeze([
   'position_consumed_sources'
 ]);
 
-function createEmptyLegacyPositionDatabase(userDataDir) {
-  const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const db = new DatabaseSync(dbPath);
-  db.exec(POSITION_RECONCILIATION_SCHEMA);
-  db.exec(`
-    DROP INDEX idx_position_bank_scope_dates;
-    DROP TABLE position_run_filtered_sources;
-    DROP TABLE position_filtered_source_rows;
-    DROP TABLE position_source_summaries;
-    DROP TABLE position_operation_inputs;
-    DROP TABLE position_checkpoint_history;
-    ALTER TABLE position_run_rows DROP COLUMN integrity_hash;
-    ALTER TABLE position_run_rows DROP COLUMN consumes_source;
-  `);
-  db.close();
-  return dbPath;
-}
-
-function insertLegacyPlaceholderRow(db, table) {
-  db.exec('PRAGMA foreign_keys = OFF;');
-  const columns = db.prepare(`PRAGMA table_info("${table}")`).all().filter((column) => (
-    !(Number(column.pk) === 1 && String(column.type).toUpperCase() === 'INTEGER')
-    && column.dflt_value === null
-    && (Number(column.notnull) === 1 || Number(column.pk) > 0)
-  ));
-  const values = columns.map((column) => (
-    String(column.type).toUpperCase() === 'INTEGER'
-      ? 1
-      : `${table}-${column.name}`
-  ));
-  db.prepare(`
-    INSERT INTO "${table}"(${columns.map((column) => `"${column.name}"`).join(', ')})
-    VALUES (${columns.map(() => '?').join(', ')})
-  `).run(...values);
-}
 
 test('链接管理和原始表始终按业务规定顺序返回', (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-order-contract-'));
@@ -291,25 +252,20 @@ test('银行管理快照单次聚合范围、总数、日期和状态并使用�
     store.close();
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
-  const insert = store.db.prepare(`
-    INSERT INTO position_bank_rows(
-      biz_id, channel, month_key, bill_date, status,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      import_order, original_json, working_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', '{}')
-  `);
-  insert.run(
-    'MANAGER-1', 'DBS', '2026-06', '2026-06-30', '未处理',
-    '/tmp/a.xlsx', 'a.xlsx', BANK_SHEET_NAME, 2, 0
-  );
-  insert.run(
-    'MANAGER-2', 'DBS', '2026-07', '2026-07-01', '已校验性质',
-    '/tmp/b.xlsx', 'b.xlsx', BANK_SHEET_NAME, 2, 1
-  );
-  insert.run(
-    'MANAGER-3', 'JPM', '2026-07', '2026-07-31', '未处理',
-    '/tmp/c.xlsx', 'c.xlsx', BANK_SHEET_NAME, 2, 2
-  );
+  for (const [bizId, channel, monthKey, billDate, status, fileName, importOrder] of [
+    ['MANAGER-1', 'DBS', '2026-06', '2026-06-30', '未处理', 'a.xlsx', 0],
+    ['MANAGER-2', 'DBS', '2026-07', '2026-07-01', '已校验性质', 'b.xlsx', 1],
+    ['MANAGER-3', 'JPM', '2026-07', '2026-07-31', '未处理', 'c.xlsx', 2]
+  ]) {
+    insertBankRowFixture(store.db, {
+      fields: { BizId: bizId, Channel: channel },
+      monthKey,
+      billDate,
+      status,
+      importOrder,
+      filePath: `/tmp/${fileName}`
+    });
+  }
 
   const snapshot = store.getBankManagerSnapshot();
   assert.equal(snapshot.summary.rowCount, 3);
@@ -345,11 +301,6 @@ test('现代来源身份下旧小文件路径保留同业务主键的不同内�
   });
   const sideDbPath = store.dbPath;
   store.close();
-  ensurePositionLargeImportSchemaAtPath({
-    sideDbPath,
-    expectedCheckpoint: checkpoint,
-    availableBytesProvider: () => 10n ** 15n
-  });
   store = createPositionReconciliationStore(userDataDir, {
     expectedCheckpoint: checkpoint
   });
@@ -416,11 +367,6 @@ test('同业务主键的不同来源记录可分别匹配并独立消费', async
   });
   const sideDbPath = store.dbPath;
   store.close();
-  ensurePositionLargeImportSchemaAtPath({
-    sideDbPath,
-    expectedCheckpoint: checkpoint,
-    availableBytesProvider: () => 10n ** 15n
-  });
   store = createPositionReconciliationStore(userDataDir, {
     expectedCheckpoint: checkpoint
   });
@@ -571,16 +517,9 @@ test('流式来源配置收窄时未启用来源明确失败且不得自动回�
     streamingSourceTypes: SOURCE_TYPES.GATEWAY_OUTBOUND,
     operationTokenProvider: () => 'streaming-hybrid-operation',
     authorizeStreamingSourceApply: async (ready) => {
-      const schema = await dispatchPositionLargeImportSchemaMigration({
-        engine: 'streaming',
-        userDataDir,
-        sideDbPath: service.store.dbPath,
-        expectedCheckpoint: service.persistenceCheckpoint()
-      }).promise;
       return {
         operationToken: 'streaming-hybrid-operation',
         archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schema.fingerprint,
         baseCheckpoint: service.persistenceCheckpoint()
       };
     }
@@ -676,6 +615,39 @@ test('普通来源 worker 退出恢复后 Service 保留已提交文件的存档
   assert.deepEqual(result.inputPaths, [stagedPath]);
   assert.deepEqual(result.inputFiles, [evidence]);
   assert.equal(result.successCount, 1);
+});
+
+test('账户表待确认期间同时保护作业目录与它自己的暂存文件', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-account-pending-protect-'));
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportEngine: 'streaming'
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+  const jobRoot = path.join(userDataDir, STAGING_RELATIVE_PATH, 'account-pending-job');
+  const stagedPath = path.join(jobRoot, '2', 'account.xlsx');
+  const finalized = service.finalizeStreamingSourceImport({
+    jobId: 'account-pending-job',
+    jobRoot,
+    results: [
+      { status: 'ok', sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND, stagingDir: path.join(jobRoot, '1') },
+      { status: 'needs-confirmation', sourceType: SOURCE_TYPES.BANK_ACCOUNT, rowCount: 1 }
+    ],
+    accountConfirmationDescriptor: {
+      filePath: '/original/account.xlsx',
+      archivePath: stagedPath,
+      stagingDir: path.dirname(stagedPath)
+    }
+  });
+  // 同批其他文件收尾时按「目录内是否含受保护路径」回收：只登记作业目录护不住账户表的暂存文件。
+  assert.deepEqual(finalized.cleanupPaths, [path.join(jobRoot, '1')]);
+  const protectedPaths = service.activeImportStagingPaths();
+  assert.ok(protectedPaths.includes(jobRoot));
+  assert.ok(protectedPaths.includes(stagedPath));
 });
 
 test('流式导入全部文件被拒时返回逐文件原因，不以异常结束且不引用已删除的暂存文件', async (t) => {
@@ -897,17 +869,9 @@ test('流式 service 完成银行确认、普通来源自动提交和账户快�
     operationTokenProvider: () => `streaming-confirmed-${++confirmedSequence}`,
     authorizeStreamingSourceApply: async (ready) => {
       const baseCheckpoint = service.persistenceCheckpoint();
-      const schema = await dispatchPositionLargeImportSchemaMigration({
-        engine: 'streaming',
-        userDataDir,
-        sideDbPath: service.store.dbPath,
-        expectedCheckpoint: baseCheckpoint,
-        batchContext: WORKER_BATCH_CONTEXT
-      }).promise;
       return {
         operationToken: `streaming-ordinary-${++ordinarySequence}`,
         archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schema.fingerprint,
         baseCheckpoint
       };
     }
@@ -1014,17 +978,9 @@ test('流式导入按设置 → 模板文件的当前结构识别、写入、确
     resolveSourceStructures: async () => structures,
     authorizeStreamingSourceApply: async (ready) => {
       const baseCheckpoint = service.persistenceCheckpoint();
-      const schema = await dispatchPositionLargeImportSchemaMigration({
-        engine: 'streaming',
-        userDataDir,
-        sideDbPath: service.store.dbPath,
-        expectedCheckpoint: baseCheckpoint,
-        batchContext: WORKER_BATCH_CONTEXT
-      }).promise;
       return {
         operationToken: `structures-apply-${++sequence}`,
         archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schema.fingerprint,
         baseCheckpoint
       };
     }
@@ -1054,13 +1010,17 @@ test('流式导入按设置 → 模板文件的当前结构识别、写入、确
   const rawPath = path.join(userDataDir, 'raw.xlsx');
   await service.exportRaw(SOURCE_TYPES.GATEWAY_INBOUND, rawPath);
   const raw = XLSX.utils.sheet_to_json(XLSX.readFile(rawPath).Sheets['中台网关原始入账订单'], { header: 1, defval: '' });
-  assert.deepEqual(raw[0], inboundHeaders);
-  assert.equal(raw[1][inboundHeaders.indexOf('fileId')], 'FILE-1');
+  // 入库与导出只含必用列（外加原始版本号 / 行号）；用户版本里改名的非必用列不保存、不导出。
+  const inboundRequired = SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.GATEWAY_INBOUND];
+  assert.deepEqual(raw[0], [...inboundRequired, '原始版本号', '原始行号']);
+  assert.equal(raw[1][inboundRequired.indexOf('bizId')], 'STRUCT-IN-1');
+  assert.deepEqual(raw[1].slice(-2), [1, 2]);
   const linkedPath = path.join(userDataDir, 'linked-account.xlsx');
   await service.exportLinked(SOURCE_TYPES.BANK_ACCOUNT, linkedPath);
   const linked = XLSX.utils.sheet_to_json(XLSX.readFile(linkedPath).Sheets['清结算银行账户表'], { header: 1, defval: '' });
-  assert.deepEqual(linked[0], accountHeaders);
-  assert.equal(linked[1][accountHeaders.indexOf('账户说明')], '新列');
+  const accountRequired = SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.BANK_ACCOUNT];
+  assert.deepEqual(linked[0], [...accountRequired]);
+  assert.equal(linked[1][accountRequired.indexOf('银行账号')], 'STRUCT-ACCOUNT-1');
 
   structures = Object.fromEntries(Object.values(SOURCE_TYPES).map((type) => [type, builtin(type)]));
   const rejected = await service.prepareSourceImportForLifecycle([inboundPath]);
@@ -1242,11 +1202,7 @@ test('流式导入取消由主进程跟踪，汇总与提交阶段拒绝取消',
   const accountApply = service.dispatchTrackedImport({
     command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
     payload: {
-      preflightReady: {
-        ledgerEvidence: {
-          ledgerPath: path.join(preparedJobRoot, 'job-ledger.sqlite')
-        }
-      }
+      preflightReady: { jobRoot: preparedJobRoot }
     }
   }, '测试账户确认');
   assert.ok(service.activeImportStagingPaths().includes(preparedJobRoot));
@@ -1342,7 +1298,7 @@ test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导
   assert.deepEqual(rows[0], POSITION_BANK_HEADERS);
   assert.equal(rows[1][POSITION_BANK_HEADERS.indexOf('FundType')], 'Inbound');
 
-  rows[1][POSITION_BANK_HEADERS.indexOf('Payee Name')] = ' ';
+  rows[1][POSITION_BANK_HEADERS.indexOf('Payee CardNo')] = ' ';
   const tampered = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(tampered, XLSX.utils.aoa_to_sheet(rows), BANK_SHEET_NAME);
   XLSX.writeFile(tampered, outputPath);
@@ -1350,7 +1306,7 @@ test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导
     () => service.importRunResult(run.runId, outputPath),
     (error) => error && error.code === 'position-result-field-tampered'
   );
-  rows[1][POSITION_BANK_HEADERS.indexOf('Payee Name')] = '';
+  rows[1][POSITION_BANK_HEADERS.indexOf('Payee CardNo')] = '';
   rows[1][POSITION_BANK_HEADERS.indexOf('FundType')] = 'Inbound&FX';
   rows[1][POSITION_BANK_HEADERS.indexOf('匹配命中详情')] = '人工确认应保留FX';
   const edited = XLSX.utils.book_new();
@@ -1855,23 +1811,19 @@ test('持久侧库非法日期标记必须阻断读取', (t) => {
   });
 
   applyBankImport(service, service.prepareBankImport([bankPath]).token);
+  // 日期类单元格以「前缀 + JSON 标记」存在值列里；标记里的日期非法时读取必须报错。
   service.store.db.prepare(`
     UPDATE position_bank_rows
-    SET working_json = ?
+    SET raw_bill_date = ?
     WHERE biz_id = ?
   `).run(
-    JSON.stringify({
-      BizId: 'POSITION-BIZ-1',
-      BillDate: {
-        __position_reconciliation_type__: 'Date',
-        value: 'not-a-date'
-      }
-    }),
+    `\u0001${JSON.stringify({ __position_reconciliation_type__: 'Date', value: 'not-a-date' })}`,
     'POSITION-BIZ-1'
   );
   assert.throws(
     () => service.store.getBankRows(),
-    /平盘侧库银行工作行 BizId=POSITION-BIZ-1 JSON 损坏：日期标记无效/
+    (error) => error && error.code === 'position-side-data-invalid'
+      && /银行行取值损坏：日期标记无效/.test(error.message)
   );
 });
 
@@ -1897,21 +1849,23 @@ test('持久侧库语法合法但缺字段的 JSON 必须 fail-closed', async (t
   });
 
   applyBankImport(service, service.prepareBankImport([bankPath]).token);
-  service.store.db.prepare(
-    "UPDATE position_bank_rows SET working_json = '{}' WHERE biz_id = ?"
-  ).run('POSITION-BIZ-1');
-  assert.throws(
-    () => service.store.getBankRows(),
-    (error) => error && error.code === 'position-side-data-invalid'
-  );
-
-  service.store.db.prepare(
-    'DELETE FROM position_bank_rows WHERE biz_id = ?'
-  ).run('POSITION-BIZ-1');
-  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(run.runId, resultPath);
+  // 银行行已是列式存储，不存在「缺字段的 JSON」；运行行的字段快照仍是 JSON，缺字段必须阻断。
+  const { original_json: originalJson } = service.store.db.prepare(
+    'SELECT original_json FROM position_run_rows WHERE run_id = ?'
+  ).get(run.runId);
+  service.store.db.prepare(
+    "UPDATE position_run_rows SET original_json = '{}' WHERE run_id = ?"
+  ).run(run.runId);
+  assert.throws(
+    () => service.store.getRun(run.runId),
+    (error) => error && error.code === 'position-side-data-invalid'
+  );
+  service.store.db.prepare(
+    'UPDATE position_run_rows SET original_json = ? WHERE run_id = ?'
+  ).run(originalJson, run.runId);
   service.store.db.prepare(
     "UPDATE position_run_rows SET lineage_json = '{}' WHERE run_id = ?"
   ).run(run.runId);
@@ -1976,15 +1930,16 @@ test('运行结果、血缘、差异集合及当前链接引用被改写时必�
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   const stored = service.store.db.prepare(`
-    SELECT result_json, lineage_json
+    SELECT original_json, lineage_json
     FROM position_run_rows
     WHERE run_id = ? AND biz_id = ?
   `).get(run.runId, 'POSITION-BIZ-1');
 
-  const changedResult = JSON.parse(stored.result_json);
+  // 结果行不单独保存（由字段快照 + 结果资金性质推导）；字段快照被改写时完整性校验必须阻断。
+  const changedResult = JSON.parse(stored.original_json);
   changedResult['Credit Amount'] = '999';
   service.store.db.prepare(`
-    UPDATE position_run_rows SET result_json = ?
+    UPDATE position_run_rows SET original_json = ?
     WHERE run_id = ? AND biz_id = ?
   `).run(JSON.stringify(changedResult), run.runId, 'POSITION-BIZ-1');
   assert.throws(
@@ -1993,9 +1948,9 @@ test('运行结果、血缘、差异集合及当前链接引用被改写时必�
     '非 FundType 结果字段被改写时必须阻断'
   );
   service.store.db.prepare(`
-    UPDATE position_run_rows SET result_json = ?
+    UPDATE position_run_rows SET original_json = ?
     WHERE run_id = ? AND biz_id = ?
-  `).run(stored.result_json, run.runId, 'POSITION-BIZ-1');
+  `).run(stored.original_json, run.runId, 'POSITION-BIZ-1');
 
   const changedLineage = JSON.parse(stored.lineage_json);
   changedLineage.pairKey = 'tampered-pair';
@@ -2256,8 +2211,11 @@ test('银行 Excel 日期单元格经过侧库后仍以日期类型导出', asyn
   applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const stored = service.store.getBankRows()[0];
   assert.equal(stored.originalRow.BillDate instanceof Date, true);
-  assert.equal(stored.workingRow.ValueDate instanceof Date, true);
-  assert.equal(stored.workingRow.最近修改时间 instanceof Date, true);
+  assert.equal(stored.workingRow.BillDate instanceof Date, true);
+  assert.equal(stored.workingRow.BillDate.getTime(), new Date(2026, 6, 20).getTime());
+  // ValueDate、最近修改时间不是交互字段：不入库，只留在存档的原始文件里。
+  assert.equal(Object.hasOwn(stored.workingRow, 'ValueDate'), false);
+  assert.equal(Object.hasOwn(stored.workingRow, '最近修改时间'), false);
 
   await service.exportBank({ channels: ['DBS'], months: ['2026-07'] }, outputPath);
   const workbook = XLSX.readFile(outputPath, { cellDates: true, raw: true });
@@ -2266,9 +2224,10 @@ test('银行 Excel 日期单元格经过侧库后仍以日期类型导出', asyn
     defval: '',
     raw: true
   });
+  assert.deepEqual(rows[0], [...POSITION_BANK_HEADERS]);
   assert.equal(rows[1][POSITION_BANK_HEADERS.indexOf('BillDate')] instanceof Date, true);
-  assert.equal(rows[1][POSITION_BANK_HEADERS.indexOf('ValueDate')] instanceof Date, true);
-  assert.equal(rows[1][POSITION_BANK_HEADERS.indexOf('最近修改时间')] instanceof Date, true);
+  assert.equal(rows[1][POSITION_BANK_HEADERS.indexOf('原始版本号')], 1);
+  assert.equal(rows[1][POSITION_BANK_HEADERS.indexOf('原始行号')], 2);
 
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
@@ -2281,8 +2240,8 @@ test('银行 Excel 日期单元格经过侧库后仍以日期类型导出', asyn
     defval: '',
     raw: true
   });
-  const modifiedAtColumn = POSITION_BANK_HEADERS.indexOf('最近修改时间');
-  editedRows[1][modifiedAtColumn] = new Date(editedRows[1][modifiedAtColumn].getTime() + (60 * 60 * 1000));
+  const billDateColumn = POSITION_BANK_HEADERS.indexOf('BillDate');
+  editedRows[1][billDateColumn] = new Date(editedRows[1][billDateColumn].getTime() + (60 * 60 * 1000));
   const tampered = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     tampered,
@@ -2340,7 +2299,7 @@ test('结果回导在解析后、写侧库前暂存发生变化时拒绝更新�
   assert.equal(fs.existsSync(stagedResultPath), false);
 });
 
-test('结果回导拒绝 BillDate/ValueDate 同日时分秒、跨日和非法文本篡改', async (t) => {
+test('结果回导拒绝 BillDate 同日时分秒、跨日和非法文本篡改，以及原始版本号 / 行号被改', async (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-result-date-tamper-'));
   const bankPath = path.join(userDataDir, 'bank.xlsx');
   const resultPath = path.join(userDataDir, 'result.xlsx');
@@ -2370,13 +2329,11 @@ test('结果回导拒绝 BillDate/ValueDate 同日时分秒、跨日和非法文
     ['BillDate', (value) => new Date(value.getTime() + (60 * 60 * 1000))],
     ['BillDate', (value) => new Date(value.getTime() + (60 * 1000))],
     ['BillDate', (value) => new Date(value.getTime() + 1000)],
-    ['ValueDate', (value) => new Date(value.getTime() + (60 * 60 * 1000))],
-    ['ValueDate', (value) => new Date(value.getTime() + (60 * 1000))],
-    ['ValueDate', (value) => new Date(value.getTime() + 1000)],
     ['BillDate', (value) => new Date(value.getTime() + (24 * 60 * 60 * 1000))],
-    ['ValueDate', (value) => new Date(value.getTime() + (24 * 60 * 60 * 1000))],
     ['BillDate', () => 'Invalid Date'],
-    ['ValueDate', () => '不是日期']
+    ['BillDate', () => '不是日期'],
+    ['原始版本号', (value) => Number(value) + 1],
+    ['原始行号', (value) => Number(value) + 1]
   ];
   for (const [header, mutate] of cases) {
     await service.exportRun(run.runId, resultPath);
@@ -2662,12 +2619,13 @@ test('来源消费 owner 必须由对应 confirmed 运行血缘证明', async (t
   assert.doesNotThrow(() => service.store.getRun(idempotentRun.runId));
   service.store.db.prepare(`
     INSERT INTO position_consumed_sources(
-      run_id, source_type, business_key, leg_index, bank_biz_id
-    ) VALUES (?, ?, ?, ?, ?)
+      run_id, source_type, business_key, source_record_key, leg_index, bank_biz_id
+    ) VALUES (?, ?, ?, ?, ?, ?)
   `).run(
     idempotentRun.runId,
     SOURCE_TYPES.GATEWAY_INBOUND,
     'UNRELATED-SOURCE',
+    'unrelated-source-record-key',
     0,
     'UNRELATED-BANK-BIZ'
   );
@@ -3516,418 +3474,94 @@ test('新建侧库在 existsSync 后被第二连接抢先创建时必须锁内�
   db.close();
 });
 
-test('完整空旧侧库只在合法 generation 0 bootstrap 下原地升级', (t) => {
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-empty-legacy-upgrade-'));
-  const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
-  const beforeStat = fs.statSync(dbPath);
-  const bootstrap = {
-    identity: 'empty-legacy-bootstrap-identity',
-    generation: 0,
-    token: 'empty-legacy-bootstrap-token'
-  };
+test('旧版本结构的侧库：store 拒绝接管；启动清理整体丢弃后按新结构重建', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-outdated-side-db-'));
+  const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
   t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
-
-  const upgraded = createPositionReconciliationService({
-    userDataDir,
-    templatePath: TEMPLATE_PATH,
-    initialSideDbCheckpoint: bootstrap
-  });
-  assert.deepEqual(upgraded.store.initializationResult(), {
-    mode: POSITION_DB_INITIALIZATION_MODES.EMPTY_LEGACY_UPGRADE
-  });
-  assert.deepEqual(upgraded.persistenceCheckpoint(), bootstrap);
-  assert.equal(
-    upgraded.store.db.prepare('PRAGMA journal_mode').get().journal_mode,
-    'wal',
-    '空旧库升级提交后必须进入正式 WAL 模式'
-  );
-  upgraded.close();
-
-  const afterStat = fs.statSync(dbPath);
-  assert.equal(afterStat.ino, beforeStat.ino, '兼容初始化必须保留原侧库文件');
-  const db = new DatabaseSync(dbPath, { readOnly: true });
-  const modernTables = db.prepare(`
-    SELECT name
-    FROM sqlite_master
-    WHERE type = 'table'
-  `).all().map((row) => row.name);
-  assert.ok(modernTables.includes('position_checkpoint_history'));
-  assert.ok(modernTables.includes('position_operation_inputs'));
-  const runRowColumns = db.prepare('PRAGMA table_info(position_run_rows)')
-    .all().map((column) => column.name);
-  assert.ok(runRowColumns.includes('consumes_source'));
-  assert.ok(runRowColumns.includes('integrity_hash'));
-  const runFilteredSourceColumns = db.prepare(
-    'PRAGMA table_info(position_run_filtered_sources)'
-  ).all().map((column) => column.name);
-  assert.ok(runFilteredSourceColumns.includes('integrity_hash'));
-  assert.equal(
-    db.prepare('SELECT COUNT(*) AS count FROM position_checkpoint_history').get().count,
-    1
-  );
-  assert.equal(
-    db.prepare('SELECT COUNT(*) AS count FROM position_operation_inputs').get().count,
-    0
-  );
-  for (const table of LEGACY_POSITION_TABLES.filter((table) => table !== 'position_meta')) {
-    assert.equal(
-      db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get().count,
-      0,
-      `${table} 不得生成业务行`
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  // v3.2.22 之前的库：有平盘表、有数据，但没有结构版本标记。
+  const legacy = new DatabaseSync(dbPath);
+  legacy.exec(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE position_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE position_bank_rows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, biz_id TEXT NOT NULL UNIQUE,
+      original_json TEXT NOT NULL, working_json TEXT NOT NULL
     );
-  }
-  assert.equal(
-    db.prepare('SELECT COUNT(*) AS count FROM position_meta').get().count,
-    3,
-    '只允许写入三项 checkpoint 元数据'
-  );
-  db.close();
-
-  const restarted = createPositionReconciliationService({
-    userDataDir,
-    templatePath: TEMPLATE_PATH,
-    requireExistingSideDb: true,
-    expectedSideDbCheckpoint: bootstrap
-  });
-  assert.deepEqual(restarted.store.initializationResult(), {
-    mode: POSITION_DB_INITIALIZATION_MODES.EXISTING
-  });
-  assert.deepEqual(restarted.persistenceCheckpoint(), bootstrap);
-  restarted.close();
-});
-
-test('空旧侧库预检后被第二连接写入时，加锁后的复检必须阻断升级', {
-  concurrency: false
-}, (t) => {
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-legacy-race-'));
-  const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
-  const injectedValue = 'sensitive-business-race-value';
-  const bootstrap = {
-    identity: 'legacy-race-bootstrap-identity',
-    generation: 0,
-    token: 'legacy-race-bootstrap-token'
-  };
-  const originalPrepare = DatabaseSync.prototype.prepare;
-  let injected = false;
-  let rejection = null;
-  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
-
-  DatabaseSync.prototype.prepare = function prepareWithLegacyRace(sql) {
-    const statement = originalPrepare.call(this, sql);
-    const normalizedSql = String(sql);
-    if (!injected
-        && normalizedSql.includes('COUNT(*)')
-        && normalizedSql.includes('FROM "position_source_rows"')) {
-      const originalGet = statement.get.bind(statement);
-      statement.get = (...args) => {
-        const row = originalGet(...args);
-        const competingDb = new DatabaseSync(dbPath);
-        try {
-          competingDb.prepare(
-            'INSERT INTO position_meta(key, value) VALUES (?, ?)'
-          ).run('race-row', injectedValue);
-          injected = true;
-        } finally {
-          competingDb.close();
-        }
-        return row;
-      };
-    }
-    return statement;
-  };
-
-  try {
-    assert.throws(
-      () => createPositionReconciliationService({
-        userDataDir,
-        templatePath: TEMPLATE_PATH,
-        initialSideDbCheckpoint: bootstrap
-      }),
-      (error) => {
-        rejection = error;
-        return error
-          && error.code === 'position-side-db-missing'
-          && error.reason === '旧版表不是空表：position_meta';
-      }
-    );
-  } finally {
-    DatabaseSync.prototype.prepare = originalPrepare;
-  }
-
-  assert.equal(injected, true, '故障注入必须发生在首次预检完成后');
-  assert.equal(rejection.code, 'position-side-db-missing');
-  assert.equal(rejection.reason, '旧版表不是空表：position_meta');
-  assert.doesNotMatch(
-    [rejection.message, ...(rejection.detailLines || [])].join('\n'),
-    new RegExp(injectedValue),
-    '拒绝错误不得泄露第二连接写入的业务值'
-  );
-
-  const db = new DatabaseSync(dbPath, { readOnly: true });
-  const tables = db.prepare(`
-    SELECT name
-    FROM sqlite_master
-    WHERE type = 'table'
-  `).all().map((row) => row.name);
-  assert.equal(tables.includes('position_checkpoint_history'), false);
-  assert.equal(tables.includes('position_operation_inputs'), false);
-  const runRowColumns = db.prepare('PRAGMA table_info(position_run_rows)')
-    .all().map((column) => column.name);
-  assert.equal(runRowColumns.includes('consumes_source'), false);
-  assert.equal(runRowColumns.includes('integrity_hash'), false);
-  assert.deepEqual(
-    db.prepare('SELECT key, value FROM position_meta').all().map((row) => ({ ...row })),
-    [{ key: 'race-row', value: injectedValue }]
-  );
-  db.close();
-});
-
-test('空旧侧库的 bootstrap 所有权或 generation 不合法时保持阻断', (t) => {
-  const bootstrap = {
-    identity: 'empty-legacy-guard-identity',
-    generation: 0,
-    token: 'empty-legacy-guard-token'
-  };
-  const cases = [
-    {
-      label: '主库已有 checkpoint',
-      options: {
-        requireExistingSideDb: true,
-        expectedSideDbCheckpoint: bootstrap
-      }
-    },
-    {
-      label: '主库仍有 pending',
-      options: {
-        initialSideDbCheckpoint: bootstrap,
-        expectedPendingOperation: {
-          operationToken: 'empty-legacy-pending',
-          baseCheckpoint: bootstrap
-        }
-      }
-    },
-    {
-      label: '首次 bootstrap 不是 generation 0',
-      options: {
-        initialSideDbCheckpoint: {
-          ...bootstrap,
-          generation: 1
-        }
-      }
-    }
-  ];
-
-  for (const item of cases) {
-    const userDataDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), `position-empty-legacy-${item.label}-`)
-    );
-    t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
-    createEmptyLegacyPositionDatabase(userDataDir);
-    assert.throws(
-      () => createPositionReconciliationService({
-        userDataDir,
-        templatePath: TEMPLATE_PATH,
-        ...item.options
-      }),
-      (error) => error && error.code === 'position-side-db-missing',
-      item.label
-    );
-  }
-});
-
-test('空旧侧库十张表任一非空都不得自动接管', (t) => {
-  const bootstrap = {
-    identity: 'non-empty-legacy-identity',
-    generation: 0,
-    token: 'non-empty-legacy-token'
-  };
-  for (const table of LEGACY_POSITION_TABLES) {
-    const userDataDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), `position-non-empty-legacy-${table}-`)
-    );
-    t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
-    const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
-    const db = new DatabaseSync(dbPath);
-    insertLegacyPlaceholderRow(db, table);
-    db.close();
-
-    assert.throws(
-      () => createPositionReconciliationService({
-        userDataDir,
-        templatePath: TEMPLATE_PATH,
-        initialSideDbCheckpoint: bootstrap
-      }),
-      (error) => error && error.code === 'position-side-db-missing',
-      `${table} 非空必须阻断`
-    );
-  }
-});
-
-test('空旧侧库缺表、错列或未知 schema 对象时保持阻断', (t) => {
-  const bootstrap = {
-    identity: 'legacy-schema-guard-identity',
-    generation: 0,
-    token: 'legacy-schema-guard-token'
-  };
-  const mutations = [
-    ['缺表', 'DROP TABLE position_account_mappings;'],
-    ['错列', 'ALTER TABLE position_bank_rows ADD COLUMN unexpected_column TEXT;'],
-    [
-      '列类型篡改',
-      `DROP TABLE position_meta;
-       CREATE TABLE position_meta (
-         key INTEGER PRIMARY KEY,
-         value TEXT NOT NULL
-       );`
-    ],
-    [
-      '非空约束篡改',
-      `DROP TABLE position_meta;
-       CREATE TABLE position_meta (
-         key TEXT PRIMARY KEY,
-         value TEXT
-       );`
-    ],
-    [
-      '默认值篡改',
-      `DROP TABLE position_revisions;
-       CREATE TABLE position_revisions (
-         kind TEXT NOT NULL,
-         scope_key TEXT NOT NULL,
-         revision INTEGER NOT NULL DEFAULT 1,
-         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-         PRIMARY KEY(kind, scope_key)
-       );`
-    ],
-    [
-      '主键篡改',
-      `DROP TABLE position_meta;
-       CREATE TABLE position_meta (
-         key TEXT NOT NULL,
-         value TEXT PRIMARY KEY
-       );`
-    ],
-    [
-      '同名索引定义篡改',
-      `DROP INDEX idx_position_bank_scope;
-       CREATE INDEX idx_position_bank_scope
-         ON position_bank_rows(channel, month_key, status);`
-    ],
-    [
-      'UNIQUE 约束缺失',
-      `DROP TABLE position_runs;
-       CREATE TABLE position_runs (
-         id INTEGER PRIMARY KEY AUTOINCREMENT,
-         run_uuid TEXT NOT NULL,
-         status TEXT NOT NULL,
-         scope_json TEXT NOT NULL,
-         snapshot_json TEXT NOT NULL,
-         summary_json TEXT NOT NULL,
-         exported_at TEXT,
-         reimported_at TEXT,
-         confirmed_at TEXT,
-         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-       );
-       CREATE INDEX idx_position_runs_status
-         ON position_runs(status, id DESC);
-       CREATE UNIQUE INDEX idx_position_runs_single_pending
-         ON position_runs(status) WHERE status = 'pending';`
-    ],
-    [
-      'FOREIGN KEY 约束缺失',
-      `DROP TABLE position_run_rows;
-       CREATE TABLE position_run_rows (
-         id INTEGER PRIMARY KEY AUTOINCREMENT,
-         run_id INTEGER NOT NULL,
-         biz_id TEXT NOT NULL,
-         channel TEXT NOT NULL,
-         month_key TEXT NOT NULL,
-         source_order INTEGER NOT NULL,
-         original_fund_type TEXT,
-         result_fund_type TEXT,
-         hit_summary TEXT,
-         hit_type TEXT,
-         match_detail TEXT,
-         outcome TEXT NOT NULL,
-         changed INTEGER NOT NULL DEFAULT 0,
-         manual_modified INTEGER NOT NULL DEFAULT 0,
-         original_json TEXT NOT NULL,
-         result_json TEXT NOT NULL,
-         lineage_json TEXT NOT NULL,
-         UNIQUE(run_id, biz_id)
-       );
-       CREATE INDEX idx_position_run_rows_scope
-         ON position_run_rows(run_id, channel, month_key, source_order);`
-    ],
-    ['未知表', 'CREATE TABLE unexpected_position_table (id INTEGER PRIMARY KEY);'],
-    ['未知视图', 'CREATE VIEW unexpected_position_view AS SELECT key FROM position_meta;'],
-    [
-      '未知触发器',
-      `CREATE TRIGGER unexpected_position_trigger
-       AFTER INSERT ON position_meta
-       BEGIN
-         SELECT 1;
-       END;`
-    ]
-  ];
-
-  for (const [label, statement] of mutations) {
-    const userDataDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), `position-legacy-schema-${label}-`)
-    );
-    t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
-    const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
-    const db = new DatabaseSync(dbPath);
-    db.exec('PRAGMA foreign_keys = OFF;');
-    db.exec(statement);
-    db.close();
-
-    assert.throws(
-      () => createPositionReconciliationService({
-        userDataDir,
-        templatePath: TEMPLATE_PATH,
-        initialSideDbCheckpoint: bootstrap
-      }),
-      (error) => error && error.code === 'position-side-db-missing',
-      `${label} 必须阻断`
-    );
-  }
-});
-
-test('空旧侧库 quick_check 失败时不得修补或写入 checkpoint', (t) => {
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-legacy-corrupt-'));
-  const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
-  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
-  const db = new DatabaseSync(dbPath, { readOnly: true });
-  const pageSize = Number(db.prepare('PRAGMA page_size').get().page_size);
-  const rootPage = Number(db.prepare(`
-    SELECT rootpage
-    FROM sqlite_master
-    WHERE type = 'index' AND name = 'idx_position_bank_scope'
-  `).get().rootpage);
-  db.close();
-  const fd = fs.openSync(dbPath, 'r+');
-  try {
-    fs.writeSync(fd, Buffer.alloc(16, 0xff), 0, 16, (rootPage - 1) * pageSize);
-  } finally {
-    fs.closeSync(fd);
-  }
-  const before = fs.readFileSync(dbPath);
+    INSERT INTO position_bank_rows(biz_id, original_json, working_json) VALUES ('OLD-1', '{}', '{}');
+  `);
+  legacy.close();
 
   assert.throws(
-    () => createPositionReconciliationService({
-      userDataDir,
-      templatePath: TEMPLATE_PATH,
-      initialSideDbCheckpoint: {
-        identity: 'corrupt-legacy-identity',
-        generation: 0,
-        token: 'corrupt-legacy-token'
-      }
+    () => createPositionReconciliationStore(userDataDir, {
+      initialCheckpoint: { identity: 'outdated-identity', generation: 0, token: 'outdated-token' }
     }),
-    (error) => error && error.code === 'position-side-db-missing'
+    (error) => error && error.code === 'position-side-db-outdated'
   );
-  assert.deepEqual(fs.readFileSync(dbPath), before, '失败校验不得改写异常侧库');
+  assert.equal(fs.existsSync(dbPath), true, 'store 自身不删除旧库');
+
+  // 先解除主库绑定、后删除旧库：解绑回调执行时旧库必须还在，中途退出才能在下次启动重做。
+  const unbindObserved = [];
+  assert.equal(discardOutdatedPositionSideDb(userDataDir, {
+    beforeDelete: () => unbindObserved.push(fs.existsSync(dbPath))
+  }), true);
+  assert.deepEqual(unbindObserved, [true]);
+  for (const suffix of ['', '-wal', '-shm', '-journal']) {
+    assert.equal(fs.existsSync(`${dbPath}${suffix}`), false, `旧库文件 ${suffix || '主文件'} 应已删除`);
+  }
+  const rebuilt = createPositionReconciliationStore(userDataDir);
+  assert.equal(rebuilt.initializationResult().mode, 'new');
+  assert.equal(rebuilt.getBankRows().length, 0);
+  rebuilt.close();
+  // 当前版本的库、以及没有任何平盘表的文件都不属于「旧版本库」，不得被丢弃。
+  assert.equal(discardOutdatedPositionSideDb(userDataDir), false);
+  assert.equal(fs.existsSync(dbPath), true);
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-outdated-empty-'));
+  t.after(() => fs.rmSync(emptyDir, { recursive: true, force: true }));
+  const emptyPath = path.join(emptyDir, POSITION_DB_RELATIVE_PATH);
+  fs.mkdirSync(path.dirname(emptyPath), { recursive: true });
+  fs.writeFileSync(emptyPath, '');
+  assert.equal(discardOutdatedPositionSideDb(emptyDir), false);
+  assert.equal(fs.existsSync(emptyPath), true);
+
+  // 结构版本标记低于当前值的库（如开发期间用旧记录标识算法写过数据的版本 2）同样整体丢弃：
+  // 两种来源记录标识不能在同一个库里混用，否则含日期的同一条记录重导时查不到旧记录而重复入库。
+  const previousVersion = new DatabaseSync(dbPath);
+  previousVersion.prepare(
+    "UPDATE position_meta SET value = ? WHERE key = 'position_schema_version'"
+  ).run(String(POSITION_SCHEMA_VERSION - 1));
+  previousVersion.close();
+  assert.equal(discardOutdatedPositionSideDb(userDataDir), true);
+  assert.equal(fs.existsSync(dbPath), false);
+
+  // 只有零散的 position_ 表、或结构版本标记损坏的库：结构无法识别，保留文件并由 store 阻断，不当旧库删除。
+  for (const [label, schema] of [
+    ['unrelated', 'CREATE TABLE position_history (id INTEGER PRIMARY KEY, note TEXT);'],
+    ['bad-version', `
+      CREATE TABLE position_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO position_meta(key, value) VALUES ('position_schema_version', 'two');
+      CREATE TABLE position_bank_rows (id INTEGER PRIMARY KEY, biz_id TEXT NOT NULL UNIQUE);
+    `]
+  ]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `position-unknown-${label}-`));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const unknownPath = path.join(dir, POSITION_DB_RELATIVE_PATH);
+    fs.mkdirSync(path.dirname(unknownPath), { recursive: true });
+    const unknown = new DatabaseSync(unknownPath);
+    unknown.exec(schema);
+    unknown.close();
+    let unbound = false;
+    assert.equal(discardOutdatedPositionSideDb(dir, { beforeDelete: () => { unbound = true; } }), false, label);
+    assert.equal(unbound, false, `${label}：不删除就不得解除主库绑定`);
+    assert.equal(fs.existsSync(unknownPath), true, label);
+    assert.throws(
+      () => createPositionReconciliationStore(dir, {
+        initialCheckpoint: { identity: `${label}-identity`, generation: 0, token: `${label}-token` }
+      }),
+      (error) => error && error.code === 'position-side-db-missing',
+      label
+    );
+  }
 });
 
 test('首次 bootstrap 只绑定同一份 generation 0 侧库，旧 marker 和既有现代库均不得接管', (t) => {
@@ -4004,6 +3638,9 @@ test('首次 bootstrap 只绑定同一份 generation 0 侧库，旧 marker 和�
     (error) => error && error.code === 'position-side-db-missing',
     '仅有旧 marker 的残缺库不得被补成空库'
   );
+  // 认不出是旧版本结构的文件不属于「旧版本库」：启动清理不得删除它。
+  assert.equal(discardOutdatedPositionSideDb(markerOnlyDir), false);
+  assert.equal(fs.existsSync(markerOnlyPath), true);
 });
 
 test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t) => {

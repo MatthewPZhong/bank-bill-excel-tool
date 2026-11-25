@@ -287,7 +287,7 @@ async function readPhysicalHeader(workbook, sheet, cancelToken = null) {
 }
 
 // definitions：本次导入使用的来源表结构（当前启用版本），缺省为内置结构。
-// bankSourceHeaders：银行对账单导入识别结构的当前用户版本（D17，与内置 46 / 49 列同时接受）。
+// bankSourceHeaders：银行对账单导入识别结构的当前用户版本（D17，与内置 46 列、平盘结果 20 列同时接受）。
 async function locatePositionBusinessSheet(workbook, kind, cancelToken = null, definitions = SOURCE_DEFINITIONS, bankSourceHeaders = null) {
   if (kind === 'bank') {
     const sheet = workbook.sheets.find((candidate) => candidate.name === BANK_SHEET_NAME);
@@ -303,7 +303,7 @@ async function locatePositionBusinessSheet(workbook, kind, cancelToken = null, d
     if (!structure) {
       throw new PositionReconciliationError(
         'position-bank-headers-invalid',
-        `银行对账单表头不符合 46/49 列契约${bankSourceHeaders ? '或当前版本' : ''}：${workbook.sourceFile}`,
+        `银行对账单表头不符合 46/20 列契约${bankSourceHeaders ? '或当前版本' : ''}：${workbook.sourceFile}`,
         bankHeaderMismatchLines(headers, bankSourceHeaders)
       );
     }
@@ -362,6 +362,26 @@ function sheetJsSerialDate(value) {
   return output;
 }
 
+// sheetJsSerialDate 的逆运算：由读取器给出的 Date 还原来源单元格的日期序号。
+// 读取器沿用 SheetJS 的换算（导入解析口径，不改）：它用 1899 年的本地偏移推算基准，而部分时区当年用的是
+// 带秒的地方时（上海为 +8:05:43），于是 2026-07-01 00:00:00 的单元格读成本地 2026-06-30 23:59:17。
+// 需要把日期原样写回 Excel 时不能取这个 Date 的年月日时分秒，要先还原成序号。
+// 有夏令时的时区里，落在「拨快一小时」那个不存在的本地小时内的两个序号会被读取器读成同一时刻，
+// 这类单元格无法区分，还原出其中靠前的一个；其余时刻精确还原（误差不超过 1 毫秒）。
+function excelSerialOfSheetJsDate(date) {
+  const time = date.getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const offset = date.getTimezoneOffset();
+  const candidates = offset === REFERENCE_OFFSET
+    ? [time]
+    : [time - (offset - REFERENCE_OFFSET) * 60000, time];
+  for (const candidate of candidates) {
+    const serial = (candidate - DATE_THRESHOLD) / dayMs;
+    if (Math.abs(sheetJsSerialDate(serial).getTime() - time) <= 1) return serial;
+  }
+  return (candidates[0] - DATE_THRESHOLD) / dayMs;
+}
+
 function sheetJsCompatibleCellValue(cell) {
   if (!cell || cell.cellType === 'blank' || cell.cellType === 'error') return '';
   if (cell.cellType === 'text') {
@@ -418,6 +438,9 @@ function valuesFromToolboxRow(row, width) {
 async function streamPositionXlsxRows(filePath, options = {}) {
   const kind = options.kind === 'bank' ? 'bank' : 'source';
   const workbook = await openPositionWorkbook(filePath, options);
+  // 调用方回调（单遍导入在这里写库）抛出的错误不是工作簿的问题：记下来原样上抛，
+  // 不能包装成 position-workbook-invalid，否则数据库错误会被当成单个坏文件处理。
+  let callbackFailure = null;
   try {
     const detected = await locatePositionBusinessSheet(
       workbook,
@@ -449,13 +472,19 @@ async function streamPositionXlsxRows(filePath, options = {}) {
         if (isBlankRow(row, sourceHeaders)) return;
         nonBlankRowCount += 1;
         if (typeof options.onRow === 'function') {
-          options.onRow({
-            row: project(row),
-            excelRowNumber: toolboxRow.rowIndex,
-            sourceType: detected.sourceType,
-            sourceHeaders,
-            sheetName: detected.sheet.name
-          });
+          const projected = project(row);
+          try {
+            options.onRow({
+              row: projected,
+              excelRowNumber: toolboxRow.rowIndex,
+              sourceType: detected.sourceType,
+              sourceHeaders,
+              sheetName: detected.sheet.name
+            });
+          } catch (error) {
+            callbackFailure = { error };
+            throw error;
+          }
         }
       }
     });
@@ -472,6 +501,7 @@ async function streamPositionXlsxRows(filePath, options = {}) {
       sharedStringsCount: workbook.sharedStrings.count
     };
   } catch (error) {
+    if (callbackFailure) throw callbackFailure.error;
     if (error instanceof PositionReconciliationError) throw error;
     throw workbookInvalid(workbook.sourceFile, error);
   } finally {
@@ -484,6 +514,7 @@ module.exports = {
   openPositionWorkbook,
   locatePositionBusinessSheet,
   readPhysicalHeader,
+  excelSerialOfSheetJsDate,
   sheetJsCompatibleCellValue,
   sheetJsSerialDate,
   streamPositionXlsxRows,

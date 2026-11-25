@@ -15,6 +15,14 @@ const POSITION_IMPORT_ESTIMATED_BYTES_PER_ROW = Object.freeze({
   maintenance: 2048
 });
 
+// 单遍导入在读文件之前不知道行数：按暂存文件大小估算侧库与 WAL 的增长。
+// 倍数取自 100 万行样本的实测峰值（银行 173MB → 增长约 0.73GB，链接原始表 146MB → 增长约 2.5GB，
+// 后者来源行与链接行各存一份且整批一个事务），向上取整留余量。
+const POSITION_IMPORT_GROWTH_PER_STAGED_BYTE = Object.freeze({
+  bank: 5,
+  source: 18
+});
+
 function existingStorageBytes(filePath) {
   const resolved = path.resolve(String(filePath || ''));
   return [resolved, `${resolved}-wal`, `${resolved}-shm`].reduce(
@@ -45,7 +53,7 @@ function estimatePositionImportDiskBytes({
   sideDbPath,
   rowCount = 0,
   stagedBytes = 0,
-  ledgerBytes = 0,
+  estimateGrowthFromStagedBytes = false,
   safetyMarginBytes = POSITION_IMPORT_DISK_SAFETY_MARGIN_BYTES
 }) {
   const normalizedKind = Object.prototype.hasOwnProperty.call(
@@ -55,9 +63,12 @@ function estimatePositionImportDiskBytes({
   const perRow = BigInt(POSITION_IMPORT_ESTIMATED_BYTES_PER_ROW[normalizedKind]);
   const rows = BigInt(normalizeNonNegativeInteger(rowCount));
   const staged = BigInt(normalizeNonNegativeInteger(stagedBytes));
-  const ledger = BigInt(normalizeNonNegativeInteger(ledgerBytes));
   const existing = existingStorageBytes(sideDbPath);
   const safety = BigInt(normalizeNonNegativeInteger(safetyMarginBytes));
+  const growthFactor = estimateGrowthFromStagedBytes === true
+    ? BigInt(POSITION_IMPORT_GROWTH_PER_STAGED_BYTE[normalizedKind] || 0)
+    : 0n;
+  const rowBytes = (rows * perRow) + (staged * growthFactor);
 
   // The estimate intentionally counts current DB pages and staged artifacts again.
   // They are already allocated at apply time, but retaining this headroom covers
@@ -66,10 +77,9 @@ function estimatePositionImportDiskBytes({
     kind: normalizedKind,
     existingBytes: existing,
     stagedBytes: staged,
-    ledgerBytes: ledger,
-    rowBytes: rows * perRow,
+    rowBytes,
     safetyMarginBytes: safety,
-    requiredBytes: existing + staged + ledger + (rows * perRow) + safety
+    requiredBytes: existing + staged + rowBytes + safety
   };
 }
 
@@ -106,6 +116,7 @@ function assertPositionImportDiskSpace(input = {}) {
 module.exports = {
   POSITION_IMPORT_DISK_SAFETY_MARGIN_BYTES,
   POSITION_IMPORT_ESTIMATED_BYTES_PER_ROW,
+  POSITION_IMPORT_GROWTH_PER_STAGED_BYTE,
   assertPositionImportDiskSpace,
   availableStorageBytes,
   estimatePositionImportDiskBytes,

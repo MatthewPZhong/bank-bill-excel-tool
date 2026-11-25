@@ -2,20 +2,19 @@
 
 // 平盘链接原始表的导入识别结构。内置结构为 constants 中的表头；设置 → 模板文件启用用户版本后，
 //   Main 在每次导入开始时读取各表当前版本，冻结后随任务传入导入 Worker，预检、写入与账户确认使用同一份。
-// 只认当前结构：导入时按它识别文件；已存行只校验必用列，导出按当前结构出列。Main 与导入 Worker 共用。
+// 只认当前结构：导入时按它识别文件；入库只保存必用列（SOURCE_REQUIRED_FIELDS），导出也只含这些列。Main 与导入 Worker 共用。
 
 const {
   LINK_HEADERS,
   POSITION_BANK_HEADERS,
   SOURCE_DEFINITIONS,
-  SOURCE_REQUIRED_FIELDS,
-  SOURCE_TYPES
+  SOURCE_REQUIRED_FIELDS
 } = require('./constants');
 const { PositionReconciliationError } = require('./common');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
 const { canonicalHeaderMapping, projectObjectToCanonical } = require('../../backend/file-service/header-structure-diff');
 
-// 平盘银行对账单可接受的表头（headers 已去首尾空格与末尾空列）：内置 46 列、平盘结果 49 列，
+// 平盘银行对账单可接受的表头（headers 已去首尾空格与末尾空列）：内置 46 列、平盘结果导出 20 列（审计列 + 交互字段 + 原始版本号 / 行号），
 //   以及设置 → 模板文件「银行对账单（导入识别结构）」当前用户版本（bankSourceHeaders，D17，由 Main 在导入开始时冻结）。
 //   返回 { headers, project(row) }：project 把按当前版本读出的行对应回内置 46 列名，其余结构原样；都不符时返回 null。
 function bankSourceStructure(headers, bankSourceHeaders = null) {
@@ -71,18 +70,13 @@ function sourceDefinitionsFor(structures) {
   })));
 }
 
-// 账户表的链接行即原始行，列随当前结构；其余链接表由派生生成，列固定。
-function linkHeadersFor(sourceType, definitions = SOURCE_DEFINITIONS) {
-  return sourceType === SOURCE_TYPES.BANK_ACCOUNT
-    ? definitions[SOURCE_TYPES.BANK_ACCOUNT].headers
-    : LINK_HEADERS[sourceType];
+// 链接表的列固定：普通来源为派生列，账户表为保存下来的必用列（v3.2.22 起来源行只保存必用列）。
+function linkHeadersFor(sourceType) {
+  return LINK_HEADERS[sourceType];
 }
 
-// 已存链接行必须具备的列：账户表只要求必用列（列名可随结构版本变化），其余为派生的固定列。
 function linkRequiredFields(sourceType) {
-  return sourceType === SOURCE_TYPES.BANK_ACCOUNT
-    ? SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.BANK_ACCOUNT]
-    : LINK_HEADERS[sourceType];
+  return LINK_HEADERS[sourceType];
 }
 
 module.exports = {

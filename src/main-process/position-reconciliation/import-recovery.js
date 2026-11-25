@@ -81,13 +81,9 @@ function assertCommittedFileSet(files, chain, sourceType) {
 }
 
 function jobRootFromPreflight(preflightReady) {
-  const ledgerPath = String(
-    preflightReady
-    && preflightReady.ledgerEvidence
-    && preflightReady.ledgerEvidence.ledgerPath
-    || ''
-  ).trim();
-  return ledgerPath ? path.dirname(path.resolve(ledgerPath)) : '';
+  // 暂存根目录由导入进程在 ready 消息里直接给出。
+  const jobRoot = String(preflightReady && preflightReady.jobRoot || '').trim();
+  return jobRoot ? path.resolve(jobRoot) : '';
 }
 
 function rebuildBankResult(db, preflightReady, chain) {
@@ -99,10 +95,7 @@ function rebuildBankResult(db, preflightReady, chain) {
   }
   assertCommittedFileSet(files, chain, 'position-bank');
   const scopes = (
-    preflightReady.ledgerEvidence
-    && preflightReady.ledgerEvidence.manifest
-    && preflightReady.ledgerEvidence.manifest.bankScopes
-    || []
+    Array.isArray(preflightReady.bankScopes) ? preflightReady.bankScopes : []
   ).map((scope) => ({
     channel: String(scope.channel || ''),
     monthKey: String(scope.monthKey || ''),
@@ -167,12 +160,13 @@ function rebuildBankResult(db, preflightReady, chain) {
     acceptedFileIndexes.set(inputPathKey(file.filePath), fileIndex);
   }
   const fileScopes = db.prepare(`
-    SELECT DISTINCT bank.source_file_path AS filePath,
+    SELECT DISTINCT raw.original_path AS filePath,
            bank.channel, bank.month_key AS monthKey
     FROM position_bank_rows bank
     JOIN position_recovery_bank_scopes scope
       ON scope.channel = bank.channel AND scope.month_key = bank.month_key
-    ORDER BY bank.source_file_path, bank.channel, bank.month_key
+    JOIN position_raw_files raw ON raw.version = bank.raw_version
+    ORDER BY raw.original_path, bank.channel, bank.month_key
   `).all().map((row) => {
     const fileIndex = acceptedFileIndexes.get(inputPathKey(row.filePath));
     if (!Number.isSafeInteger(fileIndex)) {
@@ -249,39 +243,13 @@ function proofMatchesExpected(proof, expected) {
     && snapshotsEqual(proof.sourceSnapshot, expected.sourceSnapshot);
 }
 
-function committedRecoveryOutputs(preflightReady, acceptedPaths, committedPaths) {
-  const outputs = Array.isArray(preflightReady && preflightReady.outputFiles)
-    ? preflightReady.outputFiles
-    : [];
-  const allAcceptedCommitted = committedPaths.size === acceptedPaths.size;
-  return outputs.filter((file) => {
-    const dependencies = Array.isArray(file && file.requiredInputPaths)
-      ? file.requiredInputPaths.map(inputPathKey)
-      : null;
-    if (!dependencies) {
-      if (!allAcceptedCommitted) {
-        throw recoveryRequired(
-          '部分提交恢复遇到未声明输入依赖的异常报告，禁止归入成功批次'
-        );
-      }
-      return true;
-    }
-    if (dependencies.length === 0
-        || dependencies.some((filePath) => !acceptedPaths.has(filePath))) {
-      throw recoveryRequired('异常报告输入依赖无法与预检文件集合对齐');
-    }
-    return dependencies.every((filePath) => committedPaths.has(filePath));
-  });
-}
-
-function rebuildOrdinarySourceResult(preflightReady, chain, workerError) {
-  const acceptedBankFiles = Array.isArray(preflightReady.acceptedBankFiles)
-    ? preflightReady.acceptedBankFiles
-    : [];
-  if (preflightReady.kind === 'bank' || acceptedBankFiles.length > 0) {
-    throw recoveryRequired(
-      '平盘银行批次提交后的专用恢复尚未启用，禁止按普通来源结果恢复'
-    );
+// 链接原始表单遍导入：全部被接受的文件在一个事务里提交。导入进程在提交后、回报结果前退出时，
+// 按提交链、文件凭证与版本记录重建结果；要么全部已提交，要么全部未提交。
+function rebuildOrdinarySourceResult(db, preflightReady, chain, operationToken) {
+  if (preflightReady.kind === 'bank'
+      || (Array.isArray(preflightReady.acceptedBankFiles)
+        && preflightReady.acceptedBankFiles.length > 0)) {
+    throw recoveryRequired('平盘银行批次不得按链接原始表结果恢复');
   }
   const ordered = Array.isArray(preflightReady.orderedFileResults)
     ? preflightReady.orderedFileResults
@@ -289,133 +257,88 @@ function rebuildOrdinarySourceResult(preflightReady, chain, workerError) {
   const accepted = Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
     ? preflightReady.acceptedOrdinaryInputFiles
     : [];
-  const expectedByPath = new Map(accepted.map((file) => {
-    const evidence = expectedInputEvidence(file);
-    return [evidence.filePath, { file, evidence }];
-  }));
-  if (expectedByPath.size !== accepted.length) {
-    throw recoveryRequired('平盘预检 manifest 存在重复的普通来源文件路径');
+  if (accepted.length === 0) {
+    throw recoveryRequired('平盘链接原始表恢复缺少已接受文件集合');
   }
-  const unexpectedAcceptedResult = ordered.find((item) => (
-    item.status === 'ok' && !expectedByPath.has(inputPathKey(item.archivePath))
-  ));
-  if (unexpectedAcceptedResult) {
-    throw recoveryRequired(
-      '平盘预检结果包含未登记到普通来源 manifest 的成功文件'
-    );
-  }
-  const committedPaths = new Set();
-  for (const proof of chain.committedInputs) {
-    const key = inputPathKey(proof.filePath);
-    const expected = expectedByPath.get(key);
-    if (!expected || !proofMatchesExpected(proof, expected.evidence)) {
+  assertCommittedFileSet(accepted, chain, '');
+  const findVersion = db.prepare(`
+    SELECT kind, row_count AS rowCount, operation_token AS operationToken
+    FROM position_raw_files
+    WHERE version = ?
+  `);
+  for (const file of accepted) {
+    const version = findVersion.get(Number(file.rawVersion));
+    const expectedRows = Number(file.rowCount || 0) + Number(file.filteredRowCount || 0);
+    if (!version
+        || String(version.kind) !== String(file.sourceType)
+        || String(version.operationToken) !== String(operationToken)
+        || Number(version.rowCount) !== expectedRows) {
       throw recoveryRequired(
-        '平盘 worker 退出后发现未知或不一致的文件级提交凭证'
+        '平盘链接原始表提交后的版本记录无法与已接受文件对齐',
+        [`${String(file.fileName || '')}：版本 ${Number(file.rawVersion)}`]
       );
     }
-    if (committedPaths.has(key)) {
-      throw recoveryRequired('平盘 worker 退出后发现重复文件级提交凭证');
-    }
-    committedPaths.add(key);
   }
-  if (chain.committedMutations !== committedPaths.size) {
-    throw recoveryRequired(
-      '平盘 worker 退出后的 checkpoint 次数与文件级提交凭证数量不一致'
-    );
-  }
-
-  let results = ordered.map((item) => {
-    if (item.status !== 'ok' || !expectedByPath.has(inputPathKey(item.archivePath))) {
-      return item;
-    }
-    const committed = committedPaths.has(inputPathKey(item.archivePath));
-    if (committed) {
-      return {
-        ...item,
-        status: 'ok',
-        recoveredFromWorkerExit: true
-      };
-    }
-    const { anomalyReport: _uncommittedReport, ...withoutReport } = item;
+  const proofByPath = new Map(chain.committedInputs.map((proof) => [
+    inputPathKey(proof.filePath),
+    proof
+  ]));
+  const acceptedPaths = new Set(accepted.map((file) => inputPathKey(file.archivePath)));
+  const results = ordered.map((item) => {
+    if (item.status !== 'ok' || !acceptedPaths.has(inputPathKey(item.archivePath))) return item;
+    const proof = proofByPath.get(inputPathKey(item.archivePath));
     return {
-      ...withoutReport,
-      status: 'failed',
-      code: 'position-import-worker-exited-before-commit',
-      message: 'worker 退出前该文件尚未形成侧库提交凭证',
-      detailLines: []
+      ...item,
+      inputPaths: [proof.filePath],
+      inputFiles: [resultInputEvidence(proof)],
+      originalInputPaths: [item.filePath],
+      cleanupPaths: [item.stagingDir].filter(Boolean),
+      applied: true,
+      recoveredFromWorkerExit: true
     };
   });
   const success = results.filter((item) => item.status === 'ok');
   const failed = results.filter((item) => item.status === 'failed');
   const confirmation = results.filter((item) => item.status === 'needs-confirmation');
-  const committedFiles = success.map((item) => {
-    const expected = expectedByPath.get(inputPathKey(item.archivePath)).evidence;
-    return {
-      filePath: expected.filePath,
-      role: 'input',
-      sourceType: expected.sourceType,
-      originalName: expected.originalName,
-      sourceSnapshot: expected.sourceSnapshot,
-      expectedSha256: expected.sha256,
-      sizeBytes: expected.sizeBytes
-    };
-  });
-  const acceptedPaths = new Set(expectedByPath.keys());
-  const outputFiles = committedRecoveryOutputs(
-    preflightReady,
-    acceptedPaths,
-    committedPaths
-  );
-  const retainedReportKeys = new Set(outputFiles.map((file) => (
-    String(file && file.metadata && file.metadata.reportKey || '').trim()
-  )).filter(Boolean));
-  const anomalyReports = (Array.isArray(preflightReady.anomalyReports)
+  const outputFiles = Array.isArray(preflightReady.outputFiles) ? preflightReady.outputFiles : [];
+  const anomalyReports = Array.isArray(preflightReady.anomalyReports)
     ? preflightReady.anomalyReports
-    : []).filter((report) => retainedReportKeys.has(String(report.reportKey || '').trim()));
-  results = results.map((item) => {
-    const filteredRowCount = Number(item.filteredRowCount) || 0;
-    if (item.status !== 'ok' || filteredRowCount <= 0) return item;
-    if (!item.anomalyReport
-        || !retainedReportKeys.has(String(item.anomalyReport.reportKey || '').trim())) {
+    : [];
+  for (const item of success) {
+    if (Number(item.filteredRowCount) > 0 && !item.anomalyReport) {
       throw recoveryRequired('已提交文件的异常报告未进入恢复输出集合');
     }
-    return item;
-  });
-  const aggregateReport = preflightReady.anomalyReport
-    && retainedReportKeys.has(String(preflightReady.anomalyReport.reportKey || '').trim())
-    ? preflightReady.anomalyReport
-    : (anomalyReports.length === 1 ? anomalyReports[0] : null);
+  }
+  const jobRoot = jobRootFromPreflight(preflightReady);
   return {
-    status: success.length > 0 || confirmation.length > 0 ? 'ok' : 'failed',
-    code: success.length > 0 ? 'position-import-worker-exit-recovered' : (
-      workerError && workerError.code
-        ? workerError.code
-        : 'position-import-worker-exited'
-    ),
+    status: 'ok',
+    code: 'position-import-worker-exit-recovered',
     message:
       `链接原始表导入恢复完成：成功 ${success.length}，` +
       `待确认 ${confirmation.length}，失败 ${failed.length}`,
+    jobRoot,
+    accountConfirmationDescriptor: preflightReady.accountConfirmationDescriptor || null,
     results,
     orderedFileResults: results,
     successCount: success.length,
     failedCount: failed.length,
     confirmationCount: confirmation.length,
-    inputPaths: committedFiles.map((file) => file.filePath),
-    inputFiles: committedFiles,
-    anomalyReport: aggregateReport,
+    inputPaths: success.flatMap((item) => item.inputPaths),
+    inputFiles: success.flatMap((item) => item.inputFiles),
+    anomalyReport: preflightReady.anomalyReport || null,
     anomalyReports,
     outputPaths: outputFiles.map((file) => file.filePath),
     outputFiles,
-    cleanupPaths: results
-      .filter((item) => item.status !== 'needs-confirmation')
-      .map((item) => item.stagingDir)
-      .filter(Boolean),
-    uncommittedInputPaths: accepted
-      .filter((item) => !committedPaths.has(inputPathKey(item.archivePath)))
-      .map((item) => inputPathKey(item.archivePath)),
+    cleanupPaths: confirmation.length > 0
+      ? results
+        .filter((item) => item.status !== 'needs-confirmation')
+        .map((item) => item.stagingDir)
+        .filter(Boolean)
+      : [jobRoot].filter(Boolean),
     recoveredFromWorkerExit: true,
     committedMutations: chain.committedMutations,
-    checkpoint: chain.currentCheckpoint
+    checkpoint: chain.currentCheckpoint,
+    nextCheckpoint: chain.currentCheckpoint
   };
 }
 
@@ -424,7 +347,6 @@ function recoverPositionImportWorkerExit({
   baseCheckpoint,
   operationToken,
   preflightReady,
-  workerError,
   command
 }) {
   const resolvedPath = path.resolve(String(sideDbPath || ''));
@@ -446,13 +368,16 @@ function recoverPositionImportWorkerExit({
     if (chain.committedMutations === 0 && chain.committedInputs.length === 0) {
       return null;
     }
-    if (command === POSITION_IMPORT_COMMANDS.BANK_APPLY) {
+    if (command === POSITION_IMPORT_COMMANDS.BANK_IMPORT) {
       return rebuildBankResult(db, preflightReady, chain);
     }
     if (command === POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY) {
       return rebuildAccountResult(db, preflightReady, chain);
     }
-    return rebuildOrdinarySourceResult(preflightReady, chain, workerError);
+    if (command === POSITION_IMPORT_COMMANDS.SOURCE_IMPORT) {
+      return rebuildOrdinarySourceResult(db, preflightReady, chain, operationToken);
+    }
+    throw recoveryRequired(`平盘导入命令没有对应的恢复路径：${String(command || '')}`);
   } catch (error) {
     if (error && error.code === 'position-recovery-required') throw error;
     throw recoveryRequired(

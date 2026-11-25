@@ -268,7 +268,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await setup();
     const result = await js(`(async()=>{
       let cancelled=0,applied=0;
-      fixture.api.prepareBankImport=async()=>({status:'needs-confirmation',token:'bank-prepared',fileCount:1,rowCount:12});
+      fixture.api.prepareBankImport=async()=>({status:'needs-confirmation',token:'bank-prepared',fileCount:1,rowCount:12,existing:[{channel:'DBS',monthKey:'2026-07',rowCount:3}]});
       fixture.api.cancelBankImport=async()=>{cancelled++;return {status:'cancelled'};};
       fixture.api.applyBankImport=async()=>{applied++;return {status:'ok'};};
       const task=fixture.ui.handleBankImport();await fixture.tick();await fixture.tick();
@@ -277,6 +277,19 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       return {confirmation,left:left.status,cancelled,applied,count:document.getElementById('modalRoot').children.length};
     })()`);
     assert.deepEqual(result,{confirmation:true,left:'left',cancelled:1,applied:0,count:0});
+  });
+
+  await test('Position 银行导入不覆盖已有数据时不弹确认，直接提交', async () => {
+    await setup();
+    const result = await js(`(async()=>{
+      let cancelled=0;const applied=[];
+      fixture.api.prepareBankImport=async()=>({status:'needs-confirmation',token:'bank-direct',fileCount:1,rowCount:12,existing:[]});
+      fixture.api.cancelBankImport=async()=>{cancelled++;return {status:'cancelled'};};
+      fixture.api.applyBankImport=async token=>{applied.push(token);return {status:'ok',message:'已导入 12 行平盘银行对账单'};};
+      await fixture.ui.handleBankImport();await fixture.tick();
+      return {cancelled,applied,count:document.getElementById('modalRoot').children.length,errors:window.__testErrors};
+    })()`);
+    assert.deepEqual(result,{cancelled:0,applied:['bank-direct'],count:0,errors:[]});
   });
 
   await test('Position 导航取消源表确认时释放本批全部尚未提交 token', async () => {
@@ -321,7 +334,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
   await test('Position 银行写入与账户表替换 IPC 被拒时弹出原因，无未处理异常', async () => {
     await setup();
     const result = await js(`(async()=>{
-      fixture.api.prepareBankImport=async()=>({status:'needs-confirmation',token:'bank-prepared',fileCount:1,rowCount:12});
+      fixture.api.prepareBankImport=async()=>({status:'needs-confirmation',token:'bank-prepared',fileCount:1,rowCount:12,existing:[{channel:'DBS',monthKey:'2026-07',rowCount:3}]});
       fixture.api.applyBankImport=async()=>{throw new Error("Error invoking remote method 'position-reconciliation:bank:apply-import': PositionReconciliationError: 银行导入确认已失效，请重新选择文件");};
       const bankTask=fixture.ui.handleBankImport();await fixture.tick();await fixture.tick();
       fixture.clickText('确认导入');await bankTask;await fixture.tick();
@@ -344,7 +357,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await setup();
     const result = await js(`(async()=>{
       let cancelled=0,applied=0;fixture.write=fixture.deferred();
-      fixture.api.prepareBankImport=async()=>({status:'needs-confirmation',token:'bank-prepared',fileCount:1,rowCount:12});
+      fixture.api.prepareBankImport=async()=>({status:'needs-confirmation',token:'bank-prepared',fileCount:1,rowCount:12,existing:[{channel:'DBS',monthKey:'2026-07',rowCount:3}]});
       fixture.api.cancelBankImport=async()=>{cancelled++;return {status:'cancelled'};};
       fixture.api.applyBankImport=()=>{applied++;return fixture.write.promise;};
       const task=fixture.ui.handleBankImport();await fixture.tick();await fixture.tick();

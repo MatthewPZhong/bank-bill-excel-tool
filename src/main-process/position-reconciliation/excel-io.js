@@ -8,7 +8,6 @@ const XLSX = require('xlsx');
 
 const {
   POSITION_BANK_HEADERS,
-  AUDIT_HEADERS,
   BANK_SHEET_NAME,
   LINK_HEADERS,
   SOURCE_DEFINITIONS
@@ -250,7 +249,7 @@ function readResultWorkbook(filePath) {
   if (!headersEqual(headers, POSITION_BANK_HEADERS)) {
     throw new PositionReconciliationError(
       'position-result-headers-invalid',
-      '回导结果表头不符合固定 49 列契约',
+      `回导结果表头不符合固定 ${POSITION_BANK_HEADERS.length} 列契约`,
       [`实际表头：${headers.join(' / ')}`]
     );
   }

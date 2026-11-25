@@ -8,7 +8,8 @@ const path = require('node:path');
 const ExcelJS = require('exceljs');
 
 const {
-  SOURCE_DEFINITIONS,
+  RAW_VERSION_HEADER,
+  SOURCE_REQUIRED_FIELDS,
   SOURCE_TYPES
 } = require('../../main-process/position-reconciliation/constants');
 const {
@@ -21,6 +22,8 @@ const {
 const {
   hashFileSha256Async
 } = require('../../main-process/position-reconciliation/input-staging');
+const { parseSourceFields } = require('../../main-process/position-reconciliation/source-row-storage');
+const { excelSerialOfSheetJsDate } = require('./xlsx-reader');
 
 const EXCEL_MAX_ROWS = 1048576;
 const REPORT_ARTIFACT_KEY = 'source-import-anomaly-report';
@@ -28,8 +31,10 @@ const REPORT_SOURCE_OPERATION = 'source-import-anomaly-report';
 const SUMMARY_SHEET_NAME = '异常汇总';
 const DETAIL_META_HEADERS = Object.freeze([
   '过滤记录标识', '源文件', 'Sheet', 'Excel行号', '来源类型',
-  '业务单号', 'ReconID', '错误码', '异常原因', '业务日期', '月份'
+  '业务单号', 'ReconID', '错误码', '异常原因', '业务日期', '月份', RAW_VERSION_HEADER
 ]);
+// 导入进程在事务内把过滤行的必用列暂存到这张临时表，供生成异常报告；随连接关闭自动清除。
+const FILTERED_PAYLOAD_TABLE = 'position_import_filtered_payload';
 const TEXT_HEADER_PATTERN = /id|no|code|账号|账户|卡号|单号|流水号|对账|批次号|清算号码|swift|标识/i;
 const COLUMN_WIDTHS = Object.freeze({
   文件名: 44,
@@ -99,15 +104,36 @@ function reasonSummary(value) {
     .join('；');
 }
 
-function excelValueForHeader(header, value) {
-  const normalized = value ?? '';
-  if (normalized === '' || !TEXT_HEADER_PATTERN.test(String(header))) return normalized;
-  return { richText: [{ text: String(normalized) }] };
+// 把读取器给出的 Date 写回报告。ExcelJS 按 UTC 时刻换算日期序号，而读取器给出的是本地时刻，
+// 且带有读取器（SheetJS 口径）在部分时区的秒级偏差：既不能直接写（东八区会偏移 8 小时），
+// 也不能把本地年月日时分秒搬到 UTC（上海的月初 00:00:00 已被读成上月末 23:59:17，照搬仍然跨月）。
+// 先还原来源单元格的日期序号，再换成 ExcelJS 写出同一序号的 Date。只用于写报告，不改变导入解析口径。
+const EXCEL_EPOCH_SERIAL_OF_UNIX_EPOCH = 25569;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function excelReportDate(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return value;
+  const serial = excelSerialOfSheetJsDate(value);
+  return new Date(Math.round((serial - EXCEL_EPOCH_SERIAL_OF_UNIX_EPOCH) * DAY_MS));
 }
 
-function reportDetailValues(item, sourceType, sourceDefinitions = SOURCE_DEFINITIONS) {
-  const definition = sourceDefinitions[sourceType];
-  const headers = [...DETAIL_META_HEADERS, ...definition.headers];
+// 标识类列一律写成文本（与审计列「业务单号」「对账 ID」同一份文本，便于逐列核对），
+// 即使来源单元格被 Excel 识别成了日期；日期换算只用于其余列。
+function excelValueForHeader(header, value) {
+  const normalized = value ?? '';
+  if (normalized === '') return normalized;
+  if (TEXT_HEADER_PATTERN.test(String(header))) return { richText: [{ text: String(normalized) }] };
+  if (normalized instanceof Date) return excelReportDate(normalized);
+  return normalized;
+}
+
+// 过滤明细列：过滤信息 + 该来源保存下来的必用列。
+function detailHeadersFor(sourceType) {
+  return [...DETAIL_META_HEADERS, ...SOURCE_REQUIRED_FIELDS[sourceType]];
+}
+
+function reportDetailValues(item, sourceType) {
+  const headers = detailHeadersFor(sourceType);
   const values = [
     item.reportRowKey,
     item.fileName,
@@ -120,9 +146,27 @@ function reportDetailValues(item, sourceType, sourceDefinitions = SOURCE_DEFINIT
     item.errorReason,
     item.eventDate || '',
     item.monthKey || '',
-    ...definition.headers.map((header) => item.row[header] ?? '')
+    item.rawVersion,
+    ...SOURCE_REQUIRED_FIELDS[sourceType].map((header) => item.row[header] ?? '')
   ];
   return values.map((value, index) => excelValueForHeader(headers[index], value));
+}
+
+function createFilteredPayloadTable(db) {
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS ${FILTERED_PAYLOAD_TABLE} (
+      filtered_id INTEGER PRIMARY KEY,
+      file_index INTEGER NOT NULL,
+      fields_json TEXT NOT NULL
+    );
+    DELETE FROM ${FILTERED_PAYLOAD_TABLE};
+  `);
+}
+
+// 过滤行内容由 serializeSourceFields 写入，日期单元格带类型标记：按配套的方式还原，
+// 报告里写出的是日期本身，而不是内部标记的 JSON 文本。
+function parsePayload(value) {
+  return parseSourceFields(value);
 }
 
 function detailSheetBaseName(sourceType) {
@@ -131,36 +175,23 @@ function detailSheetBaseName(sourceType) {
   throw reportError(`不支持生成异常明细的来源：${sourceType}`);
 }
 
-function normalizedReportFileIndexes(value) {
-  if (!Array.isArray(value) || value.length === 0) return [];
-  const indexes = [...new Set(value.map(Number))];
-  if (indexes.some((index) => !Number.isSafeInteger(index) || index < 0)) {
-    throw new TypeError('异常报告文件索引非法');
-  }
-  return indexes.sort((left, right) => left - right);
-}
-
-// sourceDefinitions：本次导入的链接原始表结构，过滤明细按它出列。
+// 从侧库（事务内、尚未提交）读取本次导入的过滤行生成异常报告。
+// files：本次被接受且含过滤行的文件统计（fileIndex、fileName、sourceType、各行数、原因统计）。
 async function writePositionAnomalyReport({
-  ledger,
-  sourceDefinitions = SOURCE_DEFINITIONS,
+  db,
+  files,
   jobRoot,
   jobId,
-  fileIndexes = [],
   artifactKey = REPORT_ARTIFACT_KEY,
   fileName = `平盘来源异常数据_${String(jobId)}.xlsx`,
   displayRole = '异常数据'
 }) {
-  const selectedIndexes = normalizedReportFileIndexes(fileIndexes);
-  const indexClause = selectedIndexes.length > 0
-    ? ` AND source_file_index IN (${selectedIndexes.map(() => '?').join(', ')})`
-    : '';
-  const filteredCount = Number(ledger.db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM filtered_source_rows
-    WHERE is_owner = 1${indexClause}
-  `).get(...selectedIndexes).count);
+  const reportFiles = (Array.isArray(files) ? files : [])
+    .filter((file) => Number(file.filteredRows) > 0)
+    .sort((left, right) => Number(left.fileIndex) - Number(right.fileIndex));
+  const filteredCount = reportFiles.reduce((sum, file) => sum + Number(file.filteredRows), 0);
   if (filteredCount === 0) return null;
+  const fileIndexes = reportFiles.map((file) => Number(file.fileIndex));
 
   const reportDir = path.join(path.resolve(jobRoot), 'anomaly-report');
   await fs.promises.mkdir(reportDir, { recursive: true, mode: 0o700 });
@@ -172,7 +203,6 @@ async function writePositionAnomalyReport({
   const outputPath = path.join(reportDir, normalizedFileName);
   const temporaryPath = `${outputPath}.${crypto.randomUUID()}.tmp`;
   const reportKey = `${String(jobId)}:${normalizedArtifactKey}`;
-  const selectedIndexSet = new Set(selectedIndexes);
   let workbook;
   try {
     workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
@@ -186,12 +216,9 @@ async function writePositionAnomalyReport({
     ];
     const summary = workbook.addWorksheet(SUMMARY_SHEET_NAME);
     addHeader(summary, summaryHeaders);
-    for (const file of ledger.listFiles().filter((item) => (
-      item.preflightStatus === 'accepted' && Number(item.filteredRows) > 0
-      && (selectedIndexSet.size === 0 || selectedIndexSet.has(Number(item.fileIndex)))
-    ))) {
+    for (const file of reportFiles) {
       const reportRow = summary.addRow([
-        file.originalName,
+        file.fileName,
         file.sourceType,
         file.scannedNonBlankRows,
         file.persistedCandidateRows,
@@ -206,16 +233,29 @@ async function writePositionAnomalyReport({
     }
     summary.commit();
 
+    const readDetails = db.prepare(`
+      SELECT filtered.report_row_key AS reportRowKey,
+             raw.original_name AS fileName, raw.sheet_name AS sheetName,
+             filtered.source_row_number AS rowNumber,
+             filtered.source_type AS sourceType,
+             filtered.business_key AS businessKey, filtered.recon_id AS reconId,
+             filtered.error_code AS errorCode, filtered.error_reason AS errorReason,
+             filtered.event_date AS eventDate, filtered.month_key AS monthKey,
+             filtered.raw_version AS rawVersion, payload.fields_json AS fieldsJson
+      FROM ${FILTERED_PAYLOAD_TABLE} payload
+      JOIN position_filtered_source_rows filtered ON filtered.id = payload.filtered_id
+      JOIN position_raw_files raw ON raw.version = filtered.raw_version
+      WHERE filtered.source_type = ?
+        AND payload.file_index IN (${fileIndexes.map(() => '?').join(', ')})
+      ORDER BY payload.file_index, filtered.source_row_number, filtered.id
+    `);
+    let writtenRows = 0;
     for (const sourceType of [SOURCE_TYPES.FUND_TRANSFER, SOURCE_TYPES.TEST_PAYMENT]) {
-      const definition = sourceDefinitions[sourceType];
-      const headers = [...DETAIL_META_HEADERS, ...definition.headers];
+      const headers = detailHeadersFor(sourceType);
       let sheet = null;
       let sheetIndex = 0;
       let dataRows = 0;
-      for (const item of ledger.iterateFilteredRows({
-        sourceTypes: [sourceType],
-        fileIndexes: selectedIndexes
-      })) {
+      for (const stored of readDetails.iterate(sourceType, ...fileIndexes)) {
         if (!sheet || dataRows >= EXCEL_MAX_ROWS - 1) {
           if (sheet) sheet.commit();
           sheetIndex += 1;
@@ -225,25 +265,31 @@ async function writePositionAnomalyReport({
           sheet = workbook.addWorksheet(name.slice(0, 31));
           addHeader(sheet, headers);
         }
-        const reportRow = sheet.addRow(reportDetailValues(item, sourceType, sourceDefinitions));
+        const reportRow = sheet.addRow(reportDetailValues(
+          { ...stored, row: parsePayload(stored.fieldsJson) },
+          sourceType
+        ));
         reportRow.height = 30;
         reportRow.getCell(9).alignment = { vertical: 'top', wrapText: true };
         reportRow.commit();
         dataRows += 1;
+        writtenRows += 1;
       }
       if (sheet) sheet.commit();
     }
+    if (writtenRows !== filteredCount) {
+      throw reportError('异常报告明细行数与过滤行数不一致', [
+        `过滤 ${filteredCount} 行，写出 ${writtenRows} 行`
+      ]);
+    }
     await workbook.commit();
     await fs.promises.rename(temporaryPath, outputPath);
-    const first = await hashFileSha256Async(outputPath);
+    // 报告是本次生成的产物：发布后算一次 SHA-256 作为存档与后续导出的凭证。
+    const hashed = await hashFileSha256Async(outputPath);
     const stat = await readIdentityStat(fs, outputPath, 'stat');
     const snapshot = sourceSnapshotFromStat(stat);
-    const second = await hashFileSha256Async(outputPath);
-    if (!snapshot
-        || first.sha256 !== second.sha256
-        || first.sizeBytes !== second.sizeBytes
-        || first.sizeBytes !== snapshot.sizeBytes) {
-      throw reportError('异常报告发布后哈希或大小不一致');
+    if (!snapshot || hashed.sizeBytes !== snapshot.sizeBytes) {
+      throw reportError('异常报告发布后大小不一致');
     }
     return {
       reportKey,
@@ -251,13 +297,11 @@ async function writePositionAnomalyReport({
       sourceOperation: REPORT_SOURCE_OPERATION,
       filePath: outputPath,
       fileName: normalizedFileName,
-      sha256: first.sha256,
-      sizeBytes: first.sizeBytes,
+      sha256: hashed.sha256,
+      sizeBytes: hashed.sizeBytes,
       sourceSnapshot: snapshot,
       filteredRowCount: filteredCount,
-      sourceFileIndexes: selectedIndexes.length > 0
-        ? selectedIndexes
-        : ledger.listFilteredFileIndexes(),
+      sourceFileIndexes: fileIndexes,
       role: 'output',
       displayRole: text(displayRole) || '异常数据'
     };
@@ -276,10 +320,14 @@ module.exports = {
   COLUMN_WIDTHS,
   DETAIL_META_HEADERS,
   EXCEL_MAX_ROWS,
+  FILTERED_PAYLOAD_TABLE,
   REPORT_ARTIFACT_KEY,
   REPORT_SOURCE_OPERATION,
   SUMMARY_SHEET_NAME,
   TEXT_HEADER_PATTERN,
+  createFilteredPayloadTable,
+  detailHeadersFor,
+  excelReportDate,
   excelValueForHeader,
   reportDetailValues,
   writePositionAnomalyReport

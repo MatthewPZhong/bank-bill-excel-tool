@@ -91,7 +91,7 @@ const TEMPLATE_RESOURCES = Object.freeze([
   }),
   resource({
     id: 'position-bank', path: 'assets/平盘银行对账单.xlsx', type: 'output', readMode: 'runtime',
-    bindings: [binding('position-reconciliation-process', '结果「渠道对账单」· 49 列', 'runtime')],
+    bindings: [binding('position-reconciliation-process', '结果「渠道对账单」· 20 列', 'runtime')],
     replace: REPLACEABLE, cache: '不缓存，每次生成读取', failure: '生成中止，提示模板不兼容', effect: '下次生成结果'
   }),
   resource({

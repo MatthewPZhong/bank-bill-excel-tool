@@ -8,7 +8,6 @@ const { createPositionTaskOwner } = require('../../src/main-process/position-rec
 const XLSX = require('xlsx');
 const { createPositionReconciliationService } = require('../../src/main-process/position-reconciliation/service');
 const { SOURCE_DEFINITIONS, SOURCE_TYPES } = require('../../src/main-process/position-reconciliation/constants');
-const { dispatchPositionLargeImportSchemaMigration } = require('../../src/main-process/position-reconciliation/import-dispatch');
 const { createPositionSourceImportTaskContract } = require('../../src/main-process/position-reconciliation/interactive-task-preflight');
 const { positionInputFilePlanEvidence, positionFilePlanSettlementFiles } = require('../../src/main-process/position-reconciliation/archive-file-plan-evidence');
 const { createArchiveService } = require('../../src/main-process/archive-center/archive-service');
@@ -148,12 +147,8 @@ async function verifyPositionFilePlanDeletion(parentDirectory, options = {}) {
       operationTokenProvider: () => context.taskRunId,
       authorizeStreamingSourceApply: async (ready) => {
         const baseCheckpoint = position.persistenceCheckpoint();
-        const schema = await dispatchPositionLargeImportSchemaMigration({
-          engine: 'streaming', userDataDir, sideDbPath: position.store.dbPath,
-          expectedCheckpoint: baseCheckpoint, batchContext: context
-        }).promise;
         return { operationToken: context.taskRunId, archiveManifestHash: ready.archiveManifestHash,
-          schemaFingerprint: schema.fingerprint, baseCheckpoint };
+          baseCheckpoint };
       }
     });
     await openArchive();

@@ -16,9 +16,11 @@ const {
 const {
   AUDIT_HEADERS,
   POSITION_BANK_HEADERS,
+  POSITION_BANK_INTERACTION_FIELDS,
   BANK_SHEET_NAME,
   SOURCE_TYPES,
-  SOURCE_DEFINITIONS
+  SOURCE_DEFINITIONS,
+  SOURCE_REQUIRED_FIELDS
 } = require('../../../src/main-process/position-reconciliation/constants');
 const {
   BANK_STATEMENT_FIELDS
@@ -68,7 +70,7 @@ function transferRow(overrides = {}) {
 }
 
 test.describe('平盘导入读取器', () => {
-  test('银行46/49列和XLS均可读取，49列旧审计不会进入工作数据', (t) => {
+  test('银行 46 列、平盘结果导出列和 XLS 均可读取：只取交互字段，结果文件里的审计列不会进入工作数据', (t) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-read-bank-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const legacyPath = path.join(dir, 'legacy.xls');
@@ -83,7 +85,9 @@ test.describe('平盘导入读取器', () => {
 
     const parsed = readBankFiles([legacyPath, positionPath]);
     assert.equal(parsed.records.length, 2);
-    assert.deepEqual(Object.keys(parsed.records[1].workingRow), BANK_STATEMENT_FIELDS);
+    assert.deepEqual(Object.keys(parsed.records[0].workingRow), [...POSITION_BANK_INTERACTION_FIELDS]);
+    assert.deepEqual(Object.keys(parsed.records[1].workingRow), [...POSITION_BANK_INTERACTION_FIELDS]);
+    assert.equal(parsed.records[1].workingRow.BizId, 'BANK-BIZ-2');
     assert.deepEqual(parsed.records[1].audit, Object.fromEntries(
       AUDIT_HEADERS.map((header) => [header, ''])
     ));
@@ -113,34 +117,37 @@ test.describe('平盘导入读取器', () => {
     );
   });
 
-  test('同文件完全重复主键折叠，内容冲突拒绝', (t) => {
+  test('同文件完全相同的行折叠；业务单号相同但内容不同的行各自保留', (t) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-duplicate-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const headers = SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers;
     const duplicatePath = path.join(dir, 'duplicate.xlsx');
-    const conflictPath = path.join(dir, 'conflict.xlsx');
-    const dateConflictPath = path.join(dir, 'date-conflict.xlsx');
+    const differentPath = path.join(dir, 'different.xlsx');
+    const noteOnlyPath = path.join(dir, 'note-only.xlsx');
     writeWorkbook(duplicatePath, 'Sheet1', headers, [transferRow(), transferRow()]);
-    writeWorkbook(conflictPath, 'Sheet1', headers, [
+    writeWorkbook(differentPath, 'Sheet1', headers, [
       transferRow(),
       transferRow({ 收款金额: '96' })
     ]);
-    writeWorkbook(dateConflictPath, 'Sheet1', headers, [
-      transferRow({ 交易时间: new Date(2026, 6, 20) }),
-      transferRow({ 交易时间: new Date(2026, 6, 21) })
+    // 只有非必用列不同：保存下来的内容相同，视为同一条记录。
+    writeWorkbook(noteOnlyPath, 'Sheet1', headers, [
+      transferRow({ 附言: 'A' }),
+      transferRow({ 附言: 'B' })
     ]);
 
     const parsed = readSourceFile(duplicatePath);
     assert.equal(parsed.records.length, 1);
     assert.equal(parsed.collapsedDuplicateCount, 1);
-    assert.throws(() => readSourceFile(conflictPath), /同一文件存在业务主键冲突/);
-    assert.throws(
-      () => readSourceFile(dateConflictPath),
-      /同一文件存在业务主键冲突/
-    );
+    assert.deepEqual(Object.keys(parsed.records[0].row), [...SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.FUND_TRANSFER]]);
+    const different = readSourceFile(differentPath);
+    assert.deepEqual(different.records.map((record) => record.row['收款金额']), ['95', '96']);
+    assert.notEqual(different.records[0].rowHash, different.records[1].rowHash);
+    const noteOnly = readSourceFile(noteOnlyPath);
+    assert.equal(noteOnly.records.length, 1);
+    assert.equal(noteOnly.collapsedDuplicateCount, 1);
   });
 
-  test('同批跨文件重复主键和多份账户快照均拒绝后续文件', (t) => {
+  test('同批跨文件完全相同的行折叠，多份账户快照拒绝后续文件', (t) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-cross-file-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const transferHeaders = SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers;
@@ -149,8 +156,9 @@ test.describe('平盘导入读取器', () => {
     writeWorkbook(first, 'Sheet1', transferHeaders, [transferRow()]);
     writeWorkbook(second, 'Sheet1', transferHeaders, [transferRow()]);
     const duplicateResults = readSourceFiles([first, second]);
-    assert.deepEqual(duplicateResults.map((row) => row.status), ['ok', 'failed']);
-    assert.equal(duplicateResults[1].code, 'position-source-cross-file-conflict');
+    assert.deepEqual(duplicateResults.map((row) => row.status), ['ok', 'ok']);
+    assert.deepEqual(duplicateResults.map((row) => row.rowCount), [1, 0]);
+    assert.equal(duplicateResults[1].collapsedDuplicateCount, 1);
 
     const accountHeaders = SOURCE_DEFINITIONS[SOURCE_TYPES.BANK_ACCOUNT].headers;
     const accountA = path.join(dir, 'account-a.xlsx');

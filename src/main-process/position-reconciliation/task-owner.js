@@ -16,6 +16,7 @@ const {
   assertPositionRecoveryInputsUnchanged,
   positionCommittedRecoveryArchiveFiles,
   positionRecoveryCleanupInputPaths,
+  parsePositionPendingArchiveFiles,
   requirePositionPendingArchiveFiles,
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
@@ -496,7 +497,16 @@ function createPositionTaskOwner({
     const current = readPositionPendingOperation();
     if (options.recovery !== true) {
       if (current.archiveRequired === true && current.archiveState !== 'durable') return;
+      const stagedPaths = (parsePositionPendingArchiveFiles(current) || [])
+        .map((file) => file.filePath);
       clearPositionPendingOperation(operationToken);
+      // pending 存续期间它登记的暂存文件一直受保护，存档完成时的回收因此落空；
+      // pending 清除后补一次回收，仍未存档、待确认或正在导入的文件由保护清单继续保留。
+      try {
+        await cleanupPositionArchiveSourcePaths(stagedPaths);
+      } catch (_error) {
+        // 暂存清理失败留待后续启动回收，不影响已完成的任务收口。
+      }
       return;
     }
     const deletedArchiveResult = options.archiveResult

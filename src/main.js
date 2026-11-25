@@ -136,6 +136,7 @@ const {
 } = require('./main-process/archive-center/position-owned-delete-sources');
 const { createPositionReportDeleteProtection } = require('./main-process/position-reconciliation/archive-report-delete-protection');
 const {
+  findArchivedPositionReportArtifact,
   positionInputFilePlanEvidence
 } = require('./main-process/position-reconciliation/archive-file-plan-evidence');
 const {
@@ -231,15 +232,16 @@ const {
   createPositionSourceImportTaskContract
 } = require('./main-process/position-reconciliation/interactive-task-preflight');
 const {
-  dispatchPositionLargeImportSchemaMigration
-} = require('./main-process/position-reconciliation/import-dispatch');
-const {
   hashFileSha256Async
 } = require('./main-process/position-reconciliation/input-staging');
 const {
   POSITION_SIDE_DB_CHECKPOINT_SETTING,
-  POSITION_SIDE_DB_BOOTSTRAP_SETTING
+  POSITION_SIDE_DB_BOOTSTRAP_SETTING,
+  POSITION_SIDE_DB_PENDING_SETTING
 } = require('./main-process/position-reconciliation/constants');
+const {
+  discardOutdatedPositionSideDb
+} = require('./main-process/position-reconciliation/store');
 const {
   authorizePositionImportApply,
   positionPersistentStagingProtectionPaths,
@@ -21616,8 +21618,9 @@ async function resolvePositionAnomalyReportReference(report = {}) {
   const batch = repository && operationKey
     ? repository.getBatchByOperationKey('position-reconciliation-process', operationKey)
     : null;
-  const artifact = batch && artifactKey
-    ? repository.getArtifactByKey(batch.id, artifactKey)
+  // 侧库记的是生成报告时的键，存档条目的键由文件计划另行分配：按条目里登记的生成键去找。
+  const artifact = batch
+    ? findArchivedPositionReportArtifact(repository, batch.id, artifactKey)
     : null;
   if (!artifact || artifact.status !== 'ready') {
     throw new PositionReconciliationError(
@@ -21636,6 +21639,36 @@ async function resolvePositionAnomalyReportReference(report = {}) {
     );
   }
   return { filePath: readonly.filePath };
+}
+
+// v3.2.22：平盘侧库换新结构（银行行只存交互字段），旧结构的库不迁移，启动时整体丢弃并解除主库绑定，
+// 之后按全新侧库初始化。必须早于任何读取侧库的入口（service、存档删除保护、启动恢复）。
+function discardOutdatedPositionSideDbAtStartup() {
+  try {
+    // 先解除主库绑定再删旧库：三项写入可重复执行，删除放在最后，任何一步中断后下次启动都会重做。
+    const discarded = discardOutdatedPositionSideDb(path.dirname(database.dbPath), {
+      beforeDelete: () => {
+        database.setSetting(POSITION_SIDE_DB_CHECKPOINT_SETTING, '');
+        database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
+        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+      }
+    });
+    if (!discarded) return;
+    appendActivityLogEntry({
+      level: 'info',
+      source: 'main',
+      domain: 'position-reconciliation-side-db-init',
+      message: '平盘侧库为旧版本结构，已丢弃并将按新结构重建'
+    });
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'position-reconciliation-side-db-init',
+      message: '平盘旧版本侧库清理失败',
+      details: [`code=${String(error && error.code ? error.code : 'unknown')}`]
+    });
+  }
 }
 
 function getPositionReconciliationService() {
@@ -21692,23 +21725,14 @@ function getPositionReconciliationService() {
             // Renderer may be closing while the utility process settles.
           }
         },
-        authorizeStreamingSourceApply: async (preflightReady) => {
-          const migration = dispatchPositionLargeImportSchemaMigration({
-            engine: 'streaming',
-            userDataDir: path.dirname(database.dbPath),
-            sideDbPath: service.store.dbPath,
-            expectedCheckpoint: service.persistenceCheckpoint()
-          });
-          const schema = await migration.promise;
-          return authorizePositionImportApply({
-            preflightReady,
-            currentCheckpoint: service.persistenceCheckpoint(),
-            schemaFingerprint: schema.fingerprint,
-            readPending: positionTaskOwner.readPositionPendingOperation,
-            writePending: positionTaskOwner.writePositionPendingOperation,
-            recordArchiveIntentFiles: positionTaskOwner.recordPositionArchiveIntentFiles
-          });
-        }
+        // 链接原始表单遍导入：数据已写在未提交的事务里，这里只登记存档意图并给出提交凭证。
+        authorizeStreamingSourceApply: async (preflightReady) => authorizePositionImportApply({
+          preflightReady,
+          currentCheckpoint: service.persistenceCheckpoint(),
+          readPending: positionTaskOwner.readPositionPendingOperation,
+          writePending: positionTaskOwner.writePositionPendingOperation,
+          recordArchiveIntentFiles: positionTaskOwner.recordPositionArchiveIntentFiles
+        })
       });
       const checkpoint = service.persistenceCheckpoint();
       const recovery = positionTaskOwner.recoverPositionArchiveIntent(
@@ -21895,18 +21919,35 @@ function registerPositionReconciliationHandlers() {
               sourceOperation: 'position-reconciliation:bank:apply-import'
             })),
             outputs: []
-          }
+          },
+          // 任务未接管就结束时回滚等待中的导入，释放侧库写锁。
+          onAbandon: () => getPositionReconciliationService().abandonPreparedBankImport(token)
         };
       },
-      execute: (_event, _prepared, taskContext, token) => (
-        withPositionReconciliationLock('bank-import-apply', () => {
+      execute: async (_event, _prepared, taskContext, token) => {
+        const result = await withPositionReconciliationLock('bank-import-apply', () => {
           return getPositionReconciliationService().applyBankImport(
             token,
             taskContext.batchContext,
             taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)
           );
-        })
-      )
+        });
+        // 模块锁被占时 applyBankImport 没有执行：同样要回滚等待中的导入。此时存档清单已登记这些暂存文件，
+        // 导入进程只回滚事务、不删暂存；文件留给本任务的存档结算，结算后由收尾流程回收。
+        if (result && result.status === 'busy') {
+          await getPositionReconciliationService().abandonPreparedBankImport(token);
+        }
+        return result;
+      }
+    },
+    {
+      // 导入进程在上一步（选择文件）已经开着未提交的事务等确认。确认这一步无论在哪里结束——
+      // 包括 prepare 之前的 Recovery Hold 检查就被拒、此时 onAbandon 还没登记——只要令牌没有被
+      // applyBankImport 用掉，就按令牌回滚并释放侧库写锁；令牌已用掉时这里什么都不做。
+      afterInvocation: async (_event, token) => {
+        if (!positionReconciliationService) return;
+        await positionReconciliationService.abandonPreparedBankImport(token);
+      }
     }
   );
 
@@ -23924,10 +23965,29 @@ function supportIpcHandle(channel, label, handler) {
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
 }
 
-function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
+// afterInvocation：本次调用结束后（成功、失败、被拒都算）执行的领域收尾，用于释放上一步 IPC 留下、
+// 而本次调用可能在 prepare 之前就结束因而无从登记 onAbandon 的资源。收尾失败只记日志，不改变原结果。
+function trackedIpcHandle(channel, moduleKey, functionKey, handler, { afterInvocation = null } = {}) {
   const meta = { channel, moduleKey, functionKey };
   ipcMain.handle(channel, async (event, ...args) => {
-    const result = await runArchiveAwareOperation(meta, event, args, handler);
+    let result;
+    try {
+      result = await runArchiveAwareOperation(meta, event, args, handler);
+    } finally {
+      if (typeof afterInvocation === 'function') {
+        try {
+          await afterInvocation(event, ...args);
+        } catch (error) {
+          appendActivityLogEntry({
+            level: 'warning',
+            source: 'main',
+            domain: 'ipc-task',
+            message: `[${channel}] 调用结束后的资源收尾失败`,
+            details: [error && error.message ? error.message : String(error)]
+          });
+        }
+      }
+    }
     if (isSuccessfulTrackedResult(result, moduleKey)) {
       tickUsageStats(moduleKey, functionKey);
     }
@@ -24218,6 +24278,7 @@ async function initializeApplication() {
     recoverVccStorageMigration({ journalPath: vccStorageMigrationJournalPath() });
     database = new AppDatabase(dataPath);
     database.init({ onStartupPhase: recordStartupPhase });
+    discardOutdatedPositionSideDbAtStartup();
     darkModeScheduler = createDarkModeScheduler({
       readSchedule: () => database.getDarkModeSchedule(),
       writeSchedule: (config) => database.setDarkModeSchedule(config),

@@ -6,7 +6,6 @@ const path = require('node:path');
 const ExcelJS = require('exceljs');
 
 const {
-  SOURCE_DEFINITIONS,
   SOURCE_TYPES
 } = require('./constants');
 const {
@@ -28,6 +27,7 @@ const {
   DETAIL_META_HEADERS,
   EXCEL_MAX_ROWS,
   TEXT_HEADER_PATTERN,
+  detailHeadersFor,
   excelValueForHeader
 } = require('../../backend/position-reconciliation-import/anomaly-report');
 
@@ -223,14 +223,13 @@ async function streamAnomalyDetailRows(filePath, onRow) {
   }
 }
 
-// sourceDefinitions：过滤数据按当前结构出列（设置 → 模板文件的当前版本），缺省为内置结构。
+// 过滤数据的列与导入时生成的异常报告一致：过滤信息 + 该来源保存下来的必用列。
 async function writeRunFilteredSourcesWorkbook({
   outputPath,
   run,
   filteredSources,
   reportFiles,
-  maxDetailRowsPerSheet = EXCEL_MAX_ROWS - 1,
-  sourceDefinitions = SOURCE_DEFINITIONS
+  maxDetailRowsPerSheet = EXCEL_MAX_ROWS - 1
 }) {
   const requested = new Map((Array.isArray(filteredSources) ? filteredSources : []).map(
     (item) => [text(item.reportRowKey), item]
@@ -297,14 +296,8 @@ async function writeRunFilteredSourcesWorkbook({
 
     const detailSheetStates = new Map();
     const detailHeaders = new Map([
-      [SOURCE_TYPES.FUND_TRANSFER, [
-        ...DETAIL_META_HEADERS,
-        ...sourceDefinitions[SOURCE_TYPES.FUND_TRANSFER].headers
-      ]],
-      [SOURCE_TYPES.TEST_PAYMENT, [
-        ...DETAIL_META_HEADERS,
-        ...sourceDefinitions[SOURCE_TYPES.TEST_PAYMENT].headers
-      ]]
+      [SOURCE_TYPES.FUND_TRANSFER, detailHeadersFor(SOURCE_TYPES.FUND_TRANSFER)],
+      [SOURCE_TYPES.TEST_PAYMENT, detailHeadersFor(SOURCE_TYPES.TEST_PAYMENT)]
     ]);
     for (const sourceType of [SOURCE_TYPES.FUND_TRANSFER, SOURCE_TYPES.TEST_PAYMENT]) {
       if (![...requested.values()].some((item) => item.sourceType === sourceType)) continue;

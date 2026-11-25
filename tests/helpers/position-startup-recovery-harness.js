@@ -7,14 +7,21 @@ const { randomUUID } = require('node:crypto');
 const acorn = require('acorn');
 const { bankStatementSourceHeaders, resolveBankStatementStructure } = require('../../src/main-process/bank-statement-structure');
 const { createPositionReconciliationService } = require('../../src/main-process/position-reconciliation/service');
-const { dispatchPositionLargeImportSchemaMigration } = require('../../src/main-process/position-reconciliation/import-dispatch');
 const { authorizePositionImportApply } = require('../../src/main-process/position-reconciliation/operation-lifecycle');
+const { findArchivedPositionReportArtifact } = require('../../src/main-process/position-reconciliation/archive-file-plan-evidence');
+const { PositionReconciliationError } = require('../../src/main-process/position-reconciliation/common');
+const { hashFileSha256Async } = require('../../src/main-process/position-reconciliation/input-staging');
 const constants = require('../../src/main-process/position-reconciliation/constants');
 
 const mainPath = path.resolve(__dirname, '../../src/main.js');
 const mainSource = fs.readFileSync(mainPath, 'utf8');
 const mainAst = acorn.parse(mainSource, { ecmaVersion: 'latest' });
-const functionNames = ['recoverPositionPendingBeforeInterruptedSweep', 'getPositionReconciliationService'];
+const functionNames = [
+  'recoverPositionPendingBeforeInterruptedSweep',
+  'getPositionReconciliationService',
+  // 异常报告取回：暂存已回收时按侧库记录到原存档批次里找报告（生产实现原样执行）。
+  'resolvePositionAnomalyReportReference'
+];
 const source = functionNames.map((name) => {
   const functions = mainAst.body.filter((node) => node.type === 'FunctionDeclaration' && node.id.name === name);
   assert.equal(functions.length, 1, `Main 必须只有一个 ${name} 实现`);
@@ -26,8 +33,9 @@ const source = functionNames.map((name) => {
 function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }) {
   const build = Function('dependencies', `
     'use strict';
-    const { database, path, randomUUID, __dirname, createPositionReconciliationService,
-      dispatchPositionLargeImportSchemaMigration, authorizePositionImportApply,
+    const { database, fs, path, randomUUID, __dirname, createPositionReconciliationService,
+      authorizePositionImportApply, findArchivedPositionReportArtifact, PositionReconciliationError,
+      hashFileSha256Async,
       POSITION_SIDE_DB_CHECKPOINT_SETTING, POSITION_SIDE_DB_BOOTSTRAP_SETTING,
       appendActivityLogEntry, trackArchiveOperationPromise, getTemplateResourceService,
       resolvePositionSourceStructures, bankStatementSourceHeaders, resolveBankStatementStructure } = dependencies;
@@ -36,7 +44,6 @@ function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }
     let positionReconciliationService = null;
     let positionPendingRecoveryPromise = Promise.resolve();
     const mainWindow = null;
-    const resolvePositionAnomalyReportReference = () => { throw new Error('本测试不导出异常报告'); };
     const initializeArchiveCenter = () => { throw new Error('测试必须先装配真实 Archive Controller'); };
     ${source}
     return {
@@ -48,9 +55,10 @@ function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }
       close() { if (positionReconciliationService) positionReconciliationService.close(); }
     };
   `);
-  return build({ database, path, randomUUID, __dirname: path.dirname(mainPath),
-    createPositionReconciliationService, dispatchPositionLargeImportSchemaMigration,
-    authorizePositionImportApply, ...constants,
+  return build({ database, fs, path, randomUUID, __dirname: path.dirname(mainPath),
+    createPositionReconciliationService,
+    authorizePositionImportApply, findArchivedPositionReportArtifact, PositionReconciliationError,
+    hashFileSha256Async, ...constants,
     // 恢复测试不涉及模板版本：来源为空时服务沿用固定的内置模板路径。
     getTemplateResourceService: () => ({ source: () => null }),
     // 链接原始表结构不注入解析器时，服务按内置结构导入。
