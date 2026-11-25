@@ -56,10 +56,12 @@
     // 以 __ 开头的普通列名、其他字段上与标记同名的真实列名照常按源字段处理。
     const INTERNAL_MAPPING_VALUE_PREFIX = '__FIXED__:';
     const MERCHANT_ID_CURRENCY_ONLY_MARKER = '__CURRENCY_ONLY_BIG_ACCOUNT__';
-    function ensureStaleFieldOption(select, value, targetField) {
+    // literal：值一定是源列名（如特征值的筛选字段），不按内部存储值跳过（v3.2.22）
+    function ensureStaleFieldOption(select, value, targetField, { literal = false } = {}) {
       const normalized = String(value ?? '').trim();
-      if (!select || !normalized || normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
-      if (targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
+      if (!select || !normalized) return false;
+      if (!literal && normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
+      if (!literal && targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
       if (Array.from(select.options).some((option) => option.value === normalized)) return false;
       const option = document.createElement('option');
       option.value = normalized;
@@ -1446,7 +1448,11 @@
       { value: 'slash', label: '/' },
       { value: 'comma', label: ',' },
       { value: 'dot', label: '.' },
-      { value: 'backslash', label: '\\' }
+      { value: 'backslash', label: '\\' },
+      // v3.2.22：新增 - _ $
+      { value: 'hyphen', label: '-' },
+      { value: 'underscore', label: '_' },
+      { value: 'dollar', label: '$' }
     ];
     const FEATURE_FILTER_MAX_LENGTH = 200;
     const FEATURE_FILTER_NAME_MAX_LENGTH = 30;
@@ -1472,7 +1478,9 @@
     function splitFeatureFilterText(text, separator) {
       const value = String(text ?? '').trim();
       if (!value) return [];
-      const splitter = { space: /\s+/u, slash: '/', comma: ',', dot: '.', backslash: '\\' }[separator];
+      const splitter = {
+        space: /\s+/u, slash: '/', comma: ',', dot: '.', backslash: '\\', hyphen: '-', underscore: '_', dollar: '$'
+      }[separator];
       if (!splitter) return [value];
       return value.split(splitter).map((part) => part.trim()).filter((part) => part !== '');
     }
@@ -1639,7 +1647,10 @@
 
     // v3.2.18「特征值管理」（原「筛选特征值」）：新增、选中修改、删除特征值；【保存】与确认删除立即写入模板（spec D7）。
     //   getUsage()：各弹窗草稿中选用各特征值的字段；onChange(list)：保存或删除成功后回传最新列表；onClose()：弹窗关闭。
-    function createFeatureFilterManagerDialog({ templateId, headers = [], featureFilters = [], getUsage, onChange, onClose }) {
+    function createFeatureFilterManagerDialog({
+      templateId, headers = [], featureFilters = [], getUsage, onChange, onClose,
+      resultUncertain: initialResultUncertain = false, onResultUncertain
+    }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card feature-filter-card';
@@ -1712,14 +1723,37 @@
           : '整段都是数字';
       }
 
+      // v3.2.22：设置区控件的当前值（原样，不做规范化）；回显已有特征值后记为快照，用来判断用户是否改动
+      let formSnapshot = null;
+      // v3.2.22：任一次保存或删除失败后，库中结果不确定（如已写库、同步模板库文件失败），之后的【保存】一律提交，
+      //   不再按快照跳过（切换特征值再选回会重建快照，不能靠作废快照）。失败后关闭再从同一主弹窗重开时由主弹窗带入；
+      //   保存或删除成功后列表以后端回包为准，恢复按快照判断。
+      let resultUncertain = Boolean(initialResultUncertain);
+      function markResultUncertain() {
+        resultUncertain = true;
+        if (typeof onResultUncertain === 'function') onResultUncertain();
+      }
+      function readDraft() {
+        return {
+          name: nameInput.value,
+          sourceField: sourceSelect.value,
+          separator: separatorSelect.value,
+          length: lengthInput.value,
+          letterPrefixCount: prefixInput.value,
+          digitsOnly: digitsInput.checked,
+          sample: sampleInput.value
+        };
+      }
+
       function showForm(item) {
         nameInput.value = item ? String(item.name || '') : '';
-        // 模板【更新】后筛选字段可能已不在表头：显示为「X（已删除）」并标红，保存前须重新选择
+        // 模板【更新】后筛选字段可能已不在表头：显示为「X（已删除）」并标红，改动后保存前须重新选择
+        //   筛选字段一定是源列名，以 __FIXED__: 开头的列名同样标出
         sourceSelect.querySelectorAll('option[data-stale="true"]').forEach((option) => option.remove());
         sourceSelect.classList.remove('is-stale');
         const sourceField = item ? String(item.sourceField || '').trim() : '';
         sourceSelect.value = sourceField;
-        if (sourceField && sourceSelect.value !== sourceField) ensureStaleFieldOption(sourceSelect, sourceField, '');
+        if (sourceField && sourceSelect.value !== sourceField) ensureStaleFieldOption(sourceSelect, sourceField, '', { literal: true });
         separatorSelect.value = item ? String(item.separator || '') : 'space';
         lengthInput.value = item && item.length ? String(item.length) : '';
         prefixInput.value = item && item.letterPrefixCount ? String(item.letterPrefixCount) : '';
@@ -1727,10 +1761,12 @@
         sampleInput.value = item ? String(item.sample || '') : '';
         syncDigitsLabel();
         body.hidden = false;
+        formSnapshot = item ? readDraft() : null;
       }
 
       function hideForm() {
         editingId = null;
+        formSnapshot = null;
         body.hidden = true;
       }
 
@@ -1738,7 +1774,26 @@
         renderFeatureFilterOptions(pickSelect, currentList, selectedId);
       }
 
-      renderPick('');
+      // v3.2.22：特征值下拉默认空白；已有特征值时默认选中最早新增的一个并回显（列表即新增顺序：新增追加在末尾，保存保序）
+      function applyDefaultSelection() {
+        const first = currentList[0] || null;
+        renderPick(first ? first.id : '');
+        if (!first) {
+          hideForm();
+          return;
+        }
+        editingId = String(first.id);
+        showForm(first);
+      }
+
+      // v3.2.22：正在修改的已有特征值，设置区与回显时的快照一致（如打开后默认选中即点【保存】）视为未改动。
+      //   按控件值比较：单行输入框会去掉模板包带入的换行、无法回显的值显示为空，与库中原文比较会误判为改动。
+      function isDraftUnchanged(draft) {
+        if (!formSnapshot) return false;
+        return Object.keys(formSnapshot).every((key) => formSnapshot[key] === draft[key]);
+      }
+
+      applyDefaultSelection();
       syncDigitsLabel();
 
       pickSelect.addEventListener('change', () => {
@@ -1803,14 +1858,15 @@
               } finally { confirmScope.finish(handle); }
               if (!confirmScope.isCurrent(handle)) return;
               if (result?.status !== 'success') {
+                markResultUncertain();
                 alertOn(confirmation, result?.message || '删除特征值失败');
                 return;
               }
               const closed = closeModal(handle, { status: 'submitted' });
               if (closed.status !== 'closed') return;
               currentList = cloneFeatureFilters(result.featureFilters);
-              renderPick('');
-              hideForm();
+              resultUncertain = false;
+              applyDefaultSelection();
               if (typeof onChange === 'function') onChange(cloneFeatureFilters(currentList));
             }
           });
@@ -1827,27 +1883,32 @@
       dialog.querySelector('.icon-close').addEventListener('click', () => closeManager('cancelled'));
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => closeManager('cancelled'));
       dialog.querySelector('[data-action="save"]').addEventListener('click', async () => {
-        if (editingId === null) {
+        // 空选（设置区隐藏）或已有特征值未改动：结果确定时直接关闭、不写库
+        const draft = editingId === null ? null : readDraft();
+        const unchanged = editingId === null || (Boolean(editingId) && isDraftUnchanged(draft));
+        if (unchanged && !resultUncertain) {
           closeManager('submitted');
           return;
         }
-        const others = currentList.filter((item) => String(item.id) !== editingId);
-        const { errors, rule } = validateFeatureFilterDraft({
-          name: nameInput.value,
-          sourceField: sourceSelect.value,
-          separator: separatorSelect.value,
-          length: lengthInput.value,
-          letterPrefixCount: prefixInput.value,
-          digitsOnly: digitsInput.checked,
-          sample: sampleInput.value
-        }, headers, others);
-        if (errors.length) {
-          pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
-          return;
+        let nextList;
+        if (unchanged) {
+          // 结果不确定时按界面所示的列表原样提交：由后端对照库中现值校验，不按前端表头拦下已删除的筛选字段，
+          //   也不经单行输入框改写名称、样例中的换行
+          nextList = cloneFeatureFilters(currentList);
+        } else {
+          // 名称未编辑时沿用库中原名（单行输入框回显时会去掉其中的换行）；快照在失败后保留，重试时同样沿用
+          const original = editingId ? findFeatureFilterById(currentList, editingId) : null;
+          if (original && formSnapshot && draft.name === formSnapshot.name) draft.name = String(original.name ?? '');
+          const others = currentList.filter((item) => String(item.id) !== editingId);
+          const { errors, rule } = validateFeatureFilterDraft(draft, headers, others);
+          if (errors.length) {
+            pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
+            return;
+          }
+          nextList = editingId
+            ? currentList.map((item) => (String(item.id) === editingId ? { ...rule, id: editingId } : item))
+            : currentList.concat([{ ...rule }]);
         }
-        const nextList = editingId
-          ? currentList.map((item) => (String(item.id) === editingId ? { ...rule, id: editingId } : item))
-          : currentList.concat([{ ...rule }]);
         const handle = writeScope.begin();
         if (!handle) return;
         let result;
@@ -1858,6 +1919,8 @@
         } finally { writeScope.finish(handle); }
         if (!writeScope.isCurrent(handle)) return;
         if (result?.status !== 'success') {
+          // 失败时库中结果不确定（如已写库、同步模板库文件失败）：之后的【保存】一律提交
+          markResultUncertain();
           alertOn(overlay, result?.message || '保存特征值失败');
           return;
         }
@@ -4989,6 +5052,8 @@
       let currentPreprocessRowFilterRules = cloneRowFilterRules(payload.template && payload.template.preprocessRowFilterRules);
       // v3.2.18：模板的特征值列表（【特征值管理】保存/删除即时落库后回写）；各行在「选择特征值」中选用。
       let currentFeatureFilters = cloneFeatureFilters(payload.template && payload.template.featureFilters);
+      // v3.2.22：特征值管理保存或删除失败后库中结果不确定；关闭后从本弹窗重开【管理】时带入，成功后清除
+      let featureFilterResultUncertain = false;
       // v3.2.21：模板日期格式草稿（「个性化映射设置 → 日期格式」，点【保存】时随映射提交）；不在三档内按 auto
       let currentDateFormat = TEMPLATE_DATE_FORMAT_OPTIONS.some((option) => option.value === payload.dateFormat)
         ? payload.dateFormat
@@ -5135,6 +5200,7 @@
 
         if (fieldName === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD) {
           renderAmountSplitToggleRow(fieldName);
+          renderFeatureFilterSettingRow();
           return;
         }
 
@@ -5167,7 +5233,8 @@
             || (!supportsMultiSelect && savedMapping.mappedField === LOGIC_VALUE_MAPPING_FIELD)
           )))
           .join('');
-        // v3.2.19：「选择特征值」+ 下拉框 +【特征值管理】成组，与映射字段下拉框同行；空间不足时整组换行
+        // v3.2.19：「选择特征值」+ 下拉框成组，与映射字段下拉框同行；空间不足时整组换行
+        //   v3.2.22：行内不再有【特征值管理】，改在「个性化映射设置 → 特征值设置」点【管理】
         // v3.2.19：「逻辑取值」时下拉框右侧显示【设置】与当前候补顺序
         row.innerHTML = `
           <td>${escapeHtml(fieldName)}</td>
@@ -5178,7 +5245,6 @@
                 <span class="mapping-feature-value-group" hidden>
                   <span class="mapping-feature-value-label" hidden>选择特征值</span>
                   <select class="mapping-select mapping-feature-value-select" hidden></select>
-                  <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
                 </span>
                 <button class="secondary-btn small mapping-logic-value-btn" type="button" hidden>设置</button>
                 <span class="mapping-logic-value-preview" hidden></span>
@@ -5204,7 +5270,6 @@
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
         const manageCurrencyBigAccountBtn = row.querySelector('.mapping-currency-big-account-manage-btn');
-        const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
         const featureValueGroup = row.querySelector('.mapping-feature-value-group');
         const featureValueLabel = row.querySelector('.mapping-feature-value-label');
         const featureValueSelect = row.querySelector('.mapping-feature-value-select');
@@ -5355,10 +5420,9 @@
           if (manageCurrencyBigAccountBtn) {
             manageCurrencyBigAccountBtn.hidden = selectedValue !== MERCHANT_ID_CURRENCY_ONLY_OPTION;
           }
-          if (featureFilterBtn) {
+          if (featureValueGroup) {
             const isFeatureFilterMode = selectedValue === FEATURE_FILTER_MAPPING_FIELD;
             featureValueGroup.hidden = !isFeatureFilterMode;
-            featureFilterBtn.hidden = !isFeatureFilterMode;
             featureValueLabel.hidden = !isFeatureFilterMode;
             featureValueSelect.hidden = !isFeatureFilterMode;
           }
@@ -5450,12 +5514,9 @@
           });
         }
 
-        if (featureFilterBtn) {
+        if (featureValueSelect) {
           featureValueSelect.addEventListener('change', () => {
             featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
-          });
-          featureFilterBtn.addEventListener('click', () => {
-            openFeatureFilterManager();
           });
         }
 
@@ -5473,8 +5534,8 @@
         tbody.appendChild(row);
       });
 
-      // v3.2.21：「启用」列——从「原始账单预处理」标题行到最后一个勾选行，两侧竖线贯穿，勾选框居于竖线中间。
-      //   缺标题行或其后没有勾选行（旧载荷）时不加列，勾选框保持在文字右侧。
+      // v3.2.21：「启用」列——从「原始账单预处理」标题行到最后一个勾选行，勾选框居于「启用」列头正下方。
+      //   v3.2.22：去掉列两侧的竖线。缺标题行或其后没有勾选行（旧载荷）时不加列，勾选框保持在文字右侧。
       (function markEnableColumnRows() {
         const rows = Array.from(tbody.rows);
         const startIndex = rows.findIndex((item) => item.dataset.enableHead === 'true');
@@ -5485,8 +5546,6 @@
           return;
         }
         rows.slice(startIndex, endIndex + 1).forEach((item) => item.classList.add('mapping-enable-span'));
-        rows[startIndex].classList.add('mapping-enable-span-start');
-        rows[endIndex].classList.add('mapping-enable-span-end');
       })();
 
       // v3.2.19：取值只有 是 / 否（空白）的行用勾选框（勾选 = 是）：文字在左、勾选框紧跟其右；
@@ -5602,6 +5661,24 @@
           onToggle: () => applyAmountSplitMutualExclusion(),
           onButtonClick: () => openAmountSplitRulesDialog()
         });
+      }
+
+      // v3.2.22：「个性化映射设置」中「按字段区分发生额」下方的「特征值设置」——右侧【管理】打开特征值管理（原映射行内的【特征值管理】）。
+      //   不是映射行：不写 data-template-field，collectMappingDraftFromTable 不收集；载荷没有「按字段区分发生额」（旧载荷）时不渲染。
+      function renderFeatureFilterSettingRow() {
+        const row = document.createElement('tr');
+        row.className = 'mapping-setting-row';
+        row.dataset.role = 'feature-filter-setting';
+        row.innerHTML = `
+          <td>特征值设置</td>
+          <td>
+            <div class="mapping-field-editor">
+              <button class="secondary-btn small feature-filter-manage-btn" type="button">管理</button>
+            </div>
+          </td>
+        `;
+        row.querySelector('.feature-filter-manage-btn').addEventListener('click', () => openFeatureFilterManager());
+        tbody.appendChild(row);
       }
 
       // v3.2.19：原始账单预处理——「过滤账单」勾选后显示【规则设置】；「重复账单过滤」只有勾选框；与拆分/合并无关，始终可用
@@ -5803,13 +5880,8 @@
           preprocessFields: preprocessFields.slice(),
           advancedMappingFields: advancedMappingFields.slice(),
           billSplitGroupFields: billSplitGroupFields.slice(),
-          // v3.2.18：与主映射共用特征值列表；拆分弹窗里的【特征值管理】即时落库后回写主映射
+          // v3.2.18：与主映射共用特征值列表；v3.2.22 起特征值只在主弹窗「特征值设置 →【管理】」维护，拆分弹窗只选用
           featureFilters: currentFeatureFilters,
-          getMainFeatureFilterUsage: () => collectFeatureFilterUsage(collectMappingDraftFromTable(tbody)),
-          onFeatureFiltersChange: (nextFeatureFilters) => {
-            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
-            refreshFeatureValueSelects();
-          },
           onDone: (nextMappings) => {
             currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
             // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
@@ -5872,13 +5944,18 @@
           templateId: payload.template.id,
           headers: payload.template.headers || [],
           featureFilters: currentFeatureFilters,
+          resultUncertain: featureFilterResultUncertain,
           getUsage: () => collectFeatureFilterUsage(
             currentBillSplitMappings,
             FEATURE_FILTER_SPLIT_USAGE_SUFFIX,
             collectFeatureFilterUsage(collectMappingDraftFromTable(tbody))
           ),
+          onResultUncertain: () => {
+            featureFilterResultUncertain = true;
+          },
           onChange: (nextFeatureFilters) => {
             currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
+            featureFilterResultUncertain = false;
             refreshFeatureValueSelects();
           },
           onClose: () => {
@@ -5921,21 +5998,18 @@
 
         function setRowDisabled(row, control, disabled) {
           if (!row || !control) return;
-          // v3.2.16：互斥禁用时【特征值管理】按钮与「选择特征值」随下拉框一起禁用
-          const featureFilterButton = row.querySelector('.mapping-feature-filter-btn');
+          // v3.2.16：互斥禁用时「选择特征值」随下拉框一起禁用
           const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           // v3.2.19：逻辑取值的【设置】同样随行禁用
           const logicValueButton = row.querySelector('.mapping-logic-value-btn');
           if (disabled) {
             row.classList.add('mapping-row-mutex-disabled');
             control.disabled = true;
-            if (featureFilterButton) featureFilterButton.disabled = true;
             if (featureValueSelect) featureValueSelect.disabled = true;
             if (logicValueButton) logicValueButton.disabled = true;
           } else {
             row.classList.remove('mapping-row-mutex-disabled');
             control.disabled = false;
-            if (featureFilterButton) featureFilterButton.disabled = false;
             if (featureValueSelect) featureValueSelect.disabled = false;
             if (logicValueButton) logicValueButton.disabled = false;
           }
@@ -6322,16 +6396,14 @@
       advancedMappingFields = [],
       billSplitGroupFields = [],
       featureFilters = [],
-      getMainFeatureFilterUsage = null,
-      onFeatureFiltersChange = null,
       onDone,
       onCancel
     }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card bill-split-mappings-card';
-      // v3.2.18：与主映射共用特征值列表；【特征值管理】即时落库后经 onFeatureFiltersChange 回写主映射弹窗。
-      let currentFeatureFilters = cloneFeatureFilters(featureFilters);
+      // v3.2.18：与主映射共用特征值列表；v3.2.22 起本弹窗只选用，特征值在主弹窗「特征值设置 →【管理】」维护。
+      const currentFeatureFilters = cloneFeatureFilters(featureFilters);
 
       // 模板字段列表 = targetFields 排除 Currency / Credit Amount / Debit Amount + 高级字段 + bill-split group 字段
       const excludeFields = new Set([
@@ -6421,7 +6493,6 @@
                 ${supportsMultiSelect ? `
                 <span class="mapping-feature-value-label" hidden>选择特征值</span>
                 <select class="mapping-select mapping-feature-value-select" hidden></select>
-                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
                 ` : ''}
                 ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
@@ -6438,7 +6509,6 @@
           `;
 
           const select = row.querySelector('.bill-split-mapping-select');
-          const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
           const featureValueLabel = row.querySelector('.mapping-feature-value-label');
           const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           const concatPicker = row.querySelector('.concat-field-picker');
@@ -6506,14 +6576,11 @@
             });
           }
 
-          if (featureFilterBtn) {
+          if (featureValueSelect) {
             featureValueSelect.addEventListener('change', () => {
               entry.featureFilterRef = featureValueSelect.value;
               syncFeatureFilterRef();
               featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
-            });
-            featureFilterBtn.addEventListener('click', () => {
-              openFeatureFilterManager();
             });
           }
 
@@ -6526,8 +6593,7 @@
           function syncEditorState() {
             const isConcatMode = select.value === CONCAT_FIELDS_MAPPING_FIELD;
             const isFeatureFilterMode = select.value === FEATURE_FILTER_MAPPING_FIELD;
-            if (featureFilterBtn) {
-              featureFilterBtn.hidden = !isFeatureFilterMode;
+            if (featureValueSelect) {
               featureValueLabel.hidden = !isFeatureFilterMode;
               featureValueSelect.hidden = !isFeatureFilterMode;
             }
@@ -6560,40 +6626,6 @@
       function validateLocalMappings() {
         // 校验：同字段不可重复（已通过结构保证），空字段会被后端丢弃，无需前端报错
         return true;
-      }
-
-      // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」（保留已选）。
-      //   已删除特征值的缓存引用一并清掉：删除最大 id 后再新增会沿用该 id，残留引用切回时会指向新特征值而界面显示空白。
-      function refreshFeatureValueSelects() {
-        currentDialogMappings.forEach((entry) => {
-          if (!entry.featureFilterRef || findFeatureFilterById(currentFeatureFilters, entry.featureFilterRef)) return;
-          entry.featureFilterRef = '';
-          if (entry.mappedField === FEATURE_FILTER_MAPPING_FIELD) entry.mappedFields = [];
-        });
-        tbody.querySelectorAll('.mapping-feature-value-select').forEach((featureValueSelect) => {
-          renderFeatureFilterOptions(featureValueSelect, currentFeatureFilters, featureValueSelect.value);
-        });
-      }
-
-      function openFeatureFilterManager() {
-        pushModal(overlay, () => createFeatureFilterManagerDialog({
-          templateId: template.id,
-          headers,
-          featureFilters: currentFeatureFilters,
-          getUsage: () => collectFeatureFilterUsage(
-            currentDialogMappings,
-            FEATURE_FILTER_SPLIT_USAGE_SUFFIX,
-            typeof getMainFeatureFilterUsage === 'function' ? getMainFeatureFilterUsage() : new Map()
-          ),
-          onChange: (nextFeatureFilters) => {
-            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
-            refreshFeatureValueSelects();
-            if (typeof onFeatureFiltersChange === 'function') onFeatureFiltersChange(cloneFeatureFilters(currentFeatureFilters));
-          },
-          onClose: () => {
-            returnToModal(overlay);
-          }
-        }));
       }
 
       // 返回因「逻辑取值」留空的字段（拆分/合并账单映射不支持该值）。

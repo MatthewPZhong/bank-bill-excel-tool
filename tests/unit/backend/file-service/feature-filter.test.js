@@ -50,6 +50,19 @@ test('五种分隔符与不拆分各自按口径拆段', () => {
   assert.deepEqual(splitFeatureTokens(null, 'space'), []);
 });
 
+test('v3.2.22：新增分隔符 - _ $ 按字符拆段（$ 不当正则），规则与样例校验接受新键', () => {
+  assert.deepEqual(splitFeatureTokens('PAY-FT24123456 - REF', 'hyphen'), ['PAY', 'FT24123456', 'REF']);
+  assert.deepEqual(splitFeatureTokens('A__B_C', 'underscore'), ['A', 'B', 'C']);
+  assert.deepEqual(splitFeatureTokens('$A$ B$$C', 'dollar'), ['A', 'B', 'C']);
+  // 不拆分的分隔符不影响其他符号：选 - 时 _ $ 仍在段内
+  assert.deepEqual(splitFeatureTokens('A_1-B$2', 'hyphen'), ['A_1', 'B$2']);
+  const byDollar = rule({ separator: 'dollar', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' });
+  assert.equal(byDollar.separator, 'dollar');
+  assert.equal(extractFeatureValue('付款$FT24123456$备注', byDollar), 'FT24123456');
+  assert.equal(extractFeatureValue('ORD_123456_X', rule({ separator: 'underscore', digitsOnly: true, length: 6 })), '123456');
+  assertRuleError({ separator: 'hyphen', length: 5, sample: 'AB-CD' }, /不能包含所选分隔符/);
+});
+
 test('前 N 位英文 + 纯数字组合：其余位须全为数字，取第一个命中段', () => {
   const r = rule({ length: 10, letterPrefixCount: 2, digitsOnly: true });
   assert.equal(extractFeatureValue('付款 FT2412345X FT24123456 AB98765432', r), 'FT24123456');
