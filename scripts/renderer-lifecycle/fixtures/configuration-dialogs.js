@@ -2197,6 +2197,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await expectAlert(`cfg.ff().name.value='流水号'`, /特征值名「流水号」已存在/);
     await expectAlert(`cfg.ff().name.value=' '`, /请输入特征值名/);
     await expectAlert(`cfg.ff().name.value='订单编号';cfg.ff().sample.value='12/3456'`, /输入特征值「12\/3456」不能包含所选分隔符/);
+    // v3.2.22 新分隔符：样例含所选分隔符同样拦下（与后端同口径）；之后按 $ 保存
+    await expectAlert(`cfg.ff().separator.value='hyphen';cfg.ff().sample.value='12-456'`, /输入特征值「12-456」不能包含所选分隔符/);
+    await expectAlert(`cfg.ff().separator.value='underscore';cfg.ff().sample.value='12_456'`, /输入特征值「12_456」不能包含所选分隔符/);
+    await expectAlert(`cfg.ff().separator.value='dollar';cfg.ff().sample.value='12$456'`, /输入特征值「12\$456」不能包含所选分隔符/);
     await expectAlert(`cfg.ff().sample.value='AB1234'`, /输入特征值「AB1234」不符合当前筛选条件/);
     await expectAlert(`cfg.ff().sample.value='';cfg.ff().length.value='';cfg.ff().digits.checked=false`, /特征长度、前几位英文、纯数字至少设置一项/);
     await expectAlert(`cfg.ff().source.value='';cfg.ff().length.value='3'`, /请选择筛选字段/);
@@ -2208,7 +2212,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('Boolean(cfg.ff())'), true);
 
     await js('cfg.ff().save.click();'); await tick();
-    assert.deepEqual(await js('cfg.featureSaves()[1].featureFilters.map(item=>[item.id,item.name])'), [['1', '流水号'], ['2', '订单编号']]);
+    assert.deepEqual(await js('cfg.featureSaves()[1].featureFilters.map(item=>[item.id,item.name,item.separator])'), [['1', '流水号', 'space'], ['2', '订单编号', 'dollar']]);
     assert.equal(await js('cfg.top()===cfg.overlay'), true);
     assert.deepEqual(await js(`[cfg.fv('Remark').value,cfg.fv('Remark').selectedOptions[0].textContent]`), ['2', '订单编号']);
 
@@ -2248,6 +2252,138 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`cfg.ff().save.click();`); await tick();
     assert.deepEqual(await js(`cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id,item.sourceField]))`),
       [[['1', '附言'], ['2', '附言']]]);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：名称含换行、筛选字段为以 __FIXED__: 开头的已删除列时，未改动【保存】直接关闭；只改条件时保留原名', async () => {
+    await setup();
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([{ ...SERIAL, name: '流水\n号', sourceField: '__FIXED__:流水' }])}`);
+    await js(`cfg.manage().click();`);
+    assert.deepEqual(await js(`(()=>{const s=cfg.ff().source;return [cfg.ff().name.value,s.value,s.selectedOptions[0].textContent,s.classList.contains('is-stale')];})()`),
+      ['流水号', '__FIXED__:流水', '__FIXED__:流水（已删除）', true]);
+    await js(`cfg.ff().save.click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true, '未改动直接关闭');
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+    await js(`cfg.manage().click();const s=cfg.ff().source;s.value='附言';s.dispatchEvent(new Event('change'));cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id,item.name,item.sourceField]))'),
+      [[['1', '流水\n号', '附言']]], '名称未编辑时沿用原名（含换行）');
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：保存失败后把条件改回原值再【保存】仍提交（失败时库中结果不确定）', async () => {
+    await setup();
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL])}`);
+    await js(`cfg.manage().click();cfg.ff().length.value='9';cfg.ff().sample.value='';
+      cfg.next.featureSave={status:'error',message:'同步模板库文件失败（测试）'};cfg.ff().save.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /同步模板库文件失败（测试）/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.ff().length.value='10';cfg.ff().sample.value='FT24123456';cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id,item.length,item.sample]))'),
+      [[['1', 9, '']], [['1', 10, 'FT24123456']]]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：保存或删除失败后，直接重试、切到别项再选回的【保存】都提交；名称未编辑时每次都沿用原名（含换行）', async () => {
+    await setup();
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([{ ...SERIAL, name: '流水\n号' }, ORDER])}`);
+    await js(`cfg.manage().click();cfg.ff().length.value='9';cfg.ff().sample.value='';
+      cfg.next.featureSave={status:'busy',message:'正在处理其他任务（测试）'};cfg.ff().save.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /正在处理其他任务（测试）/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.next.featureSave={status:'error',message:'同步模板库文件失败（测试）'};cfg.ff().save.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /同步模板库文件失败（测试）/);
+    await js('cfg.host.closeTop();');
+    // 切到别项再选回会重建快照；本次打开期间已有失败，未改动也提交
+    await js(`cfg.pickFeature('2');cfg.pickFeature('1');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id,item.name,item.length]))'),
+      [[['1', '流水\n号', 9], ['2', '订单号', 6]], [['1', '流水\n号', 9], ['2', '订单号', 6]], [['1', '流水\n号', 10], ['2', '订单号', 6]]]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    // 重新打开：未改动直接关闭；删除失败后未改动的【保存】同样提交
+    await js(`cfg.manage().click();cfg.ff().save.click();`); await tick();
+    assert.equal(await js('cfg.featureSaves().length'), 3);
+    await js(`cfg.manage().click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    await js(`cfg.next.featureSave={status:'error',message:'同步模板库文件失败（测试）'};cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /同步模板库文件失败（测试）/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.top().querySelector('[data-action="cancel"]').click();`); await tick();
+    await js(`cfg.pickFeature('1');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().slice(3).map(payload=>payload.featureFilters.map(item=>[item.id,item.name]))'),
+      [[['1', '流水\n号']], [['1', '流水\n号'], ['2', '订单号']]]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：失败后未改动的【保存】按原条目原样提交（已删除的筛选字段不被前端拦下，样例中的换行不被改写）；删除成功后恢复按快照判断', async () => {
+    await setup();
+    const STALE = { ...SERIAL, sourceField: '流水列', separator: 'hyphen', length: 11, digitsOnly: false, sample: 'FT2412\n3456' };
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([STALE, ORDER, { ...ORDER, id: '3', name: '备用' }])}`);
+    await js(`cfg.manage().click();cfg.pickFeature('3');cfg.ff().del.click();`); await tick();
+    await js(`cfg.next.featureSave={status:'error',message:'特征值「备用」正被 Name 使用，请先改选其他特征值后再删除'};cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    await js('cfg.host.closeTop();');
+    await js(`cfg.top().querySelector('[data-action="cancel"]').click();`); await tick();
+    await js(`cfg.pickFeature('1');cfg.ff().save.click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.deepEqual(await js('cfg.featureSaves()[1].featureFilters'), [STALE, ORDER, { ...ORDER, id: '3', name: '备用' }]);
+    // 删除失败后再删除成功：列表以后端回包为准，未改动【保存】直接关闭
+    await js(`cfg.manage().click();cfg.pickFeature('3');cfg.ff().del.click();`); await tick();
+    await js(`cfg.next.featureSave={status:'error',message:'删除特征值失败（测试）'};cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    await js('cfg.host.closeTop();');
+    await js(`cfg.top().querySelector('[data-action="cancel"]').click();`); await tick();
+    await js(`cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    await js(`cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.deepEqual(await js('[cfg.ff().pick.value,cfg.featureSaves().length]'), ['1', 4]);
+    await js('cfg.ff().save.click();'); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.equal(await js('cfg.featureSaves().length'), 4);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：结果不确定时选空白【保存】同样提交当前列表；首次新增失败后从同一主弹窗重开（列表为空）【保存】提交空列表', async () => {
+    await setup();
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL])}`);
+    await js(`cfg.manage().click();cfg.ff().length.value='9';cfg.ff().sample.value='';
+      cfg.next.featureSave={status:'busy',message:'正在处理其他任务（测试）'};cfg.ff().save.click();`); await tick();
+    await js('cfg.host.closeTop();');
+    await js(`cfg.pickFeature('');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id,item.length]))'), [[['1', 9]], [['1', 10]]]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    // 成功后空选【保存】直接关闭
+    await js(`cfg.manage().click();cfg.pickFeature('');cfg.ff().save.click();`); await tick();
+    assert.equal(await js('cfg.featureSaves().length'), 2);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+
+    await setup();
+    await openFeatureMapping();
+    await js(`cfg.manage().click();cfg.ff().add.click();cfg.ff().name.value='发票号';cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');
+      cfg.next.featureSave={status:'error',message:'同步模板库文件失败（测试）'};cfg.ff().save.click();`); await tick();
+    await js('cfg.host.closeTop();');
+    await js('cfg.ff().cancel.click();'); await tick();
+    await js('cfg.manage().click();');
+    assert.deepEqual(await js('[cfg.ff().pick.value,cfg.ff().body.hidden]'), ['', true]);
+    await js('cfg.ff().save.click();'); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>item.name))'), [['发票号'], []]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：保存失败后关闭，从同一主弹窗重开【管理】时未改动的【保存】仍按界面所示提交；成功后重开恢复按快照判断', async () => {
+    await setup();
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL])}`);
+    await js(`cfg.manage().click();cfg.ff().separator.value='dollar';
+      cfg.next.featureSave={status:'error',message:'同步模板库文件失败（测试）'};cfg.ff().save.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /同步模板库文件失败（测试）/);
+    await js('cfg.host.closeTop();');
+    await js('cfg.ff().cancel.click();'); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    await js('cfg.manage().click();');
+    assert.equal(await js('cfg.ff().separator.value'), 'space');
+    await js('cfg.ff().save.click();'); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id,item.separator]))'), [[['1', 'dollar']], [['1', 'space']]]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    await js('cfg.manage().click();cfg.ff().save.click();'); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.equal(await js('cfg.featureSaves().length'), 2);
     assert.deepEqual(await js('cfg.errors'), []);
   });
 
@@ -2330,6 +2466,32 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(saved, { keys: ['mappings', 'templateId'], feature: [['Reference', ['2'], false], ['Remark', ['1'], false]] });
     assert.equal(await js('cfg.featureSaves().length'), 0);
     assert.equal(await js('cfg.splitDone.length'), 1);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('字段筛选特征值：开启拆分/合并（「按字段区分发生额」被互斥禁用）时【管理】仍可用；新增的特征值在同一主弹窗打开的拆分/合并映射弹窗可立即选用，并计入删除保护', async () => {
+    await setup();
+    await js(`${FEATURE_SETUP_JS}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{...cfg.tpl,featureFilters:${JSON.stringify([SERIAL])}},
+        targetFields:['BillDate','Remark','Reference','Currency','Balance','按字段区分发生额','是否拆分/合并明细账单','复用模块字段的映射关系'],
+        advancedMappingFields:['按字段区分发生额'],billSplitGroupFields:['是否拆分/合并明细账单','复用模块字段的映射关系'],
+        mappings:[{templateField:'是否拆分/合并明细账单',mappedField:'是',mappedFields:[]},{templateField:'复用模块字段的映射关系',mappedField:'否',mappedFields:[]}]})).handle;
+      cfg.overlay=cfg.top();void 0;`);
+    assert.deepEqual(await js(`[cfg.row('按字段区分发生额').querySelector('input[type="checkbox"]').disabled,cfg.row('按字段区分发生额').classList.contains('bill-split-merge-disabled'),
+      cfg.manage().disabled,cfg.manage().hidden,cfg.settingRow().classList.contains('bill-split-merge-disabled')]`), [true, true, false, false, false]);
+    await js(`cfg.manage().click();cfg.ff().add.click();cfg.ff().name.value='发票号';cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().save.click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    await js(`cfg.overlay.querySelector('tr[data-template-field="复用模块字段的映射关系"] .bill-split-group-btn').click();cfg.split=cfg.top();void 0;`); await tick();
+    assert.equal(await js('cfg.split!==cfg.overlay&&Boolean(cfg.split.querySelector(".bill-split-mappings-card"))'), true);
+    await js(`cfg.pick('Remark','${FEATURE}');`);
+    assert.deepEqual(await js(`cfg.fvOptions('Remark')`), [['', ''], ['1', '流水号'], ['2', '发票号']]);
+    await js(`cfg.choose('Remark','2');cfg.split.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='splitMapping').map(call=>call.args[0].mappings.filter(m=>m.mappedField==='${FEATURE}').map(m=>[m.templateField,m.mappedFields]))`),
+      [[['Remark', ['2']]]]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    // 拆分映射选用后，主弹窗【管理】删除该特征值被拦下
+    await js(`cfg.manage().click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「发票号」正被 Remark（拆分\/合并映射） 使用/);
     assert.deepEqual(await js('cfg.errors'), []);
   });
 

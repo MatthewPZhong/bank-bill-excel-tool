@@ -702,6 +702,26 @@ function verifyNewSeparators(dir, { database, main }) {
     [['FT24123456', '123456'], ['', '654321']],
     '⑧ 回读导出明细'
   );
+  // 下划线：Remark 改选「批次号」（id 3）后按 _ 拆段取值并导出
+  const validatedUnderscore = main.validateTemplateConfiguration({
+    template,
+    mappings: mappingsFor({ Remark: { feature: '3' }, Reference: { feature: '2' } }),
+    enumValues: ENUM_VALUES,
+    featureFilters: database.getTemplate(template.id).featureFilters
+  });
+  database.saveMappings(template.id, validatedUnderscore.mappings, [], [], undefined, null, {});
+  const underscorePath = path.join(dir, 'source-f-underscore.xlsx');
+  writeSource(underscorePath, [['2026-11-03', 'XX_A123_YY-246810', 'USD', '50', '', 'ACC1']]);
+  const underscoreRows = generate(main, database, template.id, underscorePath);
+  assertEq(pickColumns(underscoreRows, ['Remark', 'Reference']), [['A123', '246810']], '⑧ 按 _ 拆段取值');
+  const underscoreOutput = path.join(dir, 'detail-f-underscore.xlsx');
+  writeWorkbookRows({ rows: buildDetailExportRows(underscoreRows), outputFilePath: underscoreOutput });
+  const underscoreExported = readSheet(underscoreOutput);
+  assertEq(
+    underscoreExported.rows.map((row) => [row[underscoreExported.header.indexOf('Remark')], row[underscoreExported.header.indexOf('Reference')]]),
+    [['A123', '246810']],
+    '⑧ 回读导出明细（_）'
+  );
 }
 
 async function run() {

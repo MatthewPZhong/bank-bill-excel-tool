@@ -213,9 +213,8 @@
           // v3.2.19：原始账单预处理
           '过滤账单',
           '重复账单过滤',
-          SIGNED_AMOUNT_MAPPING_FIELD,
-          AMOUNT_BASED_NAME_MAPPING_FIELD,
-          AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
+          // v3.2.22：含「按字段区分发生额」，预览可见其下方的「特征值设置」【管理】
+          ...ADVANCED_MAPPING_FIELDS
         ],
         mappings: [
           { templateField: 'BillDate', mappedField: '交易日期', customValue: '', isMultiBigAccount: false },

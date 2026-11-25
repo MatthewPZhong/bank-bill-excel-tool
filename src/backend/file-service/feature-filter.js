@@ -246,7 +246,7 @@ function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null, 
     const id = normalizeCell(raw.id);
     if (id) {
       if (knownIds && !knownIds.has(id)) {
-        throw fail(`特征值「${name}」不存在或已被删除，请在「特征值设置」点击【管理】重新打开`);
+        throw fail(`特征值「${name}」不存在或已被删除，请关闭映射关系管理后重新打开，再在「特征值设置」点击【管理】`);
       }
       if (seenIds.has(id)) {
         throw fail(`特征值 id 重复：${id}`);

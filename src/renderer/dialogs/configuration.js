@@ -56,10 +56,12 @@
     // 以 __ 开头的普通列名、其他字段上与标记同名的真实列名照常按源字段处理。
     const INTERNAL_MAPPING_VALUE_PREFIX = '__FIXED__:';
     const MERCHANT_ID_CURRENCY_ONLY_MARKER = '__CURRENCY_ONLY_BIG_ACCOUNT__';
-    function ensureStaleFieldOption(select, value, targetField) {
+    // literal：值一定是源列名（如特征值的筛选字段），不按内部存储值跳过（v3.2.22）
+    function ensureStaleFieldOption(select, value, targetField, { literal = false } = {}) {
       const normalized = String(value ?? '').trim();
-      if (!select || !normalized || normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
-      if (targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
+      if (!select || !normalized) return false;
+      if (!literal && normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
+      if (!literal && targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
       if (Array.from(select.options).some((option) => option.value === normalized)) return false;
       const option = document.createElement('option');
       option.value = normalized;
@@ -1645,7 +1647,10 @@
 
     // v3.2.18「特征值管理」（原「筛选特征值」）：新增、选中修改、删除特征值；【保存】与确认删除立即写入模板（spec D7）。
     //   getUsage()：各弹窗草稿中选用各特征值的字段；onChange(list)：保存或删除成功后回传最新列表；onClose()：弹窗关闭。
-    function createFeatureFilterManagerDialog({ templateId, headers = [], featureFilters = [], getUsage, onChange, onClose }) {
+    function createFeatureFilterManagerDialog({
+      templateId, headers = [], featureFilters = [], getUsage, onChange, onClose,
+      resultUncertain: initialResultUncertain = false, onResultUncertain
+    }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card feature-filter-card';
@@ -1718,14 +1723,37 @@
           : '整段都是数字';
       }
 
+      // v3.2.22：设置区控件的当前值（原样，不做规范化）；回显已有特征值后记为快照，用来判断用户是否改动
+      let formSnapshot = null;
+      // v3.2.22：任一次保存或删除失败后，库中结果不确定（如已写库、同步模板库文件失败），之后的【保存】一律提交，
+      //   不再按快照跳过（切换特征值再选回会重建快照，不能靠作废快照）。失败后关闭再从同一主弹窗重开时由主弹窗带入；
+      //   保存或删除成功后列表以后端回包为准，恢复按快照判断。
+      let resultUncertain = Boolean(initialResultUncertain);
+      function markResultUncertain() {
+        resultUncertain = true;
+        if (typeof onResultUncertain === 'function') onResultUncertain();
+      }
+      function readDraft() {
+        return {
+          name: nameInput.value,
+          sourceField: sourceSelect.value,
+          separator: separatorSelect.value,
+          length: lengthInput.value,
+          letterPrefixCount: prefixInput.value,
+          digitsOnly: digitsInput.checked,
+          sample: sampleInput.value
+        };
+      }
+
       function showForm(item) {
         nameInput.value = item ? String(item.name || '') : '';
-        // 模板【更新】后筛选字段可能已不在表头：显示为「X（已删除）」并标红，保存前须重新选择
+        // 模板【更新】后筛选字段可能已不在表头：显示为「X（已删除）」并标红，改动后保存前须重新选择
+        //   筛选字段一定是源列名，以 __FIXED__: 开头的列名同样标出
         sourceSelect.querySelectorAll('option[data-stale="true"]').forEach((option) => option.remove());
         sourceSelect.classList.remove('is-stale');
         const sourceField = item ? String(item.sourceField || '').trim() : '';
         sourceSelect.value = sourceField;
-        if (sourceField && sourceSelect.value !== sourceField) ensureStaleFieldOption(sourceSelect, sourceField, '');
+        if (sourceField && sourceSelect.value !== sourceField) ensureStaleFieldOption(sourceSelect, sourceField, '', { literal: true });
         separatorSelect.value = item ? String(item.separator || '') : 'space';
         lengthInput.value = item && item.length ? String(item.length) : '';
         prefixInput.value = item && item.letterPrefixCount ? String(item.letterPrefixCount) : '';
@@ -1733,10 +1761,12 @@
         sampleInput.value = item ? String(item.sample || '') : '';
         syncDigitsLabel();
         body.hidden = false;
+        formSnapshot = item ? readDraft() : null;
       }
 
       function hideForm() {
         editingId = null;
+        formSnapshot = null;
         body.hidden = true;
       }
 
@@ -1756,17 +1786,11 @@
         showForm(first);
       }
 
-      // v3.2.22：正在修改的已有特征值与原值一致（如打开后默认选中即点【保存】）时直接关闭、不写库
-      function isDraftUnchanged(item, draft) {
-        if (!item) return false;
-        const countText = (value) => (value ? String(value) : '');
-        return String(draft.name || '').trim() === String(item.name || '').trim()
-          && String(draft.sourceField || '').trim() === String(item.sourceField || '').trim()
-          && String(draft.separator || '') === String(item.separator || '')
-          && String(draft.length || '').trim() === countText(item.length)
-          && String(draft.letterPrefixCount || '').trim() === countText(item.letterPrefixCount)
-          && draft.digitsOnly === Boolean(item.digitsOnly)
-          && String(draft.sample || '').trim() === String(item.sample || '').trim();
+      // v3.2.22：正在修改的已有特征值，设置区与回显时的快照一致（如打开后默认选中即点【保存】）视为未改动。
+      //   按控件值比较：单行输入框会去掉模板包带入的换行、无法回显的值显示为空，与库中原文比较会误判为改动。
+      function isDraftUnchanged(draft) {
+        if (!formSnapshot) return false;
+        return Object.keys(formSnapshot).every((key) => formSnapshot[key] === draft[key]);
       }
 
       applyDefaultSelection();
@@ -1834,12 +1858,14 @@
               } finally { confirmScope.finish(handle); }
               if (!confirmScope.isCurrent(handle)) return;
               if (result?.status !== 'success') {
+                markResultUncertain();
                 alertOn(confirmation, result?.message || '删除特征值失败');
                 return;
               }
               const closed = closeModal(handle, { status: 'submitted' });
               if (closed.status !== 'closed') return;
               currentList = cloneFeatureFilters(result.featureFilters);
+              resultUncertain = false;
               applyDefaultSelection();
               if (typeof onChange === 'function') onChange(cloneFeatureFilters(currentList));
             }
@@ -1857,32 +1883,32 @@
       dialog.querySelector('.icon-close').addEventListener('click', () => closeManager('cancelled'));
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => closeManager('cancelled'));
       dialog.querySelector('[data-action="save"]').addEventListener('click', async () => {
-        if (editingId === null) {
+        // 空选（设置区隐藏）或已有特征值未改动：结果确定时直接关闭、不写库
+        const draft = editingId === null ? null : readDraft();
+        const unchanged = editingId === null || (Boolean(editingId) && isDraftUnchanged(draft));
+        if (unchanged && !resultUncertain) {
           closeManager('submitted');
           return;
         }
-        const draft = {
-          name: nameInput.value,
-          sourceField: sourceSelect.value,
-          separator: separatorSelect.value,
-          length: lengthInput.value,
-          letterPrefixCount: prefixInput.value,
-          digitsOnly: digitsInput.checked,
-          sample: sampleInput.value
-        };
-        if (editingId && isDraftUnchanged(findFeatureFilterById(currentList, editingId), draft)) {
-          closeManager('submitted');
-          return;
+        let nextList;
+        if (unchanged) {
+          // 结果不确定时按界面所示的列表原样提交：由后端对照库中现值校验，不按前端表头拦下已删除的筛选字段，
+          //   也不经单行输入框改写名称、样例中的换行
+          nextList = cloneFeatureFilters(currentList);
+        } else {
+          // 名称未编辑时沿用库中原名（单行输入框回显时会去掉其中的换行）；快照在失败后保留，重试时同样沿用
+          const original = editingId ? findFeatureFilterById(currentList, editingId) : null;
+          if (original && formSnapshot && draft.name === formSnapshot.name) draft.name = String(original.name ?? '');
+          const others = currentList.filter((item) => String(item.id) !== editingId);
+          const { errors, rule } = validateFeatureFilterDraft(draft, headers, others);
+          if (errors.length) {
+            pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
+            return;
+          }
+          nextList = editingId
+            ? currentList.map((item) => (String(item.id) === editingId ? { ...rule, id: editingId } : item))
+            : currentList.concat([{ ...rule }]);
         }
-        const others = currentList.filter((item) => String(item.id) !== editingId);
-        const { errors, rule } = validateFeatureFilterDraft(draft, headers, others);
-        if (errors.length) {
-          pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
-          return;
-        }
-        const nextList = editingId
-          ? currentList.map((item) => (String(item.id) === editingId ? { ...rule, id: editingId } : item))
-          : currentList.concat([{ ...rule }]);
         const handle = writeScope.begin();
         if (!handle) return;
         let result;
@@ -1893,6 +1919,8 @@
         } finally { writeScope.finish(handle); }
         if (!writeScope.isCurrent(handle)) return;
         if (result?.status !== 'success') {
+          // 失败时库中结果不确定（如已写库、同步模板库文件失败）：之后的【保存】一律提交
+          markResultUncertain();
           alertOn(overlay, result?.message || '保存特征值失败');
           return;
         }
@@ -5024,6 +5052,8 @@
       let currentPreprocessRowFilterRules = cloneRowFilterRules(payload.template && payload.template.preprocessRowFilterRules);
       // v3.2.18：模板的特征值列表（【特征值管理】保存/删除即时落库后回写）；各行在「选择特征值」中选用。
       let currentFeatureFilters = cloneFeatureFilters(payload.template && payload.template.featureFilters);
+      // v3.2.22：特征值管理保存或删除失败后库中结果不确定；关闭后从本弹窗重开【管理】时带入，成功后清除
+      let featureFilterResultUncertain = false;
       // v3.2.21：模板日期格式草稿（「个性化映射设置 → 日期格式」，点【保存】时随映射提交）；不在三档内按 auto
       let currentDateFormat = TEMPLATE_DATE_FORMAT_OPTIONS.some((option) => option.value === payload.dateFormat)
         ? payload.dateFormat
@@ -5914,13 +5944,18 @@
           templateId: payload.template.id,
           headers: payload.template.headers || [],
           featureFilters: currentFeatureFilters,
+          resultUncertain: featureFilterResultUncertain,
           getUsage: () => collectFeatureFilterUsage(
             currentBillSplitMappings,
             FEATURE_FILTER_SPLIT_USAGE_SUFFIX,
             collectFeatureFilterUsage(collectMappingDraftFromTable(tbody))
           ),
+          onResultUncertain: () => {
+            featureFilterResultUncertain = true;
+          },
           onChange: (nextFeatureFilters) => {
             currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
+            featureFilterResultUncertain = false;
             refreshFeatureValueSelects();
           },
           onClose: () => {
