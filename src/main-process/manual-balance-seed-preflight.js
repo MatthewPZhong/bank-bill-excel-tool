@@ -90,6 +90,16 @@ function resolveManualBalanceSeedFilePlanInputPaths({
   return normalizeInputFilePaths(sessionEntries.map((entry) => entry && entry.filePath));
 }
 
+// 账号在 beforeBillDate 之前最近的余额种子日期（与重算取种子 findPreviousBalanceSeed 同口径）；没有时为空。
+function latestBalanceSeedDateBefore(records, { merchantId, currency }, beforeBillDate) {
+  return (Array.isArray(records) ? records : []).reduce((latest, candidate) => (
+    candidate.merchantId === merchantId && candidate.currency === currency
+      && candidate.billDate < beforeBillDate && candidate.billDate > latest
+      ? candidate.billDate
+      : latest
+  ), '');
+}
+
 function buildManualBalanceSeedPlan({
   payload = {},
   pendingPrompt,
@@ -157,6 +167,21 @@ function buildManualBalanceSeedPlan({
     templateName: seedTemplateName,
     generationMethod: BALANCE_SEED_GENERATION_METHODS.manual
   };
+  // v3.2.22：核对上一账单日余额时，早于已有余额日期的补录不会被采用（重算取当前账单日期前最近的余额），
+  //   直接拒绝以免写入无效的历史余额后反复提示（手工填写与导入余额文件确认后保存同一入口）。
+  //   已有余额按本次读到的种子记录取（与重算同口径），不沿用提示生成时记下的日期：种子在此期间被改动或恢复时以当前记录为准。
+  const latestSeedDate = pendingPrompt && !pendingPrompt.reason && pendingPrompt.seedMismatch && normalizedTargetDate
+    ? latestBalanceSeedDateBefore(records, record, normalizedTargetDate)
+    : '';
+  if (latestSeedDate && normalizedSeedDate < latestSeedDate) {
+    return {
+      stopResult: buildManualBalanceInvalidResult(
+        `上一账单日日期不能早于已有余额的日期 ${latestSeedDate}（更早的余额不会用于本次核对）`,
+        pendingPrompt,
+        generatedExports
+      )
+    };
+  }
   const recordKey = balanceSeedRecordKey(record);
   const existingIndex = records.findIndex((candidate) => (
     balanceSeedRecordKey(candidate) === recordKey

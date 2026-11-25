@@ -1104,6 +1104,51 @@ test('buildMappedRows：XLSX 带数字格式的条件格式覆盖的行不参与
   assert.deepEqual(scanDuplicateSourceRows([{ filePath, detailRows: mapped }]).dropPlan, [[5]], '第 3 行不因与第 2 行底值相同而去除');
 });
 
+test('buildMappedRows：XLSX 没有样式表部件（可选部件）时照常查重；条件格式块的结束标签带空白时照常识别覆盖的行', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-source-rows-no-styles-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const header = ['日期', '收入', '支出', '流水号'];
+  const build = (name, patches) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([header, ['2026-11-01', '100', '', 123], ['2026-11-01', '100', '', 123]]), 'Sheet1');
+    const cfb = XLSX.CFB.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+    Object.entries(patches).forEach(([suffix, replace]) => {
+      const index = cfb.FullPaths.findIndex((fullPath) => fullPath.endsWith(suffix));
+      if (replace === null) {
+        cfb.FileIndex.splice(index, 1);
+        cfb.FullPaths.splice(index, 1);
+        return;
+      }
+      const entry = cfb.FileIndex[index];
+      entry.content = Buffer.from(replace(Buffer.from(entry.content).toString('utf8')), 'utf8');
+      entry.size = entry.content.length;
+    });
+    const filePath = path.join(dir, name);
+    fs.writeFileSync(filePath, XLSX.CFB.write(cfb, { type: 'buffer', fileType: 'zip' }));
+    return buildMappedRows({
+      inputFilePath: filePath,
+      orderedTargetFields: ['BillDate', 'MerchantId', 'Credit Amount', 'Debit Amount'],
+      mappingByField: { BillDate: '日期', MerchantId: '__FIXED__:ACC1', 'Credit Amount': '收入', 'Debit Amount': '支出' },
+      expectedSourceHeaders: header,
+      duplicateRowKeys: true
+    });
+  };
+  const noStyles = build('no-styles.xlsx', {
+    'xl/styles.xml': null,
+    'xl/_rels/workbook.xml.rels': (xml) => xml.replace(/<Relationship [^>]*Type="[^"]*\/styles"[^>]*\/>/, ''),
+    '[Content_Types].xml': (xml) => xml.replace(/<Override PartName="\/xl\/styles\.xml"[^>]*\/>/, ''),
+    'xl/worksheets/sheet1.xml': (xml) => xml.replace(/ s="\d+"/g, '')
+  });
+  assert.deepEqual(noStyles.rowMetas.map((meta) => Boolean(meta.sourceRowKey)), [true, true]);
+  // 条件格式（dxf 0 把第 2 行的流水号显示为 TX-A-0123）的结束标签带空白
+  const spacedClosing = build('cf-spaced.xlsx', {
+    'xl/styles.xml': (xml) => xml.replace('<dxfs count="0"/>', '<dxfs count="1"><dxf><numFmt numFmtId="200" formatCode="&quot;TX-A-&quot;0000"/></dxf></dxfs>'),
+    'xl/worksheets/sheet1.xml': (xml) => xml.replace('</sheetData>',
+      '</sheetData><conditionalFormatting sqref="D2"><cfRule type="expression" dxfId="0" priority="1"><formula>TRUE</formula></cfRule></conditionalFormatting >')
+  });
+  assert.deepEqual(spacedClosing.rowMetas.map((meta) => Boolean(meta.sourceRowKey)), [false, true]);
+});
+
 test('buildMappedRows：HTML 样式表（mso-number-format）不同的文件不互判重复；CSV 以 +、-、@ 开头的公式不参与，普通带符号金额照常比较', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-source-rows-style-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

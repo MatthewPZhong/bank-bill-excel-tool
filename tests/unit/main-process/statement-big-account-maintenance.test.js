@@ -25,9 +25,9 @@ function load(name) {
   return Function(...Object.keys(deps), `return (${source.slice(node.start, node.end)});`)(...Object.values(deps));
 }
 for (const name of ['findBigAccountMatchInRows', 'identifyAccountsFromRecognitionBasis',
-  'findSelfInputBigAccountBridge', 'selectPendingBigAccountRows', 'identifyAccountBlocks',
+  'findSelfInputBigAccountBridge', 'selectPendingBigAccountRows', 'isHeaderOnlyDetailRows', 'identifyAccountBlocks',
   'findHeaderRowNumbersInRawRows', 'buildBigAccountRecognitionBasis',
-  'finalizeBigAccountRecognitionBasis', 'buildBigAccountSelectionRows', 'bigAccountBlockHasTransactions']) deps[name] = load(name);
+  'finalizeBigAccountRecognitionBasis', 'buildBigAccountSelectionRows']) deps[name] = load(name);
 const build = load('buildBigAccountOrderEvidence');
 const extract = load('extractBigAccountOrderFromEvidence');
 
@@ -113,7 +113,7 @@ for (const [emptyBlockOrdinal, label] of ['首段', '中间段', '末尾段'].en
     // 提取只消费冻结证据；删除本测试的源文件后仍应能定位，不发生二次读取。
     fs.unlinkSync(filePath);
     const before = JSON.stringify(context);
-    const result = extract(context, 'unfixed', []);
+    const result = extract(context, []);
     assert.equal(result.errorCode, 'BIG_ACCOUNT_NOT_MAINTAINED');
     assert.deepEqual(result.unmaintainedAccounts, [{
       merchantId: accountIds[emptyBlockOrdinal], fileName: '空分段.xlsx', fileOrdinal: 0,
@@ -140,7 +140,7 @@ test('空分段定位：缺少冻结表头时保留预览行回退', () => {
   delete context.fileEntries[0].detailRows.bigAccountRecognitionBasis.headerWindows[0].headerRowNumber;
   context.rowsWithEmptyBlocks[0].sourceRowNumber = 23;
   context.bigAccountOrderEvidence = build(context);
-  assert.equal(extract(context, 'unfixed', []).unmaintainedAccounts[0].sourceRowNumber, 23);
+  assert.equal(extract(context, []).unmaintainedAccounts[0].sourceRowNumber, 23);
 });
 
 test('空分段定位：冻结表头和预览行号均缺失时保留零值', () => {
@@ -148,13 +148,13 @@ test('空分段定位：冻结表头和预览行号均缺失时保留零值', ()
   delete context.fileEntries[0].detailRows.bigAccountRecognitionBasis.headerWindows[0].headerRowNumber;
   delete context.rowsWithEmptyBlocks[0].sourceRowNumber;
   context.bigAccountOrderEvidence = build(context);
-  assert.equal(extract(context, 'unfixed', []).unmaintainedAccounts[0].sourceRowNumber, 0);
+  assert.equal(extract(context, []).unmaintainedAccounts[0].sourceRowNumber, 0);
 });
 
 test('全批检查不受选中行、已手动绑定和空 rowIndexes 限制，保留未维护原值', () => {
   const context = fixture();
   for (const rowIndexes of [[0], [], [0, 1]]) {
-    const result = extract(context, 'unfixed', rowIndexes);
+    const result = extract(context, rowIndexes);
     assert.equal(result.errorCode, 'BIG_ACCOUNT_NOT_MAINTAINED');
     assert.deepEqual(result.unmaintainedAccounts, [{
       merchantId: 'M002', fileName: '账单.xlsx', fileOrdinal: 0, blockOrdinal: 1, sourceRowNumber: 6
@@ -163,9 +163,9 @@ test('全批检查不受选中行、已手动绑定和空 rowIndexes 限制，�
   }
 });
 
-test('不固定模式也检查空交易分段；子串及前导零账号不得被维护表替换', () => {
+test('选择只列有交易的段时也检查空交易分段；子串及前导零账号不得被维护表替换', () => {
   for (const id of ['M0011', '0M001', ' M002 ']) {
-    const result = extract(fixture(['M001', id], { emptyLast: true }), 'unfixed', [0]);
+    const result = extract(fixture(['M001', id], { emptyLast: true }), [0]);
     assert.equal(result.errorCode, 'BIG_ACCOUNT_NOT_MAINTAINED');
     assert.equal(result.unmaintainedAccounts[0].merchantId, id.trim());
   }
@@ -179,7 +179,7 @@ test('多文件同名与同账号跨段保留来源顺序；提取和证据检�
   context.rowsWithEmptyBlocks.push({ ...second.rows[0], index: 2, filePath: second.fileEntries[0].filePath });
   context.bigAccountOrderEvidence = build(context);
   const before = JSON.stringify(context);
-  const result = extract(context, 'fixed', [0]);
+  const result = extract(context, [0]);
   assert.deepEqual(result.unmaintainedAccounts.map((r) => [r.merchantId, r.fileOrdinal, r.blockOrdinal]), [
     ['M002', 0, 0], ['M002', 0, 1], ['M003', 1, 0]
   ]);
@@ -187,22 +187,22 @@ test('多文件同名与同账号跨段保留来源顺序；提取和证据检�
 });
 
 test('完全未识别继续普通失败；非自己输入模板不扩大维护检查', () => {
-  const unknown = extract(fixture(['']), 'unfixed', [0]);
+  const unknown = extract(fixture(['']), [0]);
   assert.equal(unknown.status, 'error');
   assert.equal(unknown.errorCode, undefined);
   assert.deepEqual(unknown.failedRows, [{ index: 0, fileName: '账单.xlsx' }]);
-  const other = extract(fixture(['M002'], { selfInputMerchant: false }), 'unfixed', [0]);
+  const other = extract(fixture(['M002'], { selfInputMerchant: false }), [0]);
   assert.equal(other.errorCode, undefined);
 });
 
 test('维护后重新预检可提取；多币种不是未维护；失效证据优先拒绝', () => {
   const context = fixture([' M002 '], { bigAccounts: [{ merchantId: 'M002', currencies: ['USD', 'EUR'] }] });
-  const result = extract(context, 'unfixed', [0]);
+  const result = extract(context, [0]);
   assert.equal(result.status, 'ok');
   assert.equal(result.accounts[0].merchantId, 'M002');
   assert.deepEqual(result.ambiguousCurrencyFiles, ['账单.xlsx']);
   context.statementSelectionSessionId = 'different';
-  const stale = extract(context, 'unfixed', [0]);
+  const stale = extract(context, [0]);
   assert.equal(stale.status, 'error');
   assert.match(stale.message, /失效/);
 });
@@ -305,6 +305,142 @@ test('分配大账号可只返回指定条目：其余条目只计入账号块�
   // 行的文件对不上条目时不用计数（调用方退回逐个识别）
   assert.equal(countSelectionRowsByFile([{ filePath: '/synthetic/other.xlsx' }], entries), null);
   assert.equal(countSelectionRowsByFile(undefined, entries), null);
+});
+
+test('v3.2.22 只有表头的文件不占分配位置：选择窗口、分配执行与按文件计数编号一致；只有余额行的文件仍占一个', () => {
+  const { cloneRowsWithMetadata } = require('../../../src/main-process/statement-session');
+  deps.cloneRowsWithMetadata = cloneRowsWithMetadata;
+  deps.buildFieldIndexMap = load('buildFieldIndexMap');
+  const assign = load('applyBigAccountAssignmentsToFileEntries');
+  const countSelectionRowsByFile = load('countSelectionRowsByFile');
+  const header = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Balance'];
+  // sourceDataRowCount 同 buildMappedRows：原表表头以下读到的数据行数（不可枚举）
+  const entry = (name, dataRows, sourceDataRowCount = dataRows.length) => {
+    const detailRows = Object.assign([header.slice(), ...dataRows], {
+      rowMetas: dataRows.map((_row, index) => ({ sourceRowNumber: index + 2 }))
+    });
+    Object.defineProperty(detailRows, 'sourceDataRowCount', { value: sourceDataRowCount, enumerable: false });
+    return { filePath: `/synthetic/${name}.xlsx`, matchedTemplateId: 1, detailRows };
+  };
+  const headerOnly = entry('header-only', []);
+  const withTransactions = entry('with-transactions', [['2026-09-01', '', '', '5', '', '']]);
+  const balanceOnly = entry('balance-only', [['2026-09-01', '', '', '', '', '100']]);
+  const entries = [headerOnly, withTransactions, balanceOnly];
+
+  const selectionRows = deps.buildBigAccountSelectionRows(entries);
+  assert.deepEqual(selectionRows.map((row) => [row.index, row.fileName]), [
+    [0, 'with-transactions.xlsx'],
+    [1, 'balance-only.xlsx']
+  ]);
+  // 维护检查 / 证据用的含空段口径仍给只有表头的文件留一个块
+  assert.equal(deps.buildBigAccountSelectionRows(entries, { includeEmptyBlocks: true }).length, 3);
+
+  const assignments = [
+    { merchantId: 'M1', currency: 'USD', rowIndex: 0 },
+    { merchantId: 'M2', currency: 'EUR', rowIndex: 1 }
+  ];
+  const assigned = assign(entries, assignments);
+  assert.deepEqual(assigned.map((item) => item.detailRows.length), [1, 2, 2]);
+  assert.deepEqual(assigned[1].detailRows[1].slice(1, 3), ['M1', 'USD'], '第一个分配位置给有交易的文件');
+  assert.deepEqual(assigned[2].detailRows[1].slice(1, 3), ['M2', 'EUR'], '只有余额行的文件按第二个位置分配，余额行保留');
+
+  const blockCounts = countSelectionRowsByFile(selectionRows, entries);
+  assert.equal(blockCounts.get(headerOnly.filePath) || 0, 0);
+  const counted = assign(entries, assignments, { onlyEntries: new Set([balanceOnly]), blockCounts });
+  assert.deepEqual(counted.map((item) => item.detailRows[1].slice(1, 3)), [['M2', 'EUR']]);
+  const scanned = assign(entries, assignments, { onlyEntries: new Set([balanceOnly]) });
+  assert.deepEqual(scanned.map((item) => item.detailRows), counted.map((item) => item.detailRows));
+
+  // 全部只有表头：没有可分配的位置（调用方据此报「导入文件中没有账号存在交易数据」）
+  assert.deepEqual(deps.buildBigAccountSelectionRows([headerOnly, entry('header-only-2', [])]), []);
+  assert.deepEqual(deps.identifyAccountBlocks(headerOnly.detailRows), []);
+  const allEntriesHeaderOnly = load('allEntriesHeaderOnly');
+  assert.equal(allEntriesHeaderOnly([headerOnly, entry('header-only-2', [])]), true);
+  assert.equal(allEntriesHeaderOnly([headerOnly, withTransactions]), false);
+
+  // 原表有数据、处理后没有输出（过滤账单全部过滤、拆分合并零输出等）：不算只有表头，沿用原口径（仍占一个位置，生成后照常提示）
+  const processedEmpty = entry('processed-empty', [], 3);
+  assert.equal(deps.identifyAccountBlocks(processedEmpty.detailRows).length, 1);
+  assert.equal(allEntriesHeaderOnly([processedEmpty]), false);
+  // 没有记下原表行数（未经 buildMappedRows）：不按只有表头处理
+  assert.equal(allEntriesHeaderOnly([{ filePath: '/synthetic/unknown.xlsx', detailRows: [header.slice()] }]), false);
+  // 克隆（会话缓存、分配执行）保留原表行数
+  assert.equal(cloneRowsWithMetadata(headerOnly.detailRows).sourceDataRowCount, 0);
+  assert.equal(cloneRowsWithMetadata(processedEmpty.detailRows).sourceDataRowCount, 3);
+  // 重复表头下只有余额行（没有借贷）：有数据行，不按只有表头拦截（直接识别照旧）
+  const repeatedHeaderBalanceOnly = entry('repeated-header-balance', [
+    ['2026-09-01', '', '', '', '', '100'],
+    ['2026-09-02', '', '', '', '', '100']
+  ]);
+  repeatedHeaderBalanceOnly.detailRows.headerBreaks = [3];
+  assert.equal(allEntriesHeaderOnly([repeatedHeaderBalanceOnly]), false);
+});
+
+test('v3.2.22 只有表头按原表数据行数判断：真实读取的纯表头文件、拆分合并零输出、过滤账单全部过滤', (t) => {
+  const isHeaderOnly = load('isHeaderOnlyDetailRows');
+  const allEntriesHeaderOnly = load('allEntriesHeaderOnly');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'header-only-source-rows-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const HEADER = ['日期', '类型', '币种', '收入', '支出', '交易金额', '手续费'];
+  const write = (name, rows) => {
+    const filePath = path.join(dir, `${name}.xlsx`);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ...rows]), 'Sheet1');
+    XLSX.writeFile(workbook, filePath);
+    return filePath;
+  };
+  const splitRow = (seqNo, overrides) => ({ seqNo, rowStatus: 'completed', currencySourceField: '币种', creditSourceField: '', debitSourceField: '',
+    amountSourceField: '', mergedGroupSeq: null, isFeeBill: false, ...overrides });
+  const map = (filePath, extra = {}) => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    currencyMappings: [],
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '收入', 'Debit Amount': '支出' },
+    expectedSourceHeaders: HEADER,
+    featureFilters: {},
+    ...extra
+  });
+  const headerOnly = map(write('header-only', []));
+  assert.deepEqual([headerOnly.length, headerOnly.sourceDataRowCount, isHeaderOnly(headerOnly)], [1, 0, true]);
+  assert.deepEqual(deps.identifyAccountBlocks(headerOnly), []);
+  assert.equal(Object.keys(headerOnly).includes('sourceDataRowCount'), false, '不可枚举，不进入导出与快照');
+
+  // 收入、支出各 100 合并后净额为零：映射后只剩表头，但原表有 1 行数据 → 沿用原流程（拆分零输出提示）
+  const netZero = map(write('net-zero', [['2026-11-02', '拆分', 'USD', '', '', '100', '100']]), {
+    billSplitMerge: {
+      enabled: true, reuseModuleMapping: true, billSplitMappingByTargetField: {},
+      billSplitRows: [splitRow(1, { creditSourceField: '交易金额', mergedGroupSeq: 1 }), splitRow(2, { debitSourceField: '手续费', mergedGroupSeq: 1 })],
+      billSplitAmountRules: [], signedAmountSourceField: '', signedAmountTargetSeqNos: [], byFieldAmountTargetSeqNos: [], feeAmountFormula: null, rowFilterRules: null
+    }
+  });
+  assert.deepEqual([netZero.length, netZero.sourceDataRowCount, netZero.billSplitMatchStats.outputRows, isHeaderOnly(netZero)], [1, 1, 0, false]);
+  assert.equal(deps.identifyAccountBlocks(netZero).length, 1);
+
+  // 过滤账单把数据行全部过滤：原表有数据 → 沿用原流程（提示检查过滤规则）
+  const filtered = map(write('filtered', [['2026-11-02', '普通', 'USD', '5', '', '', '']]), {
+    preprocessRowFilterRules: [{ seq: 1, conditions: [{ field: '类型', op: '等于', value: '不存在' }] }]
+  });
+  assert.deepEqual([filtered.length, filtered.sourceDataRowCount, filtered.preprocessRowFilterStats.keptRows, isHeaderOnly(filtered)], [1, 1, 0, false]);
+
+  // 表头下一行就是汇总行（读取时在此截断）、只有模板表头范围以外的列有值（读取时截掉）：原表有内容 → 不算只有表头
+  const summaryOnly = map(write('summary-only', [['总收入笔数', '1']]));
+  assert.deepEqual([summaryOnly.length, summaryOnly.sourceDataRowCount, isHeaderOnly(summaryOnly)], [1, 1, false]);
+  const outsideOnly = map(write('outside-only', [['', '', '', '', '', '', '', '余额 100']]));
+  assert.deepEqual([outsideOnly.length, outsideOnly.sourceDataRowCount, isHeaderOnly(outsideOnly)], [1, 1, false]);
+  // 表头下的行只有 Excel 错误值（读取库读成空串）：原表有内容 → 不算只有表头；表头之上的错误值不计入
+  const errorOnly = map(write('error-only', [[{ t: 'e', v: 0x2A }, '', '', { t: 'e', v: 0x07 }]]));
+  assert.deepEqual([errorOnly.length, errorOnly.sourceDataRowCount, isHeaderOnly(errorOnly)], [1, 1, false]);
+  const errorAboveHeaderPath = path.join(dir, 'error-above-header.xlsx');
+  const errorAboveHeader = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(errorAboveHeader, XLSX.utils.aoa_to_sheet([['说明', { t: 'e', v: 0x2A }], HEADER]), 'Sheet1');
+  XLSX.writeFile(errorAboveHeader, errorAboveHeaderPath);
+  const errorAbove = map(errorAboveHeaderPath);
+  assert.deepEqual([errorAbove.length, errorAbove.sourceDataRowCount, isHeaderOnly(errorAbove)], [1, 0, true]);
+
+  const entry = (detailRows) => ({ filePath: path.join(dir, 'x.xlsx'), detailRows });
+  assert.equal(allEntriesHeaderOnly([entry(headerOnly), entry(headerOnly)]), true);
+  assert.equal(allEntriesHeaderOnly([entry(headerOnly), entry(netZero)]), false);
+  assert.equal(allEntriesHeaderOnly([entry(filtered)]), false);
 });
 
 test('完成大账号选择：分配后渠道同一账户命中不同余额方式时未开始即拒绝，释放本次选择、历史结果保留', () => {

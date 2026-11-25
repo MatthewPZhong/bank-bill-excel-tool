@@ -61,12 +61,11 @@ npm run preview:all
 | ![monthly-balance-export](monthly-balance-export.png) | 月度余额账单导出对话框（v1.5.3 R1） | `npm run preview:monthly-balance-export` |
 | ![export-scope](export-scope.png) | 导出余额范围选择对话框（当前批次 / 所有批次） | `npm run preview:export-scope` |
 
-### 提示 / 迁移类（3 张）
+### 提示 / 迁移类（2 张）
 
 | 截图 | 说明 | render 命令 |
 |------|------|------|
 | ![new-account-palette](new-account-palette.png) | 新开账户模块的背景调色板 | `npm run preview:new-account-palette` |
-| ![remember-order-mismatch](remember-order-mismatch.png) | 大账号顺序不匹配提示对话框（v1.5.0） | `npm run preview:remember-order-mismatch` |
 | ![account-mapping-migration](account-mapping-migration.png) | 账户映射迁移分配对话框（v1.5.1 升级路径） | `npm run preview:account-mapping-migration` |
 
 ### 月度 Pending 数据核对（9 张，v2.0.0 新增）

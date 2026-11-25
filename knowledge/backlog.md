@@ -20,6 +20,48 @@
 
 ## 未实施
 
+### B163（P3 · 改进）导入余额文件的结构白名单按读取库 SheetJS 0.18.5 的解析口径制定，升级读取库时须重核
+
+- **来源**：2026-11-24 `feat/balance-eod-file-import`（v3.2.22 暂定）第 28 轮审查后用户选择「改用结构白名单收口」（spec D7–D10，`src/backend/file-service/readers.js` `verifyXlsxStructureWhitelist`）。白名单的取舍依据读取库的实际读法：按局部名称取元素、属性按小写名称与下划线前的部分另存别名、样式表与共享字符串按内容类型取部件、工作簿取 `Directory.workbooks[0]` 等
+- **影响**：当前版本无缺陷。读取库升级后，这些读法若有变化（如开始认 `mc:AlternateContent`、改按关系取部件），白名单可能不再覆盖两边读法不同的写法；也可能误拒新版 Excel 写出的新扩展。白名单目前只用于导入余额文件，网银账单原表读取不经过它
+- **关闭条件**：升级 `xlsx` 依赖时，按上述读法逐项复核白名单与 spec §3.1「文件」，重跑 `tests/unit/backend/balance-seed-import.test.js` 的白名单用例（含 `assets` 下全部 xlsx 不误拒）与变异检查；若网银账单原表读取也要收口（见 B133），评估复用同一白名单
+- **目标版本**：未定；触发条件为升级 `xlsx` 依赖或网银账单原表读取改用白名单
+
+### B162（P3 · 已知问题）读过样式表编号写成字符引用的 xlsx 后，同一进程里读取库写出的 xlsx 样式编号为 NaN
+
+- **来源**：2026-11-24 `feat/balance-eod-file-import`（v3.2.22 暂定）第 25 轮审查修复时在单测中发现。读取库（SheetJS 0.18.5）的数字格式表是进程级全局状态：读入 `cellXfs` 的 `numFmtId` 写成字符引用（如 `&#49;&#55;&#48;`）的样式表后，表中多出 `"NaN" → General`；此后 `XLSX.write` / `XLSX.writeFile` 为每个常规格式的单元格新增一个 `numFmtId="NaN"` 的样式（已在本机复现）。导入余额文件对这类文件按无法核对拒绝，但读取在拒绝之前已发生；网银账单导入同样会读入这类文件
+- **影响**：只在手工改写、编号写成字符引用的 xlsx 上触发（Excel 与常见导出工具不这样写）。触发后到应用重启前，`writers.js` 等经读取库导出的 xlsx 样式表带非法编号，Excel 打开时可能提示修复；单元格的值不受影响。v3.2.21 及以前相同，不是本分支引入。单测已在 `writePatchedWorkbook` 写出前去掉这类表项，避免用例顺序影响结果
+- **关闭条件**：在 xlsx 公共读取入口（`src/backend/xlsx/`）读取后去掉格式表中非数字编号的表项（或写出前统一清理），补「先读此类文件、再导出」的回归用例，确认导出样式表不含 `NaN`
+- **目标版本**：未定；建议下一轮 xlsx 公共基础设施改动时一并处理
+
+### B161（P2 · 已知问题）网银账单读取原表时只读到工作表声明的范围，范围以外追加的行不读（资金口径 · 须人工复核）
+
+- **来源**：2026-11-24 `feat/balance-eod-file-import`（v3.2.22 暂定）Codex 第 20 轮审查。有的导出工具追加行后不更新 xlsx 的 `<dimension>`（读取库据此给出 `!ref`），Excel 照常显示全部行；网银账单的 `readWorkbookRows` 按 `!ref` 转换行，范围以外的行不读。本分支只做了两处收口：导入余额文件按声明范围与实际单元格范围的并集读取（`balance-seed-import.js` 的 `sheetCellRange`）；「原表只有表头」的判断把范围以外仍有内容的行计入（`readers.js` 的 `collectOutOfRangeContentRows`），不把这类文件判为只有表头
+- **影响**：这类原表生成的明细与余额会少掉范围以外的交易行，界面不提示（v3.2.21 及以前相同，不是本分支引入）；全部数据都在范围以外时按「原表有数据、处理后没有输出」给出原有提示。真实银行导出与 Excel 另存的文件 dimension 都是正确的，只在第三方工具改写的原表上出现
+- **关闭条件**：账单读取按声明范围与实际单元格范围的并集转换行（或范围以外有内容时提示「请在 Excel 中打开并另存为 xlsx 后重新导入」），评估对长数字原文（`collectLongIntegerSourceText`）、物理行号、错误值标记与重复账单原文等按 `!ref` 对齐的下标的影响，补真实 XLSX 回归用例；资金口径，合入前须人工复核
+- **目标版本**：未定；建议下一轮网银账单读取改动时一并处理
+
+### B160（P3 · 已知问题）网银账单原表数据行只有「没有计算结果的公式」时按只有表头处理
+
+- **来源**：2026-11-24 `feat/balance-eod-file-import`（v3.2.22 暂定）Codex 第 8 轮审查 P2。只有表头的判断（`readRowsWithMetadata` 的 `rowsBelowHeader` → `buildMappedRows` 的 `sourceDataRowCount`）按读取结果统计表头以下的非空行，Excel 错误值已按原表单元格另行计入；但普通读取不开 `sheetStubs`，没有缓存结果的公式（如第三方工具写出、从未在 Excel 中计算过的 `=1+1`）在读取时即被丢弃，整行只有这类公式时该行不计入
+- **影响**：整批都是这类文件、且模板需要识别或分配大账号时报「导入文件中没有账号存在交易数据」（v3.2.21 及以前同样读不出这些行，分别表现为没有交易、空明细或未识别到大账号）；混合批次中该文件不参与大账号识别与分配。不产生错误金额或错误账号，属于异常原表
+- **关闭条件**：在不为所有导入打开 `sheetStubs`（大文件内存风险）的前提下识别没有缓存结果的公式行（如只对判为只有表头的文件按工作表 XML 复核），并补真实 XLSX 回归用例
+- **目标版本**：未定；有用户反馈此类原表时处理
+
+### B159（P4 · 改进）用户数据目录残留的 `big-account-modes/`、`big-account-orders/` 未清理
+
+- **来源**：2026-11-24 `feat/balance-eod-file-import`（v3.2.22 暂定）去掉网银账单「账号顺序固定」，删除 `src/backend/big-account-mode-store.js`、`src/backend/big-account-order-store.js` 与对应 IPC；按 spec 决策，已有的 JSON 文件不删除、不再读取（集成 `statement-channel.js`、`statement-duplicate-row-filter.js` 已验证残留文件不影响手动选择与复核指纹）
+- **影响**：只占少量磁盘空间，不影响导入、选择与导出；旧版本回退时这些文件仍可被旧版读取
+- **关闭条件**：确认不再需要回退到 v3.2.21 及以前后，在启动迁移或「设置」清理入口中幂等删除这两个目录，并补删除失败不阻塞启动的回归用例
+- **目标版本**：未定；v3.2.22 发布并稳定运行一个版本周期后再评估
+
+### B158（P4 · 改进）休眠的 `statement-worker` 契约仍保留「账号顺序固定」字段
+
+- **来源**：2026-11-24 `feat/balance-eod-file-import`（v3.2.22 暂定）去掉「账号顺序固定」时，只改生产路径（`src/main.js`、渲染层、preload）。`src/main-process/statement-worker/contracts.js`（`forceMode`、`rowsWithEmptyBlocks`、记住顺序不匹配提示 DTO）与 `session-state.js`（`bigAccountChoiceMode === 'fixed'` 时 `includeEmptyBlocks`）不在生产调用链上，本次未改
+- **影响**：无运行时影响；后续若启用 worker 路径，会把已下线的固定模式字段和提示类型带回公开 DTO
+- **关闭条件**：启用或清理 `statement-worker` 时删除上述字段与提示类型（只保留不固定口径），同步其单测与执行描述符登记
+- **目标版本**：未定；与 `statement-worker` 启用或清理一并处理
+
 ### B157（P3 · 改进）跨 Sheet 回填：xls、SpreadsheetML 2003、ODS 读主表时仍解析整本工作簿
 
 - **来源**：v3.2.21 `feat/cross-sheet-backfill` 代码审查第十六轮（P2，按性能改进登记）
@@ -1004,6 +1046,7 @@
 - **关闭条件**：还原原文与读取库取值使用同一份解析结果（或按读取库的实际解析口径定位工作表与单元格）；无法证明一致时（关系或工作表 XML 含注释、标签内有非空格的空白分隔等）整张表不还原并提示「无法核对原值」；补上述两种构造文件的回归用例，并复核此前用这类文件导出的流水号
 - **目标版本**：v3.2.22（暂定）；在此之前，合并前人工复核须确认实际使用的银行文件均由 Excel、WPS 或银行系统直接导出、未经手工改写 XML
 - **关闭**：v3.2.22（暂定，分支 `fix/statement-xlsx-io-boundary`）。workbook.xml、关系文件或工作表 XML 含注释、标签内有制表符等写法时（`readers.js` `hasUnverifiableXmlMarkup`），整张表不还原并按「长数字无法核对原值」提示，照常生成；判断跳过引号内的属性值；重复账单过滤的工作表原文核对共用同一判断（[spec](../changes/v3.2.22/fix/statement-xlsx-io-boundary/spec.md) D1）。验证：单测 `statement-long-number-source-text.test.js` 新增关系标签制表符分隔并互换目标、工作表同一坐标有注释掉的旧行、属性值含 `>` 三例，翻转单元格内注释与关系文件注释两例，修复前四例均失败；`duplicate-source-rows.test.js` 查重同口径，修复前失败。无法核对原值的长账号不作为大账号自动识别的依据，按未识别处理（spec D6，集成 `statement-long-number-precision.js` ⑤）；⚠️ 此前用二进制 .xls 等识别的超长账号归属建议人工复核。「复核此前用这类文件导出的流水号」须人工处理
+- **进展（v3.2.22 `feat/balance-eod-file-import`，release 合入时并入）**：构造①另在共用的工作表定位（`findXlsxSheetXml`）按读取库口径核对——逐行移植读取库解析关系文件的口径（`readerTagAttributes` / `readerWorksheetEntryKey`，工作表的关系 Id 取读取库解析出的 `Workbook.Sheets[i].id`），算出读取库实际读取的条目，与按关系文件确认的条目不同（含属性用制表符分隔、引号前有换行等）时无法定位原文；构造②在余额文件导入另行收口（工作表 XML 有注释时不导入，单元格坐标按移植的 `forEachReaderCell` 推算），R28 起余额文件导入在上述核对之前另按结构白名单（spec D8，B163）拒绝注释、非规范写法等构造。合入 `release/v3.2.22` 后与上一条「关闭」及 v3.2.21 跨 Sheet 回填（定位不到工作表原文时整份拒绝）叠加：workbook.xml / 关系文件含注释、制表符分隔或引号前换行时，网银账单导入整份拒绝并提示用 Excel 另存（单测 `statement-long-number-source-text.test.js` ⑦⑧）；工作表 XML 含注释时仍按「无法核对原值」提示、照常生成
 
 ### B113（P3 · 已知问题）网银账单明细写出时，文本中形如 `_xHHHH_` 的字面值被当作 OOXML 转义改写
 

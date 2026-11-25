@@ -263,6 +263,7 @@ function buildMappedRows({
   const {
     rows: sourceRows,
     rowNumbers: sourceRowNumbers,
+    rowsBelowHeader,
     headerBreaks = [],
     fullRows: sourceFullRows = null,
     fullHeaders: sourceFullHeaders = null,
@@ -2120,6 +2121,15 @@ function buildMappedRows({
   mappedRows.issues = issues;
   mappedRows.rowMetas = rowMetas;
   mappedRows.headerBreaks = headerBreaks;
+  // v3.2.22：原表表头以下的非空行数（读取器在截取模板列宽、遇汇总行截断之前统计，见 readers.js rowsBelowHeader；
+  //   之后的预处理过滤、拆分 / 合并、合计行处理也都不影响它）。映射后没有行时据此区分「原表只有表头」与
+  //   「原表有内容、处理后没有输出」（后者沿用原有的过滤规则 / 拆分零输出等提示）。不可枚举，只读不导出
+  Object.defineProperty(mappedRows, 'sourceDataRowCount', {
+    value: Number.isInteger(rowsBelowHeader) ? rowsBelowHeader : (sourceRows.length > 0 ? sourceRows.length - 1 : 0),
+    enumerable: false,
+    writable: true,
+    configurable: true
+  });
 
   const sourceRowCount = rows.length > 0 ? rows.length - 1 : 0;
 

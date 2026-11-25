@@ -47,11 +47,17 @@ const RETIRED_CHANNEL_PREFIXES = new Set(['pending', 'bankBuRecon', 'bizOpRecon'
 const RETIRED_ACTION_PREFIXES = new Set(['pending', 'bank-bu', 'biz-op', 'biz-op-v327', 'acquiring']);
 const isRetiredChannel = (channel) => RETIRED_CHANNEL_PREFIXES.has(channel.split(':')[0]);
 const isRetiredAction = (actionKey) => RETIRED_ACTION_PREFIXES.has(actionKey.split(':')[0]);
+// v3.2.22 去掉网银账单「账号顺序固定」：删除大账号模式 / 顺序的读写入口（均未绑定 action）；固定基线本身不改，显式扣除。
+const REMOVED_CHANNELS = new Set(['big-account-mode:load', 'big-account-mode:save', 'big-account-order:load', 'big-account-order:save']);
+const isRemovedChannel = (channel) => REMOVED_CHANNELS.has(channel);
 const retiredBaselinePolicies = baseline.policies.filter((policy) => isRetiredChannel(policy.channel));
-const activeBaselinePolicies = baseline.policies.filter((policy) => !isRetiredChannel(policy.channel));
+const removedBaselinePolicies = baseline.policies.filter((policy) => isRemovedChannel(policy.channel));
+const activeBaselinePolicies = baseline.policies.filter((policy) => (
+  !isRetiredChannel(policy.channel) && !isRemovedChannel(policy.channel)
+));
 const baselineRecoverable = activeBaselinePolicies.filter((policy) => policy.taskKind !== 'exclude');
 const activeBaselineGroups = Object.fromEntries(Object.entries(baseline.groups)
-  .map(([group, channels]) => [group, channels.filter((channel) => !isRetiredChannel(channel))]));
+  .map(([group, channels]) => [group, channels.filter((channel) => !isRetiredChannel(channel) && !isRemovedChannel(channel))]));
 const activeBehaviorCases = baseline.behaviorCases.filter((scenario) => activeBaselineGroups[scenario.group].length > 0);
 const retiredBehaviorCases = baseline.behaviorCases.filter((scenario) => activeBaselineGroups[scenario.group].length === 0);
 const activeAuthority = Object.freeze({
@@ -171,10 +177,27 @@ test('v3.2.20 已下线模块的 74 个基线 channel 全部移出，当前 regi
     .map((scenario) => `${scenario.group}/${scenario.hook}`), ['workerFilePlan/filePlanResolver']);
 });
 
-test('Archive 固定基线逐 channel 保留其余 194 项、模块身份、file/no-file/exclude 和 hook 注册', () => {
+test('v3.2.22 删除的大账号模式 / 顺序 4 个 channel 全部移出，均未绑定 action', () => {
+  assert.deepEqual(
+    removedBaselinePolicies.map((policy) => [policy.channel, policy.taskKind]),
+    [
+      ['big-account-mode:load', 'exclude'],
+      ['big-account-mode:save', 'no-file'],
+      ['big-account-order:load', 'exclude'],
+      ['big-account-order:save', 'no-file']
+    ]
+  );
+  assert.deepEqual(policies.filter((policy) => isRemovedChannel(policy.channel)), []);
+  assert.deepEqual(
+    Object.values(baseline.authority.bindings).flat().filter((taskKey) => isRemovedChannel(taskKey)),
+    []
+  );
+});
+
+test('Archive 固定基线逐 channel 保留其余 190 项、模块身份、file/no-file/exclude 和 hook 注册', () => {
   assert.equal(baseline.baselineCommit, '11086a3cbf632a30adbcfa796e4cd81810c5aef9');
   assert.equal(baseline.policies.length, 268);
-  assert.equal(activeBaselinePolicies.length, 194);
+  assert.equal(activeBaselinePolicies.length, 190);
   const baselineChannels = new Set(activeBaselinePolicies.map((policy) => policy.channel));
   assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => baselineChannels.has(policy.channel))), activeBaselinePolicies);
   assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => !baselineChannels.has(policy.channel))), newPreparationPolicies);
@@ -188,7 +211,7 @@ test('Archive 固定基线逐 channel 保留其余 194 项、模块身份、file
     sorted(activeBaselinePolicies.filter((policy) => policy.taskKind === 'no-file').map((policy) => policy.channel))
   );
   assert.equal(FILE_ACTION_CHANNELS.length, 46);
-  assert.equal(NO_FILE_ACTION_CHANNELS.length, 54);
+  assert.equal(NO_FILE_ACTION_CHANNELS.length, 52);
   assert.deepEqual(
     sorted(Object.values(RESERVE_CHANNELS_BY_SCOPE).flat()),
     sorted(baselineRecoverable.map((policy) => policy.channel))
@@ -199,18 +222,18 @@ test('Archive 固定基线逐 channel 保留其余 194 项、模块身份、file
   );
 });
 
-test('私有 authority、独立 manifest 与扣除已下线模块后的 39-action/45-pair/100-task 清单双向闭合', () => {
+test('私有 authority、独立 manifest 与扣除已下线模块、已删入口后的 39-action/45-pair/98-task 清单双向闭合', () => {
   // 基线 67 action 中 28 个属于已下线模块；其余 action、binding、pair 与基线逐项相等且顺序不变。
   assert.equal(baseline.authority.canonicalActionKeys.length - activeAuthority.canonicalActionKeys.length, 28);
   assert.deepEqual(ACTION_TASK_BINDING_CONTRACT, {
     ...baseline.authority.contract,
     sha256: '414acda230c62605822b9151f80ae7969466c2ebf02a4e58e235b6f5b4e22469',
     actionCount: 39,
-    taskPolicyInventoryCount: 100,
-    taskPolicyInventorySha256: 'a7123f6c24236358aed90791baae775e2e9f6da195959bb3cf62a5200c5c08d7',
+    taskPolicyInventoryCount: 98,
+    taskPolicyInventorySha256: 'ccc8a7dc7218d7c6c26af0e0b3128352d00b71e2d2aff99a6f7f35477c92acb4',
     pairCount: 45,
     boundTaskKeyCount: 38,
-    unboundTaskPolicyCount: 62
+    unboundTaskPolicyCount: 60
   });
   assert.deepEqual(bindingSnapshot(), activeAuthority.bindings);
   assert.deepEqual(CANONICAL_ACTION_KEYS, activeAuthority.canonicalActionKeys);
@@ -221,9 +244,9 @@ test('私有 authority、独立 manifest 与扣除已下线模块后的 39-actio
   assert.deepEqual(registry.summary.taskPolicyInventory, sorted(baselineRecoverable.map((policy) => policy.taskKey)));
   assert.equal(registry.summary.actionKeys.length, 39);
   assert.equal(registry.summary.pairCount, 45);
-  assert.equal(registry.summary.taskPolicyInventory.length, 100);
+  assert.equal(registry.summary.taskPolicyInventory.length, 98);
   assert.equal(registry.summary.boundTaskKeyCount, 38);
-  assert.equal(registry.summary.unboundTaskPolicyCount, 62);
+  assert.equal(registry.summary.unboundTaskPolicyCount, 60);
   assert.equal(registry.summary.sha256, ACTION_TASK_BINDING_CONTRACT.sha256);
   assert.equal(registry.summary.taskPolicyInventorySha256, ACTION_TASK_BINDING_CONTRACT.taskPolicyInventorySha256);
   const bindingPairs = [];

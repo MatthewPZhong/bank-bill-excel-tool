@@ -67,12 +67,12 @@ function withChangedToolbox(t, change, work) {
   try { return work(); } finally { mocked.mock.restore(); }
 }
 
-test('实际 G2 装配覆盖全部 100 个 taskKey、四 adapter 和四历史 route（含两条已下线遗留 route），装配不调用 owner', () => {
+test('实际 G2 装配覆盖全部 98 个 taskKey、四 adapter 和四历史 route（含两条已下线遗留 route），装配不调用 owner', () => {
   const effects = [];
   const compiled = createExecutionTaskComposition(taskContext(effects));
   const policies = compiled.archivePolicies.filter((policy) => policy.batchPolicy !== 'exclude');
-  assert.equal(policies.length, 100);
-  assert.equal(compiled.taskBindings.length, 100);
+  assert.equal(policies.length, 98);
+  assert.equal(compiled.taskBindings.length, 98);
   assert.deepEqual(compiled.taskBindings.map((binding) => binding.taskKey).sort(), policies.map((policy) => policy.taskKey).sort());
   assert.deepEqual(compiled.taskAdapters.map((adapter) => adapter.id).sort(), ADAPTERS);
   assert.deepEqual(compiled.terminalRoutes.map((entry) => entry.route).sort(), ROUTES);

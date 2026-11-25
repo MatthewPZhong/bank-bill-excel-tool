@@ -7,14 +7,16 @@ const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
   version: 1,
   canonicalization: 'RFC8785-JCS',
   // v3.2.20：随业务OP数据核对 / 月度Pending / 收单 / 月度BU回填下线重算（可恢复 TaskPolicy 134 → 100）。
+  // v3.2.22：去掉网银账单「账号顺序固定」，删除未绑定 action 的 big-account-mode:save、big-account-order:save
+  //   （可恢复 TaskPolicy 100 → 98、unbound 62 → 60；action binding 与其摘要不变）。
   sha256: '414acda230c62605822b9151f80ae7969466c2ebf02a4e58e235b6f5b4e22469',
   actionCount: 39,
-  taskPolicyInventoryCount: 100,
+  taskPolicyInventoryCount: 98,
   taskPolicyInventoryCanonicalization: 'RFC8785-JCS',
-  taskPolicyInventorySha256: 'a7123f6c24236358aed90791baae775e2e9f6da195959bb3cf62a5200c5c08d7',
+  taskPolicyInventorySha256: 'ccc8a7dc7218d7c6c26af0e0b3128352d00b71e2d2aff99a6f7f35477c92acb4',
   pairCount: 45,
   boundTaskKeyCount: 38,
-  unboundTaskPolicyCount: 62
+  unboundTaskPolicyCount: 60
 });
 
 // 模块内私有 literal 是 action → legacy TaskPolicy 的唯一 authority。

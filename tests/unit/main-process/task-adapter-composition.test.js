@@ -12,7 +12,7 @@ const {
 
 const sourceRoot = path.resolve(__dirname, '../../../src');
 
-test('启动装配显式覆盖全部 100 个受控任务并排除 exclude，不接受未绑定任务', () => {
+test('启动装配显式覆盖全部 98 个受控任务并排除 exclude，不接受未绑定任务', () => {
   const policies = createTaskPolicyRegistry().list();
   const registry = createBusinessTaskAdapterRegistry({
     policies,
@@ -35,7 +35,7 @@ test('启动装配显式覆盖全部 100 个受控任务并排除 exclude，不�
     assert.ok(Object.isFrozen(adapter));
     counts[adapter.id] = (counts[adapter.id] || 0) + 1;
   }
-  assert.equal(Object.values(counts).reduce((sum, n) => sum + n, 0), 100);
+  assert.equal(Object.values(counts).reduce((sum, n) => sum + n, 0), 98);
   assert.equal(counts['position-reconciliation'], 15);
   assert.throws(() => registry.resolve('renderer:injected'), { code: 'TASK_ADAPTER_UNBOUND' });
 });

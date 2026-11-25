@@ -1184,8 +1184,6 @@ async function verifyBigAccountCompletionRejectsInjectedConflict(dir) {
       clearGeneratedExports: record('clearGeneratedExports'),
       statementDuplicateReview: { clear: record('statementDuplicateReview.clear'), cancel: record('statementDuplicateReview.cancel') },
       executeFilenameMappingImportPlan: record('executeFilenameMappingImportPlan'),
-      readBigAccountMode: () => null,
-      readBigAccountOrder: () => null,
       ensureStorageRoot: () => env.storageRoot,
       createErrorResult: (payload) => ({ status: 'error', ...payload }),
       appendActivityLogEntry: () => {}
@@ -1223,6 +1221,173 @@ async function verifyBigAccountCompletionRejectsInjectedConflict(dir) {
   assertEq(env.exportFiles(), [], 'Step2h.预检不产出文件');
 }
 
+// 记录 fn 执行期间业务代码对路径中含 markers 的文件 / 目录的任何访问（读、查存在、列目录、写、删）
+async function watchFsAccess(markers, fn) {
+  const methods = ['readFileSync', 'openSync', 'existsSync', 'statSync', 'lstatSync', 'accessSync', 'readdirSync', 'writeFileSync',
+    'renameSync', 'unlinkSync', 'rmSync', 'copyFileSync', 'mkdirSync', 'createReadStream', 'readFile', 'open', 'stat', 'readdir', 'writeFile'];
+  const promiseMethods = ['readFile', 'open', 'stat', 'readdir', 'writeFile', 'access', 'rename', 'unlink', 'rm'];
+  const touched = [];
+  const hit = (method, args) => {
+    const target = String(args[0] == null ? '' : args[0]);
+    if (markers.some((marker) => target.includes(marker))) touched.push(`${method}:${path.basename(target)}`);
+  };
+  const originals = [];
+  const wrap = (owner, name, label) => {
+    if (typeof owner[name] !== 'function') return;
+    const original = owner[name];
+    originals.push([owner, name, original]);
+    owner[name] = function watched(...args) { hit(label, args); return original.apply(this, args); };
+  };
+  methods.forEach((name) => wrap(fs, name, name));
+  promiseMethods.forEach((name) => wrap(fs.promises, name, `promises.${name}`));
+  try {
+    return { result: await fn(), touched };
+  } finally {
+    originals.reverse().forEach(([owner, name, original]) => { owner[name] = original; });
+  }
+}
+
+// (h2) v3.2.22 去掉「账号顺序固定」：升级前留下的固定模式与记住的顺序文件不再读取——多大账号导入仍进入手动选择，
+//   选择结果不带 forceMode / 含空段的行；完成选择后照常生成，整个过程不读取、不改写这些文件
+async function verifyResidualFixedOrderFilesIgnored(dir) {
+  const env = createEnvironment(dir, 'step2h2');
+  const owner = env.defineTemplate('招商银行-上海', 'A', { balance: '无', merchant: `${FIXED}M601` });
+  const channelId = env.saveWithChannel(owner, { mode: 'create' }).channelId;
+  const child = env.defineTemplate('CMB-SH', 'D', { balance: 'Bal', merchant: `${FIXED}${MULTI}` });
+  env.saveWithChannel(child, { mode: 'join', channelId });
+  env.bigAccountsByTemplateId.set(child.id, [{ merchantId: 'M601', currencies: ['USD'] }, { merchantId: 'M602', currencies: ['USD'] }]);
+  const fileA = path.join(dir, 'step2h2-a.xlsx');
+  const fileB = path.join(dir, 'step2h2-b.xlsx');
+  writeSource(fileA, 'A', [['2026-09-01', 'IGNORED', 'USD', '1', '']]);
+  writeSource(fileB, 'D', [['2026-09-01', 'IGNORED', 'USD', '2', '', '12']]);
+  // 与 v3.2.21 big-account-mode-store / big-account-order-store 相同的文件格式；按文件名映射入口与各模板 id 都写一份
+  const residualFiles = [];
+  for (const templateId of ['__FILENAME_MAPPING__', owner.id, child.id]) {
+    for (const [folder, payload] of [
+      ['big-account-modes', { templateId: String(templateId), mode: 'fixed', updatedAt: '2026-11-01T00:00:00.000Z' }],
+      ['big-account-orders', {
+        templateId: String(templateId),
+        assignments: [{ rowIndex: 0, merchantId: 'M601', currency: 'USD' }, { rowIndex: 1, merchantId: 'M602', currency: 'USD' }],
+        fileCount: 2,
+        files: [
+          { fileIndex: 0, accountCount: 1, accounts: [{ merchantId: 'M601', currency: 'USD' }] },
+          { fileIndex: 1, accountCount: 1, accounts: [{ merchantId: 'M602', currency: 'USD' }] }
+        ],
+        updatedAt: '2026-11-01T00:00:00.000Z'
+      }]
+    ]) {
+      const filePath = path.join(env.storageRoot, folder, `${templateId}.json`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+      residualFiles.push(filePath);
+    }
+  }
+  const snapshot = () => residualFiles.map((filePath) => fs.readFileSync(filePath, 'utf8'))
+    .concat(['big-account-modes', 'big-account-orders'].map((folder) => fs.readdirSync(path.join(env.storageRoot, folder)).sort().join(',')));
+  const before = snapshot();
+
+  const scope = createMainScope({
+    ...env.mainDeps,
+    ...env.fns,
+    fileImportInProgress: false,
+    lastPendingBigAccountSelection: null,
+    lastFileImportContext: null,
+    statementImportSessions: new Map(),
+    getEnumConfig: () => ({}),
+    getStatementChannelMigrationPendingMessage: () => null,
+    clearPendingManualBalancePrompt: () => {},
+    clearGeneratedExports: () => {},
+    statementDuplicateReview: { clear: () => {}, cancel: () => {}, review: ({ entries }) => ({ status: 'ok', entries }) },
+    executeFilenameMappingImportPlan: () => {},
+    ensureStorageRoot: () => env.storageRoot,
+    createErrorResult: (payload) => ({ status: 'error', ...payload }),
+    appendActivityLogEntry: () => {}
+  });
+  const prepared = { previewOnly: true, inputFilePaths: [fileA, fileB], selectionResult: { filePaths: [fileA, fileB] } };
+  const { result: run, touched } = await watchFsAccess(['big-account-modes', 'big-account-orders'], async () => {
+    const preview = await scope.handleFilenameMappingImport(prepared);
+    const contextId = scope.rememberPendingBigAccountSelection(prepared.pendingBigAccountSelection);
+    const rows = prepared.pendingBigAccountSelection.rows;
+    const handler = scope.nested('completeBigAccountSelectionHandler');
+    const outcome = scope.markContinuationPrepareRejection(await handler.prepare(null, {
+      contextId,
+      // 旧版界面会多带 mode / rememberOrder：忽略，按不固定口径校验
+      mode: 'fixed',
+      rememberOrder: true,
+      assignments: rows.map((row) => ({ index: row.index, merchantId: row.filePath === fileA ? 'M601' : 'M602', currency: 'USD' }))
+    }), { keepErrorCodes: ['BIG_ACCOUNT_SELECTION_INVALID'] });
+    const generated = outcome.proceed
+      ? await handler.execute(null, outcome, { fileEvidence: { filePlan: outcome.filePlan } })
+      : null;
+    return { preview, rows, outcome, generated };
+  });
+  assertEq([
+    run.preview && run.preview.status,
+    Object.hasOwn(run.preview || {}, 'forceMode'),
+    Object.hasOwn(run.preview || {}, 'rowsWithEmptyBlocks'),
+    run.rows.length
+  ], ['select-big-account', false, false, 2], 'Step2h2.残留固定模式与记住的顺序时仍进入手动选择，不自动分配');
+  assertEq([run.outcome.proceed, run.outcome.result], [true, undefined], 'Step2h2.手动选择完成照常放行');
+  assertEq([run.generated && run.generated.status, env.exportFiles().length > 0], ['captured', true], 'Step2h2.按所选账号照常生成');
+  const probe = await watchFsAccess(['big-account-modes'], async () => fs.readFileSync(residualFiles[0], 'utf8'));
+  assertEq(probe.touched, [`readFileSync:${path.basename(residualFiles[0])}`], 'Step2h2.前提：访问记录能观测到对残留文件的读取');
+  assertEq(touched, [], 'Step2h2.导入预检、完成选择与生成全程不访问残留的模式 / 顺序文件');
+  assertEq(snapshot(), before, 'Step2h2.残留文件原样保留');
+}
+
+// (h3) v3.2.22 按文件名映射入口（真实读取与映射）：MerchantId 由大账号决定的模板，整批原表只有表头时在混合模式检查、
+//   直接识别与手动选择之前报「没有交易数据」，预检阶段按未开始导入处理（保留上一批界面）；混有交易文件时只为它留选择位置
+async function verifyFilenameMappingHeaderOnlyBatch(dir) {
+  const env = createEnvironment(dir, 'step2h3');
+  const template = env.defineTemplate('CMB-SH', 'D', { balance: 'Bal', merchant: `${FIXED}${MULTI}` });
+  env.saveWithChannel(template, { mode: 'create' });
+  env.bigAccountsByTemplateId.set(template.id, [{ merchantId: 'M601', currencies: ['USD'] }, { merchantId: 'M602', currencies: ['USD'] }]);
+  const emptyA = path.join(dir, 'step2h3-empty-a.xlsx');
+  const emptyB = path.join(dir, 'step2h3-empty-b.xlsx');
+  const withRows = path.join(dir, 'step2h3-rows.xlsx');
+  writeSource(emptyA, 'D', []);
+  writeSource(emptyB, 'D', []);
+  writeSource(withRows, 'D', [['2026-09-01', 'IGNORED', 'USD', '2', '', '12']]);
+  const run = async (filePaths) => {
+    const scope = createMainScope({
+      ...env.mainDeps,
+      ...env.fns,
+      fileImportInProgress: false,
+      lastPendingBigAccountSelection: null,
+      getEnumConfig: () => ({}),
+      getStatementChannelMigrationPendingMessage: () => null,
+      clearPendingManualBalancePrompt: () => {},
+      clearGeneratedExports: () => {},
+      statementDuplicateReview: { clear: () => {}, cancel: () => {} },
+      executeFilenameMappingImportPlan: () => {},
+      ensureStorageRoot: () => env.storageRoot,
+      createErrorResult: (payload) => ({ status: 'error', ...payload }),
+      appendActivityLogEntry: () => {}
+    });
+    const prepared = { previewOnly: true, inputFilePaths: filePaths, selectionResult: { filePaths } };
+    return { result: await scope.handleFilenameMappingImport(prepared), prepared };
+  };
+  const headerOnly = await run([emptyA, emptyB]);
+  assertEq([
+    headerOnly.result && headerOnly.result.status,
+    headerOnly.result && headerOnly.result.errorCode,
+    headerOnly.result && headerOnly.result.message,
+    headerOnly.result && headerOnly.result.preservesSession,
+    headerOnly.prepared.pendingBigAccountSelection || null
+  ], ['error', 'NO_TRANSACTION_DATA', '导入文件中没有账号存在交易数据', true, null], 'Step2h3.整批只有表头：报没有交易数据，按未开始导入处理，不进入大账号选择');
+  // 一个候选大账号（直接识别）、没有候选大账号（只维护了自有账号）：同样在识别前拦截，不误报未识别到大账号
+  for (const [label, bigAccounts] of [['一个候选大账号', [{ merchantId: 'M601', currencies: ['USD'] }]], ['没有候选大账号', []]]) {
+    env.bigAccountsByTemplateId.set(template.id, bigAccounts);
+    const { result } = await run([emptyA, emptyB]);
+    assertEq([result && result.errorCode, result && result.preservesSession], ['NO_TRANSACTION_DATA', true], `Step2h3.整批只有表头（${label}）`);
+  }
+  env.bigAccountsByTemplateId.set(template.id, [{ merchantId: 'M601', currencies: ['USD'] }, { merchantId: 'M602', currencies: ['USD'] }]);
+  const mixed = await run([emptyA, withRows]);
+  assertEq([mixed.result && mixed.result.status, (mixed.result && mixed.result.rows || []).map((row) => row.fileName)],
+    ['select-big-account', ['step2h3-rows.xlsx']], 'Step2h3.混有交易文件：只为有交易的文件留选择位置');
+  assertEq(env.exportFiles(), [], 'Step2h3.预检不产出文件');
+}
+
 // (i) release 审查：进入大账号选择时，各账号块的账号、币种都由用户的选择覆盖。原行中余额方式不同的两个子模板暂时是同一账户时，
 //   预检不按原行拒绝（进入选择），完成选择后按分配结果判断：两边分到不同账号时放行，分到同一账号时按未开始拒绝
 async function verifyBigAccountSelectionDefersProvisionalConflict(dir) {
@@ -1253,8 +1418,6 @@ async function verifyBigAccountSelectionDefersProvisionalConflict(dir) {
       clearGeneratedExports: record('clearGeneratedExports'),
       statementDuplicateReview: { clear: record('statementDuplicateReview.clear'), cancel: record('statementDuplicateReview.cancel') },
       executeFilenameMappingImportPlan: record('executeFilenameMappingImportPlan'),
-      readBigAccountMode: () => null,
-      readBigAccountOrder: () => null,
       ensureStorageRoot: () => env.storageRoot,
       createErrorResult: (payload) => ({ status: 'error', ...payload }),
       appendActivityLogEntry: () => {}
@@ -1328,8 +1491,6 @@ async function verifyAutoBigAccountUsesInjectedRows(dir) {
       clearGeneratedExports: () => {},
       statementDuplicateReview: { clear: () => {}, cancel: () => {} },
       executeFilenameMappingImportPlan: () => {},
-      readBigAccountMode: () => null,
-      readBigAccountOrder: () => null,
       ensureStorageRoot: () => env.storageRoot,
       createErrorResult: (payload) => ({ status: 'error', ...payload }),
       appendActivityLogEntry: () => {},
@@ -2423,7 +2584,7 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     } });
     const handler = scope.nested('completeBigAccountSelectionHandler');
     const result = await handler.execute(null, {
-      contextId: 'step20b', isFixedMode: false, normalizedAssignments: [], rememberOrder: false
+      contextId: 'step20b', normalizedAssignments: []
     }, { fileEvidence: { filePlan: { inputs: [] } } });
     return { result, cleared: sideEffects.includes('clearGeneratedExports'), report: scope.lastErrorReport };
   };
@@ -2594,6 +2755,8 @@ async function run() {
     verifyMixedBalanceModes(dir);
     await verifyDirectImportRejectsInjectedConflict(dir);
     await verifyBigAccountCompletionRejectsInjectedConflict(dir);
+    await verifyResidualFixedOrderFilesIgnored(dir);
+    await verifyFilenameMappingHeaderOnlyBatch(dir);
     await verifyBigAccountSelectionDefersProvisionalConflict(dir);
     await verifyAutoBigAccountUsesInjectedRows(dir);
     verifyMixedGroups(dir);

@@ -36,7 +36,6 @@
       createAmountSplitRulesDialog,
       createBillSplitRowsDialog,
       createBillSplitMappingsDialog,
-      createRememberOrderMismatchDialog,
       createDuplicateRowsReviewDialog,
       createAccountMappingMigrationDialog,
       closeModal,
@@ -570,20 +569,6 @@
       }));
     }
 
-    // 8. 大账号顺序不匹配提示对话框（v1.5.0）
-    function applyRememberOrderMismatchDialogPreviewState() {
-      setCurrentModule(MODULES.statementGenerator.id);
-      openModal(() => createRememberOrderMismatchDialog({
-        message: '已记住的大账号顺序与当前导入文件不匹配（A.xlsx：账户号 6222...01 vs 已记 9558...08），请选择处理方式。',
-        bigAccountResult: {
-          accounts: [
-            { merchantId: '6222000000000001', currency: 'USD' },
-            { merchantId: '9558800000000008', currency: 'HKD' }
-          ]
-        }
-      }));
-    }
-
     // 8b. 重复账单提醒（v3.2.19 原始账单预处理「重复账单过滤」）
     function applyDuplicateRowsReviewDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
@@ -703,7 +688,6 @@
       ];
       openModal(() => createBigAccountSelectionDialog({
         rows,
-        rowsWithEmptyBlocks: rows,
         expandedBigAccountOptions: [
           { merchantId: '6222000000000001', currency: 'USD' },
           { merchantId: '6222000000000001', currency: 'HKD' },
@@ -714,7 +698,6 @@
         ],
         templateId: 'preview-template-4',
         templateName: 'HSBC-SG',
-        canRemember: true,
         onDone: () => {},
         onCancel: closeModal
       }));
@@ -737,7 +720,6 @@
       }
       openModal(() => createBigAccountSelectionDialog({
         rows,
-        rowsWithEmptyBlocks: rows,
         expandedBigAccountOptions: [
           { merchantId: '6222000000000001', currency: 'USD' },
           { merchantId: '6222000000000001', currency: 'HKD' },
@@ -750,7 +732,6 @@
         ],
         templateId: 'preview-template-4',
         templateName: 'HSBC-SG',
-        canRemember: true,
         onDone: () => {},
         onCancel: closeModal
       }));
@@ -1527,7 +1508,6 @@
       applyAmountSplitRulesDialogPreviewState,
       applyBillSplitRowsDialogPreviewState,
       applyBillSplitMappingsDialogPreviewState,
-      applyRememberOrderMismatchDialogPreviewState,
       applyDuplicateRowsReviewDialogPreviewState,
       applyAccountMappingMigrationDialogPreviewState,
       // 2026-04-24 补：历史遗漏 preview

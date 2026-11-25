@@ -591,6 +591,7 @@ const {
 } = require('./main-process/manual-balance-seed-settlement');
 const { parseBankAccountExcel } = require('./backend/bank-account-import');
 const {
+  balanceImportAccountsForPrompt,
   matchBalanceSeedImport,
   parseBalanceSeedImportRows,
   readBalanceSeedImportFile
@@ -601,8 +602,6 @@ const {
   writeBalanceAdjustments,
   resolveBalanceAdjustment
 } = require('./backend/balance-adjustment-store');
-const { readBigAccountOrder, writeBigAccountOrder } = require('./backend/big-account-order-store');
-const { readBigAccountMode, writeBigAccountMode } = require('./backend/big-account-mode-store');
 const {
   appendCurrencyBigAccountIssues,
   calculateEndingBalanceFromAmounts,
@@ -738,9 +737,6 @@ const {
   showImportOpenDialog: showRememberedImportOpenDialog
 } = require('./main-process/import-dialog-state');
 const {
-  findSavedOrderFileRowMismatches,
-  hasUnidentifiedTransactionRows,
-  matchImportFilesToSavedOrder,
   matchMerchantIds,
   normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
@@ -2587,7 +2583,7 @@ function buildBalanceMismatchConfirmResult(mismatches, generatedFiles) {
   };
 }
 
-function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks, bigAccounts = [], fixedAssignments = [], templateId } = {}) {
+function buildBigAccountSelectionRequiredResult({ rows = [], bigAccounts = [], fixedAssignments = [], templateId } = {}) {
   const mapRow = (row, index) => ({
     index: Number.isInteger(row.index) ? row.index : index,
     label: `${index + 1}.`,
@@ -2600,7 +2596,6 @@ function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks
     selectionMode: 'multi-row',
     templateId,
     rows: rows.map(mapRow),
-    rowsWithEmptyBlocks: (rowsWithEmptyBlocks || rows).map(mapRow),
     bigAccounts: bigAccounts.map((item) => ({
       merchantId: normalizeCell(item.merchantId),
       currencies: Array.isArray(item.currencies)
@@ -2627,10 +2622,7 @@ function buildBigAccountPreviewResult(result, contextId) {
   return {
     ...result,
     contextId,
-    rows: sanitizeRows(result && result.rows),
-    rowsWithEmptyBlocks: sanitizeRows(
-      result && (result.rowsWithEmptyBlocks || result.rows)
-    )
+    rows: sanitizeRows(result && result.rows)
   };
 }
 
@@ -2647,10 +2639,8 @@ function normalizePendingBigAccountSelection(pendingContext, payload = {}) {
           : (Number.isInteger(item.rowIndex) ? item.rowIndex : index)
       }))
     : [];
-  const isFixedMode = payload.mode === 'fixed';
-  const expectedRows = isFixedMode
-    ? (pendingContext.rowsWithEmptyBlocks || pendingContext.rows)
-    : pendingContext.rows;
+  // v3.2.22：账号顺序固定已去掉，只按不含无交易空段的预览行（账号顺序不固定口径）核对。
+  const expectedRows = Array.isArray(pendingContext.rows) ? pendingContext.rows : [];
   if (!assignments.length || assignments.length !== expectedRows.length) {
     const error = new FileValidationError(
       'BIG_ACCOUNT_SELECTION_INVALID',
@@ -2699,18 +2689,14 @@ function normalizePendingBigAccountSelection(pendingContext, payload = {}) {
       rowIndex: assignment.rowIndex
     };
   }).sort((left, right) => left.rowIndex - right.rowIndex);
-  return { isFixedMode, normalizedAssignments };
+  return { normalizedAssignments };
 }
 
-function selectPendingBigAccountRows(pendingContext, mode, rowIndexes = []) {
+function selectPendingBigAccountRows(pendingContext, rowIndexes = []) {
   const requestedRowIndexes = new Set(
     (Array.isArray(rowIndexes) ? rowIndexes : []).filter(Number.isInteger)
   );
-  const serverRows = mode === 'fixed'
-    ? (pendingContext && (
-        pendingContext.rowsWithEmptyBlocks || pendingContext.rows
-      ))
-    : (pendingContext && pendingContext.rows);
+  const serverRows = pendingContext && pendingContext.rows;
   return (Array.isArray(serverRows) ? serverRows : [])
     .filter((row) => requestedRowIndexes.has(Number(row.index)));
 }
@@ -2951,12 +2937,26 @@ function rebuildMatchedTemplateFileEntries({
   });
 }
 
+// v3.2.22：原表只有表头、表头以下没有任何非空行（按映射时记下的 sourceDataRowCount 判断：读取器在截取模板列宽、
+//   遇汇总行截断之前统计）。
+//   原表有数据、只是处理后没有输出的文件不算（如「过滤账单」全部过滤、拆分合并后零输出：沿用原流程与原有提示），
+//   只有余额行等有数据行的文件也不算；没有记下原表行数时按不是只有表头处理。
+function isHeaderOnlyDetailRows(detailRows) {
+  return Array.isArray(detailRows) && detailRows.length <= 1 && detailRows.sourceDataRowCount === 0;
+}
+
 function identifyAccountBlocks(detailRows, options = {}) {
   const { includeEmptyBlocks = false } = options;
   const headerRow = detailRows[0] || [];
   const dataRows = detailRows.slice(1);
   const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
   const headerBreaks = Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks : [];
+
+  // v3.2.22：原表只有表头（没有任何数据行）的文件在不含空段的口径下没有账号块，选择窗口与分配执行都不为它留位置；
+  //   有数据行但没有借贷的文件（可能只有余额行）、数据行全被预处理过滤掉的文件仍按原口径处理
+  if (!includeEmptyBlocks && isHeaderOnlyDetailRows(detailRows)) {
+    return [];
+  }
 
   if (!headerBreaks.length) {
     return [{
@@ -3433,6 +3433,14 @@ function isMultiBigAccountMapping(mappings = []) {
   });
 }
 
+// v3.2.22：MerchantId 由大账号决定（保存为多大账号标记，或映射配置里显示为「自己输入」），导入时需要识别或分配大账号
+function usesBigAccountMerchantMapping(mappings = []) {
+  return isMultiBigAccountMapping(mappings) || (Array.isArray(mappings) ? mappings : []).some((mapping) => (
+    normalizeCell(mapping && mapping.templateField) === 'MerchantId'
+    && normalizeCell(mapping && mapping.mappedField) === MERCHANT_ID_SELF_INPUT_OPTION
+  ));
+}
+
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」— 逐行按币种回填，不参与大账号识别与选择
 function isCurrencyOnlyMerchantMapping(mappings = []) {
   return (Array.isArray(mappings) ? mappings : []).some((mapping) => {
@@ -3493,6 +3501,11 @@ function resolveDirectBigAccountRecognition({
   }
 
   for (const entry of (Array.isArray(fileEntries) ? fileEntries : [])) {
+    // v3.2.22：原表只有表头的文件没有交易、不需要大账号（与手动选择时不占位置同一口径），不参与识别；
+    //   调用方仍按完整的文件清单生成
+    if (isHeaderOnlyDetailRows(entry && entry.detailRows)) {
+      continue;
+    }
     const entryTemplateConfig = getEntryTemplateConfig({
       entry,
       fallbackTemplateConfig,
@@ -3601,18 +3614,6 @@ function resolvePreparedDirectBigAccountRecognition({ prepared, recognitionArgs 
   const decision = resolveDirectBigAccountRecognition(recognitionArgs);
   if (prepared.previewOnly) {
     prepared.directBigAccountRecognitionDecision = decision;
-  }
-  return decision;
-}
-
-function resolvePreparedFixedBigAccountAutoMatchDecision(prepared, resolveDecision) {
-  if (!prepared.previewOnly
-      && Object.hasOwn(prepared, 'fixedBigAccountAutoMatchDecision')) {
-    return prepared.fixedBigAccountAutoMatchDecision;
-  }
-  const decision = resolveDecision();
-  if (prepared.previewOnly) {
-    prepared.fixedBigAccountAutoMatchDecision = decision;
   }
   return decision;
 }
@@ -3944,13 +3945,51 @@ function markContinuationPrepareRejection(outcome, { keepErrorCodes = [] } = {})
   return { ...outcome, result: { ...outcome.result, preservesSession: true } };
 }
 
-// 指定模板按记住的固定顺序自动套用大账号时，生成失败是否照常按导入失败报错（而不是降级为重新选择大账号）：
-//   - v3.2.19：重复账单【确认】后的续跑：条目已按记住的顺序分配并经用户确认，生成失败（如收支同时有值）照常报错
-//     （复核窗口会把它当作最终结果）；
-//   - v3.2.22 B113：明细含无法写入 Excel 的字符（带行列位置的拒绝）改选大账号也修不好，照常报错并列出位置（Codex 第五轮）
-function shouldPropagateAutoMatchError(error, prepared) {
-  if (prepared && prepared.duplicateReviewConfirmation && !prepared.previewOnly) return true;
-  return Boolean(error && error.positionsOnly);
+// v3.2.22：只有表头的文件不再占账号块后，「没有交易数据」在预检阶段也会出现：此时未开始导入，
+//   标记 preservesSession，界面只提示原因、保留上一批的导出与补录入口。
+//   fileEntries 带有「跨 Sheet 回填」的逐行原因时按 v3.2.21 的方式报错（状态框可查看、导出逐行原因），不按未开始的拒绝只弹提示
+function createNoTransactionDataResult(templateName, prepared, fileEntries = []) {
+  if (collectCrossSheetBackfillWarnings(fileEntries).length) return createNoTransactionDataErrorResult(fileEntries, templateName);
+  const result = createErrorResult({
+    step: '导入网银明细文件',
+    message: '导入文件中没有账号存在交易数据',
+    errorCode: 'NO_TRANSACTION_DATA',
+    templateName
+  });
+  return prepared && prepared.previewOnly ? { ...result, preservesSession: true } : result;
+}
+
+// v3.2.22：整批文件的原表都只有表头（没有任何数据行）时没有可识别或分配大账号的交易
+function allEntriesHeaderOnly(fileEntries) {
+  return Array.isArray(fileEntries) && fileEntries.length > 0
+    && fileEntries.every((entry) => isHeaderOnlyDetailRows(entry && entry.detailRows));
+}
+
+// v3.2.22：不需要映射结果时判断整批原表是否都只有表头：逐文件按模板表头读原表（与映射同一读取口径：表头定位、
+//   表头以下非空行数 rowsBelowHeader，见 isHeaderOnlyDetailRows；同一文件变更检查），不映射、不还原长数字原文；
+//   见到第一份表头以下有数据的文件即返回 false。读取或表头定位失败（FileValidationError）时无法判断，返回 null，
+//   交给原路径按原口径报告；文件在确认期间变化等其他错误照常抛出
+function probeSourceFilesHeaderOnly({ template, inputFilePaths = [] }) {
+  const filePaths = normalizeInputFilePaths(inputFilePaths, { dedupe: false });
+  if (!filePaths.length) return false;
+  for (const inputFilePath of filePaths) {
+    let source;
+    try {
+      // 只用表头定位与表头以下的行数（都按读取库的值），不还原长数字原文
+      source = readRowsWithMetadata(inputFilePath, (template && template.headers) || [], {
+        readGuard: createStatementWorkbookReadGuard(inputFilePath)
+      });
+    } catch (error) {
+      if (!(error instanceof FileValidationError) || error.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) throw error;
+      return null;
+    }
+    const rows = Array.isArray(source && source.rows) ? source.rows : [];
+    const rowsBelowHeader = Number.isInteger(source && source.rowsBelowHeader)
+      ? source.rowsBelowHeader
+      : Math.max(0, rows.length - 1);
+    if (rowsBelowHeader > 0) return false;
+  }
+  return true;
 }
 
 function createBigAccountRecognitionErrorResult(resolution, context = {}) {
@@ -4115,14 +4154,7 @@ function buildTemplateLibraryPayload() {
   const templates = database.listTemplateBundleEntries().map((entry) => {
     const template = database.getTemplateByKey(entry.templateKey) || database.getTemplateByName(entry.name);
     if (template) {
-      const orderConfig = readBigAccountOrder(ensureStorageRoot(), template.id);
-      if (orderConfig && Array.isArray(orderConfig.files) && orderConfig.files.length > 0) {
-        entry.bigAccountOrderConfig = orderConfig;
-      }
-      const mode = readBigAccountMode(ensureStorageRoot(), template.id);
-      if (mode === 'fixed') {
-        entry.bigAccountMode = mode;
-      }
+      // v3.2.22：账号顺序固定已去掉，模板包不再带大账号解析模式（bigAccountMode）与记住的顺序（bigAccountOrderConfig）。
       // v1.5.1: 导出账户映射；v3.2.15：渠道子模板的账户映射在渠道层，条目不带。
       if (!entry.channelName) {
         entry.accountMappings = database.listAccountMappings({ templateId: template.id }).map(toBundleAccountMapping);
@@ -11175,18 +11207,7 @@ function registerTemplateHandlers() {
           database.saveBillSplitMappings(template.id, normalizedBillSplitMappings);
 
           applyBundleBillSplitConfig(template.id, entry);
-
-          if (entry.bigAccountOrderConfig && Array.isArray(entry.bigAccountOrderConfig.files)) {
-            writeBigAccountOrder(ensureStorageRoot(), template.id, entry.bigAccountOrderConfig);
-          } else {
-            writeBigAccountOrder(ensureStorageRoot(), template.id, { assignments: [] });
-          }
-
-          writeBigAccountMode(
-            ensureStorageRoot(),
-            template.id,
-            entry.bigAccountMode === 'fixed' ? 'fixed' : 'unfixed'
-          );
+          // v3.2.22：旧模板包里的 bigAccountMode / bigAccountOrderConfig（账号顺序固定，已去掉）忽略，不报错。
 
           if (existingTemplate) {
             updatedCount += 1;
@@ -13025,15 +13046,8 @@ function buildDuplicateReviewConfigStamp(templateIds) {
       generationConfig = { error: String(error && error.message || error) };
     }
     // 拆分/合并的原始元数据（正负号 / 按字段取发生额的指定账单序号等）也直接计入：不论当前是否生效，变化即重新确认
-    // 大账号「固定模式」与记住的顺序（按记住的顺序自动分配大账号时决定各段账号）：存于模板配置以外，一并计入
-    let bigAccountSelection;
-    try {
-      bigAccountSelection = [readBigAccountMode(ensureStorageRoot(), id), readBigAccountOrder(ensureStorageRoot(), id)];
-    } catch (error) {
-      bigAccountSelection = { error: String(error && error.message || error) };
-    }
-    return [id, templateConfig, database.listEffectiveAccountMappings(config.template), database.getBillSplitMeta(id), generationConfig,
-      bigAccountSelection];
+    //   （v3.2.22 起不再有大账号「固定模式」与记住的顺序，不计入）
+    return [id, templateConfig, database.listEffectiveAccountMappings(config.template), database.getBillSplitMeta(id), generationConfig];
   }))).digest('hex');
 }
 
@@ -15745,15 +15759,14 @@ function registerBigAccountHandlers() {
     }
   });
 
-  // v3.2.17：补录余额「导入余额文件」——选择余额文件，按当前补录提示的待补录账号（银行账号 + 币种）提取上一账单日余额，
+  // v3.2.17：补录余额「导入余额文件」——选择余额文件，按当前补录提示的待补录账号提取上一账单日余额，
   //   返回给补录弹窗的「余额确认」视图。只读预检：不写种子、不改补录 prompt 与生成缓存；确认后由渲染层逐个账号
   //   沿用 file:save-balance-seed 写入（主进程照常只接受当前 prompt 指向的账号并校验）。
+  // v3.2.22：文件为「银行原始日终余额信息」，按 银行账户号 + 币种 + 银行名 + 开户地 匹配（银行名、开户地取输出名称拆分，
+  //   与余额账单写入的银行名称、所在地同口径）；「核对上一账单日余额」提示也可导入（当前核对账号在前）。
   ipcMain.handle('file:import-balance-seed-file', async () => {
     const pendingPrompt = lastManualBalancePrompt;
-    const pendingAccounts = pendingPrompt && !pendingPrompt.reason && !pendingPrompt.seedMismatch
-      && Array.isArray(pendingPrompt.pendingAccounts)
-      ? pendingPrompt.pendingAccounts
-      : [];
+    const pendingAccounts = balanceImportAccountsForPrompt(pendingPrompt);
     if (!pendingAccounts.length) {
       return {
         status: 'error',
@@ -15761,26 +15774,54 @@ function registerBigAccountHandlers() {
         message: '当前没有待补录的账号，请重新生成余额'
       };
     }
+    const balanceGroup = splitTemplateName(pendingPrompt.templateName);
+    // v3.2.22 W1：余额文件只接受 xlsx（读取时另按扩展名与内容核对）
     const choice = await showImportOpenDialog('balance-seed-file', {
       title: '选择余额文件',
       properties: ['openFile'],
-      filters: statementFileDialogFilters()
+      filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }]
     });
     const filePath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
     if (!filePath) return { status: 'cancelled' };
     const fileName = path.basename(filePath);
     try {
-      const { rows, displayRows, date1904 } = readBalanceSeedImportFile(filePath);
-      const { records, skippedRowCount } = parseBalanceSeedImportRows(rows, { displayRows, date1904 });
-      const matched = matchBalanceSeedImport(records, pendingAccounts);
+      const { rows, displayRows, date1904, rowNumbers, unreadableCells } = readBalanceSeedImportFile(filePath);
+      const { records, skippedRowCount } = parseBalanceSeedImportRows(rows, { displayRows, date1904, rowNumbers, unreadableCells });
+      // 核对账号可填日期的下限按当前种子记录取（与重算、保存时的预检同口径）。种子文件读取失败（如损坏）时的明细含
+      //   种子文件路径（文件名为银行名，可能是账号），界面弹窗的文字会进活动日志：只返回不带路径的提示
+      let accounts;
+      try {
+        accounts = balanceImportAccountsForPrompt(pendingPrompt, {
+          previousSeedDate: ({ merchantId, currency, targetBillDate }) => {
+            const seed = findPreviousBalanceSeed(ensureStorageRoot(), {
+              bankName: balanceGroup.bankName, merchantId, currency, beforeBillDate: targetBillDate
+            });
+            return seed ? seed.billDate : '';
+          }
+        });
+      } catch (seedError) {
+        if (!(seedError instanceof FileValidationError)) throw seedError;
+        return {
+          status: 'error',
+          errorCode: seedError.code,
+          message: seedError.message,
+          detailLines: ['请在模板管理的【余额管理】中检查本组的余额，或删除损坏的余额种子文件后重试']
+        };
+      }
+      const matched = matchBalanceSeedImport(records, accounts, balanceGroup);
+      // 文件名、模板 / 输出名称可能含账号：落盘日志按待匹配账号与长数字脱敏，返回界面的仍是原名
+      const maskForLog = (text) => maskAccountLikeTextForLog(text, accounts.map((account) => account.merchantId));
       appendActivityLogEntry({
         level: 'info',
         message: '导入余额文件，等待确认补录余额',
         details: [
-          `文件：${fileName}`,
-          `模板名：${pendingPrompt.templateName || 'N/A'}`,
+          `文件：${maskForLog(fileName)}`,
+          `模板名：${maskForLog(pendingPrompt.templateName || 'N/A')}`,
+          `银行名 / 开户地：${maskForLog(balanceGroup.bankName || '(空)')} / ${maskForLog(balanceGroup.location || '(空)')}`,
+          ...(pendingPrompt.seedMismatch ? ['入口：核对上一账单日余额'] : []),
           `待补录账号：${matched.accounts.length} 个`,
           `从文件提取：${matched.matchedCount} 个`,
+          ...(matched.choiceCount ? [`同日多个余额待选择：${matched.choiceCount} 个`] : []),
           `需手工录入：${matched.manualCount} 个`,
           ...(skippedRowCount ? [`跳过无效行：${skippedRowCount} 行`] : [])
         ]
@@ -15789,6 +15830,8 @@ function registerBigAccountHandlers() {
         status: 'success',
         fileName,
         templateName: pendingPrompt.templateName || '',
+        bankName: balanceGroup.bankName,
+        location: balanceGroup.location,
         skippedRowCount,
         ...matched
       };
@@ -15918,26 +15961,6 @@ function findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockO
   return null;
 }
 
-// 大账号预览行对应的块里有没有交易（收入或支出非空的行），按块实际包含的明细行判断：
-//   没有分段的文件整份是一块，起止不经裁剪，只有表头时也是 [0, 0]，不能只看起止。
-//   明细没有收入 / 支出列时无法判断，返回 null（按有交易处理）。
-function bigAccountBlockHasTransactions(detailRows, startIndex, endIndex) {
-  const headerRow = Array.isArray(detailRows) && Array.isArray(detailRows[0]) ? detailRows[0] : [];
-  const amountIndexes = ['Credit Amount', 'Debit Amount']
-    .map((field) => headerRow.indexOf(field))
-    .filter((index) => index >= 0);
-  if (!amountIndexes.length) return null;
-  const start = Number(startIndex);
-  const end = Number(endIndex);
-  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
-  const dataRows = detailRows.slice(1);
-  for (let index = Math.max(0, start); index <= end && index < dataRows.length; index += 1) {
-    const row = dataRows[index];
-    if (Array.isArray(row) && amountIndexes.some((amountIndex) => normalizeCell(row[amountIndex]) !== '')) return true;
-  }
-  return false;
-}
-
 function buildBigAccountOrderEvidence(pendingContext) {
   const fileEntries = Array.isArray(pendingContext.fileEntries) ? pendingContext.fileEntries : [];
   const allMerchantIds = (pendingContext.bigAccounts || [])
@@ -16011,12 +16034,6 @@ function buildBigAccountOrderEvidence(pendingContext) {
       ).size > 1
         ? 'MULTI_CURRENCY'
         : null;
-      // 区分无交易空段与“有交易但未识别账号”的块，记住顺序时据此核对未识别块的位置是否变化。
-      const hasTransactions = bigAccountBlockHasTransactions(
-        entry.detailRows,
-        previewRow.blockStartIndex,
-        previewRow.blockEndIndex
-      );
       return Object.freeze({
         blockOrdinal,
         sourceRow,
@@ -16024,8 +16041,7 @@ function buildBigAccountOrderEvidence(pendingContext) {
         currency,
         matchKind: identified ? identified.matchType : '',
         accountKey: merchantId ? `${merchantId}\u0000${currency}` : '',
-        ambiguityCode,
-        empty: typeof hasTransactions === 'boolean' ? !hasTransactions : null
+        ambiguityCode
       });
     });
     return Object.freeze({
@@ -16047,7 +16063,7 @@ function buildBigAccountOrderEvidence(pendingContext) {
   });
 }
 
-function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
+function extractBigAccountOrderFromEvidence(pendingContext, rowIndexes) {
   const evidence = pendingContext.bigAccountOrderEvidence;
   if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
     return { status: 'error', failedRows: [], message: '大账号选择预览已失效，请重新导入文件' };
@@ -16080,7 +16096,7 @@ function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
       unmaintainedAccounts
     };
   }
-  const selectedRows = selectPendingBigAccountRows(pendingContext, mode, rowIndexes);
+  const selectedRows = selectPendingBigAccountRows(pendingContext, rowIndexes);
   if (selectedRows.length === 0) {
     return { status: 'error', failedRows: [], message: '请选择需要提取的大账号预览行' };
   }
@@ -16116,194 +16132,6 @@ function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
     result.ambiguousCurrencyFiles = Array.from(new Set(ambiguousCurrencyFiles));
   }
   return result;
-}
-
-// 大账号顺序证据里每份文件逐块（与固定模式预览行一一对应）的 { merchantId（未识别为 ''）, empty（是否无交易，未知为 null）}；
-// 与保存顺序的 rowAccounts / rowEmpty 同口径。
-function bigAccountOrderEvidenceRowLists(evidence) {
-  const files = evidence && Array.isArray(evidence.files) ? evidence.files : [];
-  return files.map((file) => (Array.isArray(file.rows) ? file.rows : [])
-    .map((row) => ({
-      merchantId: row.accountKey !== '' ? normalizeCell(row.merchantId) : '',
-      empty: typeof row.empty === 'boolean' ? row.empty : null
-    })));
-}
-
-// 逐块结果里识别到的账号（按块顺序），供匹配记住的文件。
-function identifiedAccountsFromRowLists(rowLists) {
-  return rowLists.map((rows) => rows
-    .filter((row) => row.merchantId !== '')
-    .map((row) => ({ merchantId: row.merchantId })));
-}
-
-// v3.2.15（release 审查）：固定模式下界面按位置逐块套用记住的分配，而完成选择时服务端只核对账号、不核对币种。
-//   记住的顺序与本次导入文件无法按位置逐块对上时（文件个数不同、匹配不上、同一多币种大账号的多份账单或同一文件里
-//   同一账号多个币种、文件或账号块换序、空段 / 未识别段的位置变化），按位置套用会把账号 / 币种填到别的块上，
-//   因此降级为不固定模式由用户选择，界面也不再套用记住的分配（forceMode 存在即不预填）。
-//   各文件逐块识别到的账号取大账号顺序证据，与保存顺序同口径；没有文件信息的旧顺序无法核对，沿用原行为。
-function resolveSavedBigAccountOrderDecision(pendingContext) {
-  const keep = { forceUnfixed: false, reason: '', fileNames: [] };
-  const templateId = pendingContext && pendingContext.templateId;
-  if (readBigAccountMode(ensureStorageRoot(), templateId) !== 'fixed') return keep;
-  const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
-  if (!savedOrderConfig || !Array.isArray(savedOrderConfig.assignments) || !savedOrderConfig.assignments.length) return keep;
-  if (!Array.isArray(savedOrderConfig.files) || !savedOrderConfig.files.length) return keep;
-  const evidenceFiles = pendingContext.bigAccountOrderEvidence && Array.isArray(pendingContext.bigAccountOrderEvidence.files)
-    ? pendingContext.bigAccountOrderEvidence.files
-    : [];
-  const fileNamesOf = (indexes) => indexes.map((index) => evidenceFiles[index].fileName);
-  if (evidenceFiles.length !== savedOrderConfig.fileCount) return { forceUnfixed: true, reason: 'file-count', fileNames: [] };
-  const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
-  const { failedImportIndexes, ambiguousImportIndexes, savedIndexByImport } = matchImportFilesToSavedOrder(
-    identifiedAccountsFromRowLists(importRowLists),
-    savedOrderConfig
-  );
-  if (ambiguousImportIndexes.length) {
-    return { forceUnfixed: true, reason: 'ambiguous', fileNames: fileNamesOf(ambiguousImportIndexes) };
-  }
-  if (failedImportIndexes.length) return { forceUnfixed: true, reason: 'mismatch', fileNames: fileNamesOf(failedImportIndexes) };
-  // 界面按位置套用：本次第 i 份文件须对上记住的第 i 份，且逐块识别结果一致（不比较拼接后的分配，空段不会造成误降级）。
-  const reorderedIndexes = savedIndexByImport
-    .map((savedIndex, importIndex) => (savedIndex === importIndex ? -1 : importIndex))
-    .filter((importIndex) => importIndex >= 0);
-  if (reorderedIndexes.length) return { forceUnfixed: true, reason: 'reordered', fileNames: fileNamesOf(reorderedIndexes) };
-  const rowMismatches = findSavedOrderFileRowMismatches(importRowLists, savedOrderConfig, savedIndexByImport);
-  if (rowMismatches.length) return { forceUnfixed: true, reason: 'rows', fileNames: fileNamesOf(rowMismatches) };
-  return keep;
-}
-
-const SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS = Object.freeze({
-  'file-count': '本次导入的文件个数与记住的不同',
-  mismatch: '部分文件的账户个数、账户号或账号块顺序与记住的对不上',
-  reordered: '文件顺序与记住的不同',
-  rows: '部分文件的账号块（含无交易的空段、未识别账号的块）与记住的对不上'
-});
-
-// 降级在预检阶段做出：常规导入预检返回大账号选择后直接转入完成选择，不会再以非预检方式运行到这里，
-// 因此日志不区分预检；同一次导入只会判定一次。
-function logSavedBigAccountOrderDowngrade(templateName, decision) {
-  const ambiguous = decision.reason === 'ambiguous';
-  appendActivityLogEntry({
-    level: 'info',
-    message: ambiguous
-      ? '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择'
-      : '已记住的大账号顺序与本次导入文件对不上，改为人工选择',
-    details: [
-      `模板名：${normalizeCell(templateName) || 'N/A'}`,
-      ...(ambiguous ? [] : [`原因：${SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS[decision.reason] || decision.reason}`]),
-      ...(decision.fileNames.length ? [`涉及文件：${decision.fileNames.join('、')}`] : [])
-    ]
-  });
-}
-
-function applySavedBigAccountOrderGuard(_prepared, pendingContext, selectionRequired) {
-  const decision = resolveSavedBigAccountOrderDecision(pendingContext);
-  if (!decision.forceUnfixed) return selectionRequired;
-  logSavedBigAccountOrderDowngrade(pendingContext.template && pendingContext.template.name, decision);
-  return { ...selectionRequired, forceMode: 'unfixed' };
-}
-
-function buildBigAccountOrderData(pendingContext, assignments = []) {
-  const evidence = pendingContext.bigAccountOrderEvidence;
-  if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
-    throw new Error('大账号顺序证据已失效');
-  }
-  return {
-    assignments,
-    fileCount: evidence.files.length,
-    files: evidence.files.map((file) => {
-      const accounts = file.rows
-        .filter((row) => row.accountKey !== '')
-        .map((row) => ({ merchantId: row.merchantId, currency: row.currency }));
-      // 逐块识别账号、是否无交易与 assignments 一一对应（含空段 / 未识别段），供下次按块核对能否按位置套用。
-      const rowAccounts = file.rows.map((row) => (row.accountKey !== '' ? row.merchantId : ''));
-      const rowEmpty = file.rows.map((row) => (typeof row.empty === 'boolean' ? row.empty : null));
-      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts, rowAccounts, rowEmpty };
-    })
-  };
-}
-
-function persistBigAccountOrderAfterGeneration({
-  pendingContext,
-  normalizedAssignments,
-  rememberOrder,
-  result
-}) {
-  if (typeof rememberOrder !== 'boolean') return result;
-  try {
-    const data = rememberOrder
-      ? buildBigAccountOrderData(pendingContext, normalizedAssignments)
-      : { assignments: [] };
-    writeBigAccountOrder(ensureStorageRoot(), pendingContext.templateId, data);
-    return result;
-  } catch (error) {
-    const warning = rememberOrder
-      ? '账单已生成，但大账号顺序保存失败，本次选择未记住。'
-      : '账单已生成，但清除已记住的大账号顺序失败，后续仍可能沿用原顺序。';
-    appendActivityLogEntry({
-      level: 'warning',
-      message: '大账号顺序设置保存失败',
-      details: [warning, error && error.message ? error.message : String(error)]
-    });
-    return {
-      ...result,
-      status: result && result.status === 'success' ? 'warning' : result.status,
-      message: [result && result.message, warning].filter(Boolean).join('\n'),
-      detailLines: [
-        ...(result && Array.isArray(result.detailLines) ? result.detailLines : []),
-        warning
-      ],
-      bigAccountOrderSaveWarning: warning
-    };
-  }
-}
-
-function registerBigAccountOrderHandlers() {
-  ipcMain.handle('big-account-mode:load', (_event, templateId) => {
-    try {
-      return { status: 'success', mode: readBigAccountMode(ensureStorageRoot(), templateId) };
-    } catch (_error) {
-      return { status: 'success', mode: 'unfixed' };
-    }
-  });
-
-  businessIpcHandle('big-account-mode:save', '保存大账号模式', (_event, payload = {}) => {
-    try {
-      writeBigAccountMode(ensureStorageRoot(), payload.templateId, payload.mode);
-      return { status: 'success' };
-    } catch (_error) {
-      return { status: 'error', message: '解析模式保存失败' };
-    }
-  });
-
-  ipcMain.handle('big-account-order:load', (_event, templateId) => {
-    try {
-      return { status: 'success', order: readBigAccountOrder(ensureStorageRoot(), templateId) };
-    } catch (_error) {
-      return { status: 'success', order: null };
-    }
-  });
-
-  businessIpcHandle('big-account-order:save', '保存大账号顺序', (_event, payload = {}) => {
-    try {
-      const data = { assignments: payload.assignments || [] };
-
-      if (payload.includeFileInfo) {
-        const pendingContext = requirePendingBigAccountSelection(payload.contextId);
-        if (!pendingContext) {
-          return { status: 'error', message: '大账号选择预览已失效，请重新导入文件' };
-        }
-        const fileInfoData = buildBigAccountOrderData(pendingContext, data.assignments);
-        data.fileCount = fileInfoData.fileCount;
-        data.files = fileInfoData.files;
-      }
-
-      writeBigAccountOrder(ensureStorageRoot(), payload.templateId, data);
-      return { status: 'success' };
-    } catch (_error) {
-      return { status: 'error', message: '大账号选择顺序保存失败' };
-    }
-  });
 }
 
 const STATEMENT_IMPORT_PREVIEW_READY = 'statement-import-preview-ready';
@@ -17006,6 +16834,17 @@ async function handleFilenameMappingImport(prepared) {
     );
     const bigAccountOptions = allCurrencyOnly ? [] : expandBigAccountConfigurations(aggregatedBigAccounts);
 
+    // v3.2.22：MerchantId 由大账号决定的导入（命中的模板有「自己输入」/ 多大账号映射，或候选大账号多于一个）整批原表
+    //   只有表头时没有需要识别或分配大账号的交易：在混合模式检查、直接识别与手动选择之前统一拒绝（预检阶段按未开始导入
+    //   处理）。MerchantId 取自源列的普通映射、有数据的混合批次仍按原规则
+    const needsBigAccountMerchant = bigAccountOptions.length > 1 || trimmedProvisionalEntries.some((entry) => {
+      const entryConfig = perTemplateConfigCache.get(entry.matchedTemplateId);
+      return usesBigAccountMerchantMapping(entryConfig && entryConfig.exportMappings);
+    });
+    if (needsBigAccountMerchant && allEntriesHeaderOnly(trimmedProvisionalEntries)) {
+      return createNoTransactionDataResult(virtualTemplateName, prepared);
+    }
+
     if (bigAccountOptions.length > 1 && currencyOnlyFileNames.length) {
       return createCurrencyOnlyMixedSelectionErrorResult(currencyOnlyFileNames, virtualTemplateName);
     }
@@ -17013,11 +16852,11 @@ async function handleFilenameMappingImport(prepared) {
     if (bigAccountOptions.length > 1) {
       const selectionRows = buildBigAccountSelectionRows(trimmedProvisionalEntries);
       if (!selectionRows.length || isAllTransactionsSkippedByBackfill(trimmedProvisionalEntries)) {
-        return createNoTransactionDataErrorResult(trimmedProvisionalEntries, virtualTemplateName);
+        return createNoTransactionDataResult(virtualTemplateName, prepared, trimmedProvisionalEntries);
       }
       const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-      const pendingContext = stagePendingBigAccountSelection(prepared, {
+      stagePendingBigAccountSelection(prepared, {
         templateId: FILENAME_MAPPING_TEMPLATE_ID,
         template: syntheticTemplateConfig.template,
         mappings: syntheticTemplateConfig.exportMappings,
@@ -17030,13 +16869,12 @@ async function handleFilenameMappingImport(prepared) {
         rows: selectionRows,
         rowsWithEmptyBlocks: selectionRowsWithEmpty
       });
-      return applySavedBigAccountOrderGuard(prepared, pendingContext, buildBigAccountSelectionRequiredResult({
+      return buildBigAccountSelectionRequiredResult({
         rows: selectionRows,
-        rowsWithEmptyBlocks: selectionRowsWithEmpty,
         bigAccounts: aggregatedBigAccounts,
         fixedAssignments: [],
         templateId: FILENAME_MAPPING_TEMPLATE_ID
-      }));
+      });
     }
 
     // ===== 步骤 8：边界 — bigAccountOptions.length <= 1 直接生成 =====
@@ -17067,11 +16905,11 @@ async function handleFilenameMappingImport(prepared) {
       if (recognitionResult.status === 'needs-selection') {
         const selectionRows = buildBigAccountSelectionRows(trimmedProvisionalEntries);
         if (!selectionRows.length || isAllTransactionsSkippedByBackfill(trimmedProvisionalEntries)) {
-          return createNoTransactionDataErrorResult(trimmedProvisionalEntries, virtualTemplateName);
+          return createNoTransactionDataResult(virtualTemplateName, prepared, trimmedProvisionalEntries);
         }
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-        const pendingContext = stagePendingBigAccountSelection(prepared, {
+        stagePendingBigAccountSelection(prepared, {
           templateId: FILENAME_MAPPING_TEMPLATE_ID,
           template: syntheticTemplateConfig.template,
           mappings: syntheticTemplateConfig.exportMappings,
@@ -17084,13 +16922,12 @@ async function handleFilenameMappingImport(prepared) {
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty
         });
-        return applySavedBigAccountOrderGuard(prepared, pendingContext, buildBigAccountSelectionRequiredResult({
+        return buildBigAccountSelectionRequiredResult({
           rows: selectionRows,
-          rowsWithEmptyBlocks: selectionRowsWithEmpty,
           bigAccounts: aggregatedBigAccounts,
           fixedAssignments: [],
           templateId: FILENAME_MAPPING_TEMPLATE_ID
-        }));
+        });
       }
 
       if (recognitionResult.selectedBigAccount) {
@@ -17530,9 +17367,7 @@ function registerFileHandlers() {
           })
         };
       }
-      if (previewResult
-          && (previewResult.status === 'select-big-account'
-            || previewResult.status === 'remember-order-mismatch')) {
+      if (previewResult && previewResult.status === 'select-big-account') {
         const pendingContext = previewPrepared.pendingBigAccountSelection;
         if (!pendingContext) {
           return {
@@ -17659,6 +17494,39 @@ function registerFileHandlers() {
         (mapping) => mapping.templateField === 'MerchantId' && mapping.mappedField === MERCHANT_ID_SELF_INPUT_OPTION
       );
 
+      // v3.2.22：MerchantId 由大账号决定（「自己输入」/ 多大账号映射，或候选大账号多于一个）时，整批原表只有表头即没有
+      //   需要识别或分配大账号的交易：在直接识别与手动选择分流之前统一拒绝（预检阶段按未开始导入处理，与按文件名映射同一判断）。
+      //   MerchantId 取自源列的普通映射不受影响
+      // 预检已确认原表有数据行时（sourceRowsChecked），执行阶段（同一份 prepared，任务开始前已核对文件与配置未变）不再重新映射
+      if ((bigAccountOptions.length > 1 || isMerchantIdSelfInput || usesBigAccountMerchantMapping(templateConfig.exportMappings))
+        && !selectionResult.sourceRowsChecked) {
+        // 后续分支本来就复用预映射条目时（多个 / 一个候选大账号、自己输入）映射并缓存。多大账号映射而没有候选大账号时，
+        //   生成须走原路径（prepareGeneratedFiles）校验大账号，不能复用放宽了受管大账号校验的预映射条目：
+        //   这里不映射，只逐文件探测原表有没有数据行（probeSourceFilesHeaderOnly），只记结论
+        let headerOnly = null;
+        if (selectionResult.parentProvisionalEntries) {
+          headerOnly = allEntriesHeaderOnly(selectionResult.parentProvisionalEntries);
+        } else if (bigAccountOptions.length > 0 || isMerchantIdSelfInput) {
+          const provisionalEntries = buildPendingBigAccountFileEntries({
+            template: templateConfig.template,
+            mappings: templateConfig.exportMappings,
+            orderedTargetFields: templateConfig.exportTargetFields,
+            inputFilePaths: selectionResult.filePaths
+          });
+          if (prepared.previewOnly) selectionResult.parentProvisionalEntries = provisionalEntries;
+          headerOnly = allEntriesHeaderOnly(provisionalEntries);
+        } else {
+          headerOnly = probeSourceFilesHeaderOnly({
+            template: templateConfig.template,
+            inputFilePaths: selectionResult.filePaths
+          });
+        }
+        if (headerOnly === true) {
+          return createNoTransactionDataResult(templateConfig.template.name, prepared);
+        }
+        if (headerOnly === false && prepared.previewOnly) selectionResult.sourceRowsChecked = true;
+      }
+
       if (bigAccountOptions.length > 1) {
         const provisionalFileEntries = selectionResult.parentProvisionalEntries
           || buildPendingBigAccountFileEntries({
@@ -17670,290 +17538,18 @@ function registerFileHandlers() {
         if (prepared.previewOnly && !selectionResult.parentProvisionalEntries) {
           selectionResult.parentProvisionalEntries = provisionalFileEntries;
         }
-        // v3.2.21：跨 Sheet 回填跳过了全部交易时，在套用已记住的大账号顺序之前返回逐行跳过原因（固定 / 不固定模式同一口径，
-        //   不按「账户个数或账户号匹配不上」提示检查账户）
-        if (isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
-          return createNoTransactionDataErrorResult(provisionalFileEntries, templateConfig.template.name);
-        }
-        const savedMode = readBigAccountMode(ensureStorageRoot(), templateId);
-        const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
-
-
-        let forceUnfixedMode = false;
-        if (savedMode === 'fixed' && savedOrderConfig && Array.isArray(savedOrderConfig.files) && savedOrderConfig.files.length > 0) {
-          const importFileCount = selectionResult.filePaths.length;
-
-          if (importFileCount !== savedOrderConfig.fileCount) {
-            // 文件个数不等于"记住顺序"里的文件个数 → 降级为"不固定"模式（不缓存判定，预检返回选择后不会再执行到这里）
-            forceUnfixedMode = true;
-            logSavedBigAccountOrderDowngrade(templateConfig.template.name, { reason: 'file-count', fileNames: [] });
-          } else if (importFileCount === savedOrderConfig.fileCount) {
-            const autoMatchDecision = resolvePreparedFixedBigAccountAutoMatchDecision(
-              prepared,
-              () => {
-                // 每个导入文件按块顺序识别到的账号去全部保存文件里找匹配（不按位置对位）。识别取大账号顺序证据，
-                // 与保存顺序同口径：直接识别逐块取，自定义输入 MerchantId 逐块经账户映射桥接（部分块桥接不到时
-                // 保留已桥接的块，与保存时一致），只用导入时冻结的识别依据，不重开源文件。
-                const importAccountLists = identifiedAccountsFromRowLists(bigAccountOrderEvidenceRowLists(
-                  buildBigAccountOrderEvidence({
-                    fileEntries: provisionalFileEntries,
-                    bigAccounts: effectiveBigAccounts,
-                    rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true })
-                  })
-                ));
-
-                const {
-                  failedImportIndexes,
-                  ambiguousImportIndexes,
-                  reorderedAssignments,
-                  savedIndexByImport
-                } = matchImportFilesToSavedOrder(importAccountLists, savedOrderConfig);
-                const importFileName = (index) => path.basename(provisionalFileEntries[index].filePath);
-                return {
-                  failedFileNames: failedImportIndexes.map(importFileName),
-                  ambiguousFileNames: ambiguousImportIndexes.map(importFileName),
-                  reorderedAssignments,
-                  savedIndexByImport
-                };
-              }
-            );
-            const { failedFileNames, ambiguousFileNames, reorderedAssignments, savedIndexByImport } = autoMatchDecision;
-
-            // 记住的顺序无法唯一对应导入文件时（如同一多币种大账号的多份账单）不自动套用，降级为不固定模式由用户确认；
-            // 匹配不上的文件仍走下方“记住顺序不匹配”提示。
-            if (failedFileNames.length === 0 && ambiguousFileNames.length > 0) {
-              forceUnfixedMode = true;
-              // 常规导入在预检阶段即返回大账号选择，日志须在预检时写（判定按 prepared 缓存，同一次导入只写一次）。
-              if (prepared.previewOnly || !Object.hasOwn(prepared, 'fixedBigAccountAutoMatchDecision')) {
-                logSavedBigAccountOrderDowngrade(templateConfig.template.name, {
-                  reason: 'ambiguous',
-                  fileNames: ambiguousFileNames
-                });
-              }
-            }
-
-            if (failedFileNames.length === 0 && reorderedAssignments.length > 0) {
-
-              // 已保存顺序自动命中时只需本地上下文；仅真正进入人工选择时才持久化 opaque context。
-              const pendingContext = createPendingBigAccountSelectionContext(prepared, {
-                templateId,
-                template: templateConfig.template,
-                mappings: templateConfig.exportMappings,
-                orderedTargetFields: templateConfig.exportTargetFields,
-                inputFilePaths: selectionResult.filePaths,
-                bigAccounts: effectiveBigAccounts,
-                fixedAssignments: templateConfig.fixedAssignments,
-                fileEntries: provisionalFileEntries,
-                rows: buildBigAccountSelectionRows(provisionalFileEntries),
-                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }),
-              });
-
-              // 重排后按位置逐块套用：每份文件逐块识别结果须与对上的记住文件一致（空段 / 未识别段位置、
-              // 旧数据无法还原逐块信息时不自动套用，转人工选择，由下方选择结果的顺序核对降级）。
-              // 有交易但识别不出账号的块只能按位置取分配、无法核对，也不自动生成，交由用户在选择窗口确认。
-              const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
-              const autoApplicable = findSavedOrderFileRowMismatches(importRowLists, savedOrderConfig, savedIndexByImport).length === 0
-                && !hasUnidentifiedTransactionRows(importRowLists);
-              const autoResult = prepared.previewOnly
-                ? null
-                : await ipcMain.emit('__internal-complete-big-account-selection__') || null;
-              if (!autoResult && autoApplicable) {
-                try {
-                  const directResult = await (async () => {
-                    const isFixedMode = true;
-                    const expectedRows = pendingContext.rowsWithEmptyBlocks || pendingContext.rows;
-                    const normalizedAssignments = reorderedAssignments
-                      .map((assignment) => {
-                        const matchedAccount = effectiveBigAccounts.find((item) => item.merchantId === assignment.merchantId);
-                        if (!matchedAccount) return null;
-                        const availableCurrencies = Array.isArray(matchedAccount.currencies) ? matchedAccount.currencies : [];
-                        const normalizedCurrency = matchedAccount.isMultiCurrency
-                          ? normalizeCell(assignment.currency)
-                          : normalizeCell(availableCurrencies[0] || assignment.currency);
-                        if (!normalizedCurrency || !availableCurrencies.includes(normalizedCurrency)) return null;
-                        return { merchantId: matchedAccount.merchantId, currency: normalizedCurrency, rowIndex: assignment.rowIndex };
-                      })
-                      .filter((a) => a !== null)
-                      .sort((left, right) => left.rowIndex - right.rowIndex);
-
-                    if (normalizedAssignments.length !== expectedRows.length) {
-                      // Log first few filtered-out assignments
-                      savedOrderConfig.assignments.forEach((a, i) => {
-                        const matched = effectiveBigAccounts.find((item) => item.merchantId === a.merchantId);
-                        if (!matched) {
-                        } else {
-                          const avail = Array.isArray(matched.currencies) ? matched.currencies : [];
-                          const nc = matched.isMultiCurrency ? normalizeCell(a.currency) : normalizeCell(avail[0] || a.currency);
-                          if (!nc || !avail.includes(nc)) {
-                          }
-                        }
-                      });
-                      return null;
-                    }
-
-                    // v3.2.19：重复账单过滤——在按记住顺序分配大账号后的条目上查重；预检有重复先暂停，
-                    //   执行时按确认摘要去重。须以返回值传出（外层 catch 会把异常当成自动套用失败转人工选择）。
-                    if (prepared.previewOnly) {
-                      if (hasDuplicateRowKeys(pendingContext.fileEntries)) {
-                        const paused = previewDuplicateRows(
-                          applyBigAccountAssignmentsToFileEntries(
-                            pendingContext.fileEntries,
-                            normalizedAssignments,
-                            { includeEmptyBlocks: isFixedMode }
-                          ),
-                          prepared,
-                          templateConfig.template.name
-                        );
-                        if (paused) return paused;
-                      }
-                      return statementImportPreviewReady();
-                    }
-
-                    const reviewedAutoEntries = applyConfirmedDuplicateRowFilter(
-                      applyBigAccountAssignmentsToFileEntries(
-                        pendingContext.fileEntries,
-                        normalizedAssignments,
-                        { includeEmptyBlocks: isFixedMode }
-                      ),
-                      prepared,
-                      templateConfig.template.name
-                    );
-                    if (reviewedAutoEntries.result) return reviewedAutoEntries.result;
-                    const resolvedFileEntries = reviewedAutoEntries.entries;
-                    const fallbackTemplateConfig = {
-                      template: pendingContext.template,
-                      exportMappings: pendingContext.mappings,
-                      exportTargetFields: pendingContext.orderedTargetFields
-                    };
-                    const generationTemplateConfig = resolveGenerationTemplateConfig({
-                      fileEntries: resolvedFileEntries,
-                      fallbackTemplateConfig
-                    });
-                    const generationConfig = buildStatementGenerationConfig({
-                      template: generationTemplateConfig.template,
-                      mappings: generationTemplateConfig.exportMappings,
-                      orderedTargetFields: generationTemplateConfig.exportTargetFields,
-                      allowManagedMerchantWithoutSelection: true
-                    });
-                    const preparedBatch = statementGenerationHelpers.buildPreparedStatementBatchFromEntries({
-                      config: generationConfig,
-                      fileEntries: resolvedFileEntries
-                    });
-                    const generatedFiles = {
-                      ...generateStatementFiles({
-                        config: generationConfig,
-                        preparedBatch,
-                        scope: 'current'
-                      }),
-                      fileEntries: resolvedFileEntries.map((entry) => buildStatementFileEntry({
-                        ...entry,
-                        buildEntryId: buildStatementFileEntryId
-                      })),
-                      preparedBatch
-                    };
-
-                    resolvePendingReplacePaths(pendingContext).forEach((fp) => {
-                      removeStatementSessionEntriesByFilePath(session, fp);
-                    });
-                    const batchId = appendStatementSessionImport({
-                      buildBatchId: buildStatementBatchId,
-                      lastGeneratedExports,
-                      session,
-                      fileEntries: generatedFiles.fileEntries
-                    });
-                    rememberLastFileImportContext({
-                      templateId: generationTemplateConfig.template.id || pendingContext.templateId,
-                      template: generationTemplateConfig.template,
-                      mappings: generationTemplateConfig.exportMappings,
-                      orderedTargetFields: generationTemplateConfig.exportTargetFields,
-                      inputFilePaths: pendingContext.inputFilePaths,
-                      selectedBigAccount: null,
-                      preparedDetailRows: generatedFiles.preparedBatch.detailRows,
-                      scope: 'current',
-                      statementSessionKey: session.key,
-                      currentBatchId: batchId
-                    });
-                    clearPendingBigAccountSelection();
-                    updateStatementSessionCache(session, batchId, generatedFiles);
-                    return buildImportResultFromGeneratedFiles({
-                      generatedFiles,
-                      templateId: pendingContext.templateId,
-                      templateName: generationTemplateConfig.template.name,
-                      inputFilePaths: pendingContext.inputFilePaths
-                    });
-                  })();
-
-                  if (directResult) {
-                    return directResult;
-                  }
-                } catch (autoMatchError) {
-                  if (shouldPropagateAutoMatchError(autoMatchError, prepared)) throw autoMatchError;
-                  // Fall through to manual selection
-                }
-              }
-            }
-
-            if (failedFileNames.length > 0) {
-              stagePendingBigAccountSelection(prepared, {
-                templateId,
-                template: templateConfig.template,
-                mappings: templateConfig.exportMappings,
-                orderedTargetFields: templateConfig.exportTargetFields,
-                inputFilePaths: selectionResult.filePaths,
-                bigAccounts: effectiveBigAccounts,
-                fixedAssignments: templateConfig.fixedAssignments,
-                fileEntries: provisionalFileEntries,
-                rows: buildBigAccountSelectionRows(provisionalFileEntries),
-                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }),
-              });
-              return {
-                status: 'remember-order-mismatch',
-                message: failedFileNames
-                  .map((name) => `${name}的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。`)
-                  .join('\n'),
-                failedFileNames,
-                selectionMode: 'multi-row',
-                templateId,
-                rows: buildBigAccountSelectionRows(provisionalFileEntries).map((row, index) => ({
-                  index: Number.isInteger(row.index) ? row.index : index,
-                  label: `${index + 1}.`,
-                  sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName)
-                })),
-                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }).map((row, index) => ({
-                  index: Number.isInteger(row.index) ? row.index : index,
-                  label: `${index + 1}.`,
-                  sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName)
-                })),
-                bigAccounts: effectiveBigAccounts.map((item) => ({
-                  merchantId: normalizeCell(item.merchantId),
-                  currencies: Array.isArray(item.currencies)
-                    ? item.currencies.map((value) => normalizeCell(value)).filter((value) => value !== '')
-                    : [],
-                  isMultiCurrency: Boolean(item.isMultiCurrency)
-                })),
-                expandedBigAccountOptions: expandBigAccountConfigurations(effectiveBigAccounts),
-                fixedAssignments: (templateConfig.fixedAssignments || []).map((item) => ({
-                  merchantId: normalizeCell(item.merchantId),
-                  currency: normalizeCell(item.currency),
-                  rowIndex: Number(item.rowIndex || 0)
-                })),
-                forceMode: 'fixed'
-              };
-            }
-          }
-        }
-
+        // v3.2.21：跨 Sheet 回填跳过了全部交易时返回逐行跳过原因（不按「账户个数或账户号匹配不上」提示检查账户）
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
         if (!selectionRows.length || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
-          return createNoTransactionDataErrorResult(provisionalFileEntries, templateConfig.template.name);
+          return createNoTransactionDataResult(templateConfig.template.name, prepared, provisionalFileEntries);
         }
 
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
-        const pendingContext = stagePendingBigAccountSelection(prepared, {
+        // v3.2.22：账号顺序固定（记住顺序、按记住的顺序自动分配）已去掉，多账号导入一律由用户手动选择。
+        //   含空段的预览行仍随待选择上下文保存，供「提取大账号顺序」按块取识别证据。
+        stagePendingBigAccountSelection(prepared, {
           templateId,
           template: templateConfig.template,
           mappings: templateConfig.exportMappings,
@@ -17963,22 +17559,14 @@ function registerFileHandlers() {
           fixedAssignments: templateConfig.fixedAssignments,
           fileEntries: provisionalFileEntries,
           rows: selectionRows,
-          rowsWithEmptyBlocks: selectionRowsWithEmpty,
-          });
-        const selectionRequired = buildBigAccountSelectionRequiredResult({
+          rowsWithEmptyBlocks: selectionRowsWithEmpty
+        });
+        return buildBigAccountSelectionRequiredResult({
           rows: selectionRows,
-          rowsWithEmptyBlocks: selectionRowsWithEmpty,
           bigAccounts: effectiveBigAccounts,
           fixedAssignments: templateConfig.fixedAssignments,
           templateId
         });
-        if (forceUnfixedMode) {
-          selectionRequired.forceMode = 'unfixed';
-          return selectionRequired;
-        }
-        // 固定模式未能自动套用（重排后逐块对不上、币种不可用等）而进入人工选择时，界面会按位置预填记住的分配，
-        // 与标准入口同样按位置逐块核对，对不上就降级。
-        return applySavedBigAccountOrderGuard(prepared, pendingContext, selectionRequired);
       }
 
       if (isMerchantIdSelfInput && bigAccountOptions.length <= 1) {
@@ -17998,7 +17586,7 @@ function registerFileHandlers() {
         }, 0);
 
         if (totalBlocks === 0 || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
-          return createNoTransactionDataErrorResult(provisionalFileEntries, templateConfig.template.name);
+          return createNoTransactionDataResult(templateConfig.template.name, prepared, provisionalFileEntries);
         }
 
         const needsSelection = inputFileCount > 1 || totalBlocks > 1;
@@ -18015,7 +17603,7 @@ function registerFileHandlers() {
           const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
           if (!selectionRows.length || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
-            return createNoTransactionDataErrorResult(provisionalFileEntries, templateConfig.template.name);
+            return createNoTransactionDataResult(templateConfig.template.name, prepared, provisionalFileEntries);
           }
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
@@ -18029,11 +17617,10 @@ function registerFileHandlers() {
             fixedAssignments: templateConfig.fixedAssignments,
             fileEntries: provisionalFileEntries,
             rows: selectionRows,
-            rowsWithEmptyBlocks: selectionRowsWithEmpty,
-              });
+            rowsWithEmptyBlocks: selectionRowsWithEmpty
+          });
           return buildBigAccountSelectionRequiredResult({
             rows: selectionRows,
-            rowsWithEmptyBlocks: selectionRowsWithEmpty,
             bigAccounts: effectiveBigAccounts,
             fixedAssignments: templateConfig.fixedAssignments,
             templateId
@@ -18081,7 +17668,7 @@ function registerFileHandlers() {
           const selectionRows = buildBigAccountSelectionRows(recognitionFileEntries);
 
           if (!selectionRows.length || isAllTransactionsSkippedByBackfill(recognitionFileEntries)) {
-            return createNoTransactionDataErrorResult(recognitionFileEntries, templateConfig.template.name);
+            return createNoTransactionDataResult(templateConfig.template.name, prepared, recognitionFileEntries);
           }
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(recognitionFileEntries, { includeEmptyBlocks: true });
@@ -18100,7 +17687,6 @@ function registerFileHandlers() {
           });
           return buildBigAccountSelectionRequiredResult({
             rows: selectionRows,
-            rowsWithEmptyBlocks: selectionRowsWithEmpty,
             bigAccounts: effectiveBigAccounts,
             fixedAssignments: templateConfig.fixedAssignments,
             templateId
@@ -18380,8 +17966,7 @@ function registerFileHandlers() {
           let assignedEntries = null;
           const resolveAssignedEntries = () => assignedEntries || (assignedEntries = applyBigAccountAssignmentsToFileEntries(
             pendingContext.fileEntries,
-            normalized.normalizedAssignments,
-            { includeEmptyBlocks: normalized.isFixedMode }
+            normalized.normalizedAssignments
           ));
           const reviewsDuplicateRows = !confirmation && hasDuplicateRowKeys(pendingContext.fileEntries);
           // v3.2.21（D3）：按本次分配的大账号判断渠道组内同一账户是否命中不同余额方式（导入预检时多大账号模板的行还没有账号）。
@@ -18398,13 +17983,9 @@ function registerFileHandlers() {
                   pendingContext.fileEntries,
                   normalized.normalizedAssignments,
                   {
-                    includeEmptyBlocks: normalized.isFixedMode,
                     onlyEntries: new Set(mixedEntries),
                     // 不参与复核的文件按选择窗口已识别的账号块计数，不再扫描
-                    blockCounts: countSelectionRowsByFile(
-                      normalized.isFixedMode ? pendingContext.rowsWithEmptyBlocks : pendingContext.rows,
-                      pendingContext.fileEntries
-                    )
+                    blockCounts: countSelectionRowsByFile(pendingContext.rows, pendingContext.fileEntries)
                   }
                 ))
             )
@@ -18473,9 +18054,6 @@ function registerFileHandlers() {
               ),
               outputs: []
             },
-            rememberOrder: normalized.isFixedMode && typeof payload.rememberOrder === 'boolean'
-              ? payload.rememberOrder
-              : null,
             importConfigGuard: () => (review ? isDuplicateReviewConfigCurrent(review) : isImportConfigStampCurrent(mappingConfig)),
             beforeStart() {
               const current = requirePendingBigAccountSelection(contextId);
@@ -18566,7 +18144,7 @@ function registerFileHandlers() {
     };
     clearPendingBigAccountSelection(prepared.contextId);
     statementDuplicateReview.clear();
-    const { isFixedMode, normalizedAssignments, rememberOrder } = prepared;
+    const { normalizedAssignments } = prepared;
     // 按文件名映射的多模板分组生成：报错文件名、上下文与活动日志用固定名称（见下方错误处理）
     let multiTemplateGeneration = false;
     try {
@@ -18578,11 +18156,7 @@ function registerFileHandlers() {
 
       // v3.2.19：重复账单过滤——有重复时须已确认（摘要一致）才去重生成，否则拒绝
       const reviewedEntries = applyConfirmedDuplicateRowFilter(
-        applyBigAccountAssignmentsToFileEntries(
-          pendingContext.fileEntries,
-          normalizedAssignments,
-          { includeEmptyBlocks: isFixedMode }
-        ),
+        applyBigAccountAssignmentsToFileEntries(pendingContext.fileEntries, normalizedAssignments),
         prepared,
         pendingContext.template.name
       );
@@ -18621,12 +18195,7 @@ function registerFileHandlers() {
           statementSessionKey: session.key,
           currentBatchId: lastBatchId,
         });
-        return persistBigAccountOrderAfterGeneration({
-          pendingContext,
-          normalizedAssignments,
-          rememberOrder,
-          result: lastResult
-        });
+        return lastResult;
       }
 
       const generationTemplateConfig = resolveGenerationTemplateConfig({
@@ -18684,12 +18253,7 @@ function registerFileHandlers() {
         templateName: generationTemplateConfig.template.name,
         inputFilePaths: pendingContext.inputFilePaths
       });
-      return persistBigAccountOrderAfterGeneration({
-        pendingContext,
-        normalizedAssignments,
-        rememberOrder,
-        result
-      });
+      return result;
     } catch (error) {
       if (isRestoredStatementRuntimeFailure(error)) {
         return createRestoredStatementRuntimeFailureResult(error, {
@@ -18773,11 +18337,7 @@ function registerFileHandlers() {
     if (!pendingContext) {
       return { status: 'error', failedRows: [], message: '当前没有待处理的大账号选择任务，请重新导入文件' };
     }
-    return extractBigAccountOrderFromEvidence(
-      pendingContext,
-      payload?.mode || 'unfixed',
-      payload.rowIndexes
-    );
+    return extractBigAccountOrderFromEvidence(pendingContext, payload.rowIndexes);
   });
 
   businessIpcHandle('file:save-balance-seed', '补录余额并生成账单', {
@@ -24874,7 +24434,6 @@ function registerAllIpcHandlersWithMemoryActivity() {
   registerFundTransferAccountMappingHandlers();
   registerTemplateHandlers();
   registerBigAccountHandlers();
-  registerBigAccountOrderHandlers();
   registerFileHandlers();
   registerNewAccountHandlers();
   registerPreFundReconciliationHandlers();

@@ -167,6 +167,10 @@ const TEMPLATE_RESOURCES = Object.freeze([
     bindings: [binding('bank-statement-process', '导入文件 · 识别结构', 'runtime')] }),
   resource({ id: 'inbound-raw-order', path: 'assets/入账原始订单.xlsx', type: 'input', readMode: 'sample',
     bindings: [binding('bank-statement-process', '导入结构参考')] }),
+  // 银行原始日终余额信息（清结算系统导出）：网银账单补录余额「导入余额文件」的文件结构参考；列名在程序内固定
+  //   （backend/balance-seed-import.js BALANCE_IMPORT_COLUMNS），替换版本不生效。
+  resource({ id: 'statement-balance-eod', path: 'assets/银行原始日终余额信息.xlsx', type: 'input', readMode: 'sample',
+    bindings: [binding('statement-generator', '补录余额「导入余额文件」· 结构参考')] }),
   resource({ id: 'fx-delivery', path: 'assets/外汇交割表.xls', type: 'input', ...LINKED_INPUT_STRUCTURE, headerRow: 2,
     bindings: [binding('bank-statement-process', '链接表导入 · 识别结构', 'runtime')] }),
   resource({ id: 'fx-option', path: 'assets/外汇期权表.xlsx', type: 'input', readMode: 'disabled', headerRow: 2,

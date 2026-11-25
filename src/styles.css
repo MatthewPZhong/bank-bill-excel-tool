@@ -1105,18 +1105,6 @@ select {
   text-align: center;
 }
 
-.big-account-mode-label {
-  font-size: 13px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.big-account-mode-select {
-  font-size: 13px;
-  padding: 4px 8px;
-  border-radius: 8px;
-}
-
 .big-account-selection-footer {
   justify-content: flex-end;
   align-items: center;
@@ -1217,28 +1205,6 @@ select {
   border-right: 1px solid rgba(104, 79, 39, 0.12);
 }
 
-.ba-single-scroll-active {
-  overflow-y: auto;
-  max-height: 50vh;
-}
-
-.ba-single-scroll-active .big-account-split-left,
-.ba-single-scroll-active .big-account-split-right {
-  overflow-y: visible;
-  max-height: none;
-}
-
-.text-readonly {
-  pointer-events: none;
-}
-
-.big-account-order-text-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-}
-
 .extract-edit-container {
   display: flex;
   align-items: center;
@@ -1261,21 +1227,6 @@ select {
 
 .big-account-search-input {
   width: 160px;
-}
-
-.big-account-remember-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.big-account-remember-label.is-disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
 }
 
 /* v1.5.2 需求 2：多对一工具条（单个账号匹多个文件） */

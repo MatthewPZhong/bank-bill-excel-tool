@@ -18,7 +18,7 @@
     const reportError=error=>ui.reportError?.(error);
     const updateStatusBox=(...args)=>{if(live())ui.status(...args);};
     function openModal(factory) { return live() ? ui.modalBridge.openModal(factory,{owner}) : {status:'stale'}; }
-    const {createAlertDialog,createTemplateManagerDialog,createBigAccountSelectionDialog,createRememberOrderMismatchDialog,createDuplicateRowsReviewDialog,
+    const {createAlertDialog,createTemplateManagerDialog,createBigAccountSelectionDialog,createDuplicateRowsReviewDialog,
       createExportScopeDialog,createMonthlyBalanceExportDialog,createManualBalanceSeedDialog,createAccountMappingDialog,createAccountMappingMigrationDialog,
       createChannelAccountMappingConflictDialog,createTemplateImportNameDialog}=ui;
     const getStatementChannels=()=>typeof config.getStatementChannels==='function'?config.getStatementChannels():[];
@@ -374,11 +374,6 @@ async function handleOpenAccountMappings() {
           //   用户再点「导入文件」时弹出（不重新导入）
           openInteraction(kind,result,()=>createAlertDialog(text,{skipLogReport:true})); return;
         }
-        if(result.status==='remember-order-mismatch') {
-          const failedLines=(result.failedFileNames||[]).map(name=>name+'的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。').join('<br/>');
-          // 与大账号选择一样持有主进程待选择的上下文：宿主拒绝打开时保留结果，用户再点「导入文件」继续
-          openInteraction(kind,result,()=>createRememberOrderMismatchDialog({message:failedLines,bigAccountResult:result}));return;
-        }
         applyStatementResult(result);
         // 账单日期断档、余额校验不一致、人工补录替换直接弹出确认；关闭后仍可点击状态框重新打开。
         if(['gap','mismatch','seed-replace'].includes(result.manualBalancePrompt?.reason)) openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
@@ -434,7 +429,7 @@ async function handleOpenAccountMappings() {
     function acceptBackgroundOutcome({ kind, result }) {
       if (!result || result.status === 'cancelled' || result.status === 'empty') return;
       // 后台 IPC 已执行，保留返回事实；旧页面的选择窗口不在新一轮 enter 中自动复活。
-      if (['select-big-account', 'remember-order-mismatch', 'select-export-scope', 'duplicate-review'].includes(result.status)) {
+      if (['select-big-account', 'select-export-scope', 'duplicate-review'].includes(result.status)) {
         deferInteraction(kind, result);
         return;
       }
