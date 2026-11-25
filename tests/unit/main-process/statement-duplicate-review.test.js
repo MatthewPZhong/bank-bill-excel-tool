@@ -188,18 +188,16 @@ test('主进程：预检暂停与续跑接在导入 prepare 中，执行路径�
   assertBefore(prepareBody, 'duplicateReviewContextId', 'prepareStatementImportFiles(', '续跑分支须在文件选择之前');
   assert.match(prepareBody, /previewResult\.status === DUPLICATE_REVIEW_STATUS[\s\S]*statementDuplicateReview\.remember\(/);
 
-  // 指定模板导入：复用条目的生成分支、记住顺序自动套用，各自在组批前复核
+  // 指定模板导入：复用条目的生成分支在组批前复核（v3.2.22 起去掉「记住顺序自动套用」分支）
   const reusedBranch = source.slice(source.indexOf('const reviewedEntries = applyConfirmedDuplicateRowFilter('), source.indexOf('} else {\n        generatedFiles = prepareGeneratedFiles({'));
   assert.ok(source.indexOf('const reviewedEntries = applyConfirmedDuplicateRowFilter(') >= 0);
   assertBefore(reusedBranch, 'if (reviewedEntries.result) return reviewedEntries.result;', 'buildPreparedStatementBatchFromEntries(', '复用条目分支先复核再组批');
-  assert.ok(source.indexOf('const reviewedAutoEntries = applyConfirmedDuplicateRowFilter(') >= 0);
   // 查重范围：预检与执行都按生成组标注后再查重（不同生成组的相同行不互判重复）
   assert.match(source, /review\(\{ entries: scopeDuplicateEntries\(entries\), prepared, phase: 'preview'/);
   assert.match(source, /review\(\{ entries: scopeDuplicateEntries\(entries\), prepared, phase: 'execute'[\s\S]{0,200}unscopeDuplicateEntries\(outcome\.entries\)/);
-  // 自动套用：确认后的续跑生成失败照常报错，不降级为重新选择大账号
-  assert.match(source, /catch \(autoMatchError\) \{[\s\S]{0,400}if \(prepared && prepared\.duplicateReviewConfirmation && !prepared\.previewOnly\) throw autoMatchError;/);
-  const autoBranch = source.slice(source.indexOf('const reviewedAutoEntries = applyConfirmedDuplicateRowFilter('));
-  assertBefore(autoBranch, 'if (reviewedAutoEntries.result) return reviewedAutoEntries.result;', 'buildPreparedStatementBatchFromEntries(', '自动套用先复核再组批');
+  // v3.2.22：记住顺序自动套用整段下线，不再存在绕过手动选择的组批路径
+  assert.equal(source.indexOf('reviewedAutoEntries'), -1);
+  assert.equal(source.indexOf('autoMatchError'), -1);
   // 勾选时普通路径改走复用条目分支（不再直接 prepareGeneratedFiles 映射并生成）
   assert.match(source, /isDuplicateRowFilterEnabled\(templateConfig\.exportMappings\) && !selectionResult\.parentProvisionalEntries/);
 
@@ -333,7 +331,9 @@ function loadPlainImportHandler({ entries, calls, overrides = {} }) {
   Object.entries(overrides).forEach(([name, value]) => scope.set(name, value));
   ['statementImportPreviewReady', 'isDuplicateRowFilterEnabled', 'previewDuplicateRows', 'applyConfirmedDuplicateRowFilter',
     'scopeDuplicateEntries', 'unscopeDuplicateEntries', 'buildTemplateCatalogStamp', 'isImportConfigStampCurrent', 'checkImportConfigGuard',
-    'resolveReusedSingleTemplateEntries', 'buildDuplicateReviewConfigStamp', 'isDuplicateReviewConfigCurrent']
+    'resolveReusedSingleTemplateEntries', 'buildDuplicateReviewConfigStamp', 'isDuplicateReviewConfigCurrent',
+    // v3.2.22：需要识别或分配大账号且全部文件只有表头时的拦截
+    'isMultiBigAccountMapping', 'usesBigAccountMerchantMapping', 'isHeaderOnlyDetailRows', 'allEntriesHeaderOnly', 'createNoTransactionDataResult']
     .forEach((name) => scope.set(name, evaluate(functionSource(name))));
   let handlerNode = null;
   (function visit(node) {

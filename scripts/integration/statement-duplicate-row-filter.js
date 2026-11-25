@@ -14,8 +14,6 @@
 // 用法：node scripts/integration/statement-duplicate-row-filter.js
 
 const fs = require('node:fs');
-const { readBigAccountMode, writeBigAccountMode } = require('../../src/backend/big-account-mode-store');
-const { readBigAccountOrder } = require('../../src/backend/big-account-order-store');
 const os = require('node:os');
 const path = require('node:path');
 const XLSX = require('xlsx');
@@ -197,9 +195,6 @@ function createMain(database, overrides = {}) {
     buildBigAccountRecognitionBasis: () => null,
     finalizeBigAccountRecognitionBasis: () => null,
     normalizeBundleAccountMappings: () => [],
-    // 复核指纹计入大账号固定模式与记住的顺序（真实存储，存放在临时目录）
-    readBigAccountMode,
-    readBigAccountOrder,
     ensureStorageRoot: () => BIG_ACCOUNT_STORAGE_ROOT,
     ...overrides
   });
@@ -207,6 +202,22 @@ function createMain(database, overrides = {}) {
 
 const BIG_ACCOUNT_STORAGE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-duplicate-row-filter-storage-'));
 process.on('exit', () => fs.rmSync(BIG_ACCOUNT_STORAGE_ROOT, { recursive: true, force: true }));
+
+// v3.2.21 及更早版本「账号顺序固定」写下的文件（格式同当时的 big-account-mode-store / big-account-order-store）
+function writeResidualBigAccountOrderFiles(storageRoot, templateId) {
+  const write = (dir, payload) => {
+    fs.mkdirSync(path.join(storageRoot, dir), { recursive: true });
+    fs.writeFileSync(path.join(storageRoot, dir, `${templateId}.json`), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  };
+  write('big-account-modes', { templateId: String(templateId), mode: 'fixed', updatedAt: '2026-11-01T00:00:00.000Z' });
+  write('big-account-orders', {
+    templateId: String(templateId),
+    assignments: [{ rowIndex: 0, merchantId: 'RESIDUAL-001', currency: 'USD' }],
+    fileCount: 1,
+    files: [{ fileIndex: 0, accountCount: 1, accounts: [{ merchantId: 'RESIDUAL-001', currency: 'USD' }], rowAccounts: ['RESIDUAL-001'], rowEmpty: [false] }],
+    updatedAt: '2026-11-01T00:00:00.000Z'
+  });
+}
 
 const openedDatabases = [];
 
@@ -515,11 +526,9 @@ function verifyReviewConfigStamp(database, main, template) {
   assertEq(changed !== first, true, '⑥ 拆分发生额的指定账单序号变化时复核指纹不同');
   assertEq(main.buildDuplicateReviewConfigStamp([template.id]), first, '⑥ 改回原配置后指纹恢复');
   assertEq(main.buildDuplicateReviewConfigStamp([987654]) !== main.buildDuplicateReviewConfigStamp([]), true, '⑥ 模板不存在记为 missing');
-  // 大账号固定模式（按记住的顺序自动分配）变化时指纹不同
-  writeBigAccountMode(BIG_ACCOUNT_STORAGE_ROOT, template.id, 'fixed');
-  assertEq(main.buildDuplicateReviewConfigStamp([template.id]) !== first, true, '⑥ 大账号固定模式变化时复核指纹不同');
-  writeBigAccountMode(BIG_ACCOUNT_STORAGE_ROOT, template.id, 'unfixed');
-  assertEq(main.buildDuplicateReviewConfigStamp([template.id]), first, '⑥ 改回原模式后指纹恢复');
+  // v3.2.22：账号顺序固定已去掉，升级前残留的大账号模式 / 记住顺序文件不再读取，也不影响复核指纹
+  writeResidualBigAccountOrderFiles(BIG_ACCOUNT_STORAGE_ROOT, template.id);
+  assertEq(main.buildDuplicateReviewConfigStamp([template.id]), first, '⑥ 残留的固定模式 / 记住顺序文件不改变复核指纹');
 
   // 一次指纹计算只解析一次枚举表与币种表（模板多时不在主进程反复同步读文件）
   const second = saveTemplate(database, main, '查重模板-2').template;

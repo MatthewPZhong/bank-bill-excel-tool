@@ -188,9 +188,7 @@ function createMain(database) {
     buildBigAccountRecognitionBasis: () => null,
     finalizeBigAccountRecognitionBasis: () => null,
     normalizeBundleAccountMappings: () => [],
-    ensureStorageRoot: () => '',
-    readBigAccountOrder: () => null,
-    readBigAccountMode: () => 'unset'
+    ensureStorageRoot: () => ''
   });
 }
 
@@ -244,8 +242,6 @@ function loadTemplateHandlers(database, main, { bundlePath = '', syncTemplateLib
     dialog: { showMessageBox: async () => ({ response: 1 }) },
     mainWindow: null,
     ensureStorageRoot: () => '',
-    writeBigAccountOrder: () => {},
-    writeBigAccountMode: () => {},
     restoreBundleFollowUpRounds: () => ({
       channelRestore: { assignments: [], channels: [] },
       restoreResult: { channelCount: 0, conflictCount: 0 }
@@ -529,6 +525,33 @@ async function verifyBundle(dir, database, main, template) {
     return item ? item.dateFormat : null;
   })], ['success', ['DMY', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto']], '④ 导入：日在前原样保留，无效值、缺省与非字符串按 auto');
   closeDatabase(variantTarget);
+
+  // v3.2.22 去掉「账号顺序固定」：导出不再带 bigAccountMode / bigAccountOrderConfig；
+  //   旧模板包（带 bigAccountMode: 'fixed' 与记住的顺序）照常导入，这两项忽略不报错
+  assertEq([Object.hasOwn(entry, 'bigAccountMode'), Object.hasOwn(entry, 'bigAccountOrderConfig')], [false, false],
+    '⑤ 导出的模板包不带大账号解析模式与记住的顺序');
+  fs.writeFileSync(bundlePath, JSON.stringify({
+    bundleVersion: CONSTANTS.BASE_BUNDLE_VERSION,
+    channels: [],
+    templates: [{
+      ...entry,
+      templateKey: 'legacy-fixed-order',
+      name: '旧包-固定顺序',
+      headers: [...entry.headers, '旧包列'],
+      bigAccountMode: 'fixed',
+      bigAccountOrderConfig: {
+        assignments: [{ rowIndex: 0, merchantId: 'LEGACY-001', currency: 'USD' }],
+        fileCount: 1,
+        files: [{ fileIndex: 0, accountCount: 1, accounts: [{ merchantId: 'LEGACY-001', currency: 'USD' }] }]
+      }
+    }]
+  }), 'utf8');
+  const legacyTarget = openDatabase(path.join(dir, 'legacy-fixed-order.sqlite'));
+  const legacyResult = await loadTemplateHandlers(legacyTarget, createMain(legacyTarget), { bundlePath }).importBundle();
+  const legacyTemplate = legacyTarget.getTemplateByKey('legacy-fixed-order');
+  assertEq([legacyResult.status, Boolean(legacyTemplate), legacyTemplate && legacyTemplate.dateFormat], ['success', true, 'MDY'],
+    '⑤ 带固定顺序的旧模板包照常导入，其余配置不受影响');
+  closeDatabase(legacyTarget);
 }
 
 async function run() {

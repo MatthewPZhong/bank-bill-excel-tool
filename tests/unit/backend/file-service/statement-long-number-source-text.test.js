@@ -1400,6 +1400,19 @@ test('XLSX：读取库实际读取的工作表与按关系定位的不一致时�
     await swapTargets(zip);
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Id="rId1"', 'Id="rId&#49;"');
   })), '关系 Id 含字符引用');
+  // ⑦ 关系属性用制表符分隔（读取库的标签名只到第一个空格为止，认不出这些关系、改按物理序号读表），关系顺序与物理顺序相反（B133 构造①）
+  assertUnverified(map(await build('tab-separated-rels.xlsx', async (zip) => {
+    await swapTargets(zip);
+    const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    assert.match(rels, /<Relationship Id=/);
+    zip.file('xl/_rels/workbook.xml.rels', rels.replace(/<Relationship Id=/g, '<Relationship\tId='));
+  })), '关系属性用制表符分隔');
+  // ⑧ 关系属性的引号前有换行（本模块的属性读法能读出 Id，读取库把换行与引号算进值里、找不到关系，改按物理序号读表）
+  assertUnverified(map(await build('newline-rels.xlsx', async (zip) => {
+    await swapTargets(zip);
+    const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    zip.file('xl/_rels/workbook.xml.rels', rels.replace(/<Relationship Id="/g, '<Relationship Id=\n"'));
+  })), '关系属性的引号前有换行');
   // 对照：Target 写成绝对路径 /xl/worksheets/sheet1.xml 时两种口径一致，照常还原
   const absolute = map(await build('absolute-target.xlsx', async (zip) => {
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="/xl/worksheets/sheet1.xml"');

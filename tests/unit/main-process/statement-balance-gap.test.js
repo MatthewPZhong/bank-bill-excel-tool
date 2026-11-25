@@ -21,7 +21,8 @@ const {
   findPreviousBalanceSeed,
   readBalanceSeedRecords,
   splitTemplateName,
-  upsertBalanceSeedRecord
+  upsertBalanceSeedRecord,
+  writeBalanceSeedRecords
 } = require('../../../src/backend/balance-seed-store');
 const { readBalanceAdjustments } = require('../../../src/backend/balance-adjustment-store');
 const { createStatementGenerationHelpers, selectBalanceAccountRows } = require('../../../src/main-process/statement-generation');
@@ -531,6 +532,49 @@ test('断档补录日期必须晚于断档前最后一个账单日', (t) => {
   assert.equal(accepted.stopResult, undefined);
   assert.equal(accepted.plan.record.billDate, '2026-09-03');
   assert.equal(accepted.plan.record.merchantId, 'M001');
+});
+
+// v3.2.22：核对上一账单日余额（seedMismatch）时，早于已有余额日期的补录不会被采用，预检直接拒绝
+test('核对上一账单日余额：补录日期不能早于已有余额的日期；等于或晚于照常', (t) => {
+  const storageRoot = createTempRoot(t);
+  const seed = (billDate, extra = {}) => upsertBalanceSeedRecord(storageRoot, {
+    templateName: TEMPLATE_NAME, merchantId: 'M001', currency: 'USD', billDate, endBalance: 100, overwrite: true, ...extra
+  });
+  seed('2026-09-29');
+  // 其他账号 / 币种、当前账单日期及以后的种子不影响下限
+  seed('2026-09-30', { currency: 'EUR' });
+  seed('2026-09-30', { merchantId: 'M002' });
+  seed('2026-10-01');
+  const prompt = {
+    templateName: TEMPLATE_NAME, merchantId: 'M001', currency: 'USD', targetBillDate: '2026-10-01',
+    seedMismatch: { seedDate: '2026-09-29', seedBalance: 0, anchorBalance: 0, billDate: '2026-10-01', statementBalances: [1] }
+  };
+  const build = (billDate, pendingPrompt = prompt) => buildManualBalanceSeedPlan({
+    payload: { billDate, endBalance: '500' },
+    pendingPrompt,
+    importContext: { template: { name: TEMPLATE_NAME } },
+    storageRoot
+  });
+  const rejected = build('2026-09-28');
+  assert.equal(rejected.stopResult.status, 'manual-balance-invalid');
+  assert.equal(rejected.stopResult.message, '上一账单日日期不能早于已有余额的日期 2026-09-29（更早的余额不会用于本次核对）');
+  assert.equal(rejected.stopResult.manualBalancePrompt.merchantId, 'M001');
+  for (const billDate of ['2026-09-29', '2026-09-30']) {
+    const accepted = build(billDate);
+    assert.equal(accepted.stopResult, undefined, billDate);
+    assert.equal(accepted.plan.record.billDate, billDate);
+  }
+  // 普通缺种子补录不受限制
+  assert.equal(build('2026-09-01', { ...prompt, seedMismatch: undefined }).stopResult, undefined);
+
+  // 下限按当前种子记录取，不沿用提示里记下的日期：提示生成后种子被改到更晚，按更晚的日期拒绝
+  seed('2026-09-30');
+  assert.equal(build('2026-09-29').stopResult.message, '上一账单日日期不能早于已有余额的日期 2026-09-30（更早的余额不会用于本次核对）');
+  // 种子被恢复到不含该账号的版本：没有已有余额，更早的日期照常保存
+  writeBalanceSeedRecords(storageRoot, splitTemplateName(TEMPLATE_NAME).bankName, []);
+  const restored = build('2026-09-28');
+  assert.equal(restored.stopResult, undefined);
+  assert.equal(restored.plan.record.billDate, '2026-09-28');
 });
 
 function writeSourceWorkbook(root, fileName, rows) {

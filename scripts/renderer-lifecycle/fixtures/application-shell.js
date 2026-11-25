@@ -140,8 +140,6 @@ module.exports = async ({ js, load, reset, assert, test }) => {
   await test('实际大账号提取未维护错误：原上下文取消失败可重试，成功后父子整栈结束', async () => {
     await js(`(async()=>{
       await setCurrentModule('statement-generator',{persist:false}).ready;
-      shellResponses['big-account-mode:load']={mode:'unfixed'};
-      shellResponses['big-account-order:load']={order:null};
       shellResponses['file:extract-big-account-order']={status:'error',errorCode:'BIG_ACCOUNT_NOT_MAINTAINED',unmaintainedAccounts:[
         {merchantId:'M<002>',fileName:'<账单>.xlsx',fileOrdinal:0,blockOrdinal:1,sourceRowNumber:8},
         {merchantId:'M<002>',fileName:'另一份.xlsx',fileOrdinal:1,blockOrdinal:0,sourceRowNumber:3}]};

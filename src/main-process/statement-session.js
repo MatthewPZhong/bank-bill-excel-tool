@@ -25,6 +25,13 @@ function cloneRowsWithMetadata(rows = []) {
     clonedRows.headerBreaks = rows.headerBreaks.slice();
   }
 
+  // v3.2.22：原表数据行数（file-service buildMappedRows，不可枚举）
+  if (Number.isInteger(rows.sourceDataRowCount)) {
+    Object.defineProperty(clonedRows, 'sourceDataRowCount', {
+      value: rows.sourceDataRowCount, enumerable: false, writable: true, configurable: true
+    });
+  }
+
   if (rows.amountSplitMatchStats && typeof rows.amountSplitMatchStats === 'object') {
     clonedRows.amountSplitMatchStats = { ...rows.amountSplitMatchStats };
   }

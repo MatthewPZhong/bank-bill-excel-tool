@@ -111,10 +111,11 @@ test('main 的 IPC 与 policy/support 精确相等', () => {
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 235);
+  // v3.2.22：去掉「账号顺序固定」删除 big-account-mode/order 的 load/save（no-file 54 → 52、exclude 119 → 117）
+  assert.equal(actual.length, 231);
   assert.equal(registry.channels('reserve').length, 46);
-  assert.equal(registry.channels('no-file').length, 54);
-  assert.equal(registry.channels('exclude').length, 119);
+  assert.equal(registry.channels('no-file').length, 52);
+  assert.equal(registry.channels('exclude').length, 117);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 16);
   // v3.2.18 模板管理【更新】：预览为只读预检（exclude），确认写入为 support action
   assert.ok(registry.channels('exclude').includes('template:preview-header-update'));
@@ -225,23 +226,23 @@ test('exclude 只允许有限原因，所有 policy 都是 literal 且无 wildca
   }
 });
 
-test('46 file 与 54 no-file mutation 逐项显式分类且精确闭合', () => {
+test('46 file 与 52 no-file mutation 逐项显式分类且精确闭合', () => {
   const registry = createTaskPolicyRegistry();
   const fileChannels = new Set(FILE_ACTION_CHANNELS);
   const noFileChannels = new Set(NO_FILE_ACTION_CHANNELS);
   const excludeInventory = Object.values(EXCLUDED_CHANNELS_BY_REASON).flat();
   const excludeChannels = new Set(excludeInventory);
   assert.equal(fileChannels.size, 46);
-  assert.equal(noFileChannels.size, 54);
-  assert.equal(excludeInventory.length, 119);
-  assert.equal(excludeChannels.size, 119);
+  assert.equal(noFileChannels.size, 52);
+  assert.equal(excludeInventory.length, 117);
+  assert.equal(excludeChannels.size, 117);
   assert.deepEqual([...fileChannels].filter((channel) => noFileChannels.has(channel)), []);
   assert.deepEqual([...fileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual([...noFileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual(new Set(registry.channels('reserve')), fileChannels);
   assert.deepEqual(new Set(registry.channels('no-file')), noFileChannels);
-  assert.equal(registry.channels('exclude').length, 119);
-  assert.equal(registry.list().length, 46 + 54 + 119);
+  assert.equal(registry.channels('exclude').length, 117);
+  assert.equal(registry.list().length, 46 + 52 + 117);
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['staging-preflight-only'].includes('template:preview-header-update'));
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-schedule'));
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-lightness'));
@@ -472,7 +473,7 @@ test('无文件运行/配置使用 Task Run 但不占批次号，银行对账 ex
       .filter((policy) => policy.batchPolicy === 'no-file')
       .map((policy) => policy.channel)
       .length,
-    54
+    52
   );
   const first = createBankStatementRunFlowIdentity(() => 'ephemeral-run-1');
   const rerun = createBankStatementRunFlowIdentity(() => 'ephemeral-run-2');

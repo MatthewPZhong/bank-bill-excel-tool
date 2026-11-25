@@ -474,7 +474,7 @@ function initializeDomainControllers(info) {
       getAccountMappingCount: configurationServices.getAccountMappingCount, subscribe: configurationServices.subscribe,
       refreshTemplates: configurationServices.refreshTemplates },
     ui: { modalHost, modalBridge, status: updateStatusBox, reportError: ui.reportError, alertNative: window.alert.bind(window),
-      createAlertDialog, createTemplateManagerDialog, createBigAccountSelectionDialog, createRememberOrderMismatchDialog,
+      createAlertDialog, createTemplateManagerDialog, createBigAccountSelectionDialog,
       createDuplicateRowsReviewDialog,
       createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, createAccountMappingDialog, createAccountMappingMigrationDialog,
       createChannelAccountMappingConflictDialog, createTemplateImportNameDialog }
@@ -521,7 +521,6 @@ const {
   createTemplateImportNameDialog,
   createBigAccountSelectionDialog,
   createBigAccountManagerDialog,
-  createRememberOrderMismatchDialog,
   // v3.2.19 重复账单提醒
   createDuplicateRowsReviewDialog,
   createTemplateManagerDialog,
@@ -697,7 +696,6 @@ const rendererPreviews = window.__rendererPreviews.createRendererPreviews({
   createAmountSplitRulesDialog,
   createBillSplitRowsDialog,
   createBillSplitMappingsDialog,
-  createRememberOrderMismatchDialog,
   createDuplicateRowsReviewDialog,
   createAccountMappingMigrationDialog,
   closeModal,
@@ -748,7 +746,6 @@ const {
   applyAmountSplitRulesDialogPreviewState,
   applyBillSplitRowsDialogPreviewState,
   applyBillSplitMappingsDialogPreviewState,
-  applyRememberOrderMismatchDialogPreviewState,
   applyDuplicateRowsReviewDialogPreviewState,
   applyAccountMappingMigrationDialogPreviewState,
   // 2026-04-24 补：历史遗漏 preview
@@ -1964,10 +1961,6 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'bill-split-mappings-dialog') {
     setTimeout(() => {
       applyBillSplitMappingsDialogPreviewState();
-    }, 120);
-  } else if (info.previewModal === 'remember-order-mismatch-dialog') {
-    setTimeout(() => {
-      applyRememberOrderMismatchDialogPreviewState();
     }, 120);
   } else if (info.previewModal === 'duplicate-rows-review-dialog') {
     setTimeout(() => {

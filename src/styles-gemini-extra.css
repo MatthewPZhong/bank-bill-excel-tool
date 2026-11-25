@@ -341,7 +341,6 @@ td .muted { color: var(--muted); }
 .monthly-balance-export-card { width: min(100%, 520px); }
 .manual-balance-card { width: min(100%, 560px); }
 .template-rename-card { width: min(100%, 520px); }
-.remember-order-mismatch-card { width: min(100%, 460px); }
 .app-update-settings-card {
   --app-settings-footer-inline-padding: 24px;
   --app-settings-confirm-width: 72px;
@@ -2315,16 +2314,6 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
   display: flex; align-items: center; gap: 10px;
   margin-left: auto;
 }
-.big-account-mode-label {
-  font-size: 12px; color: var(--muted);
-}
-.big-account-mode-select {
-  height: 36px;
-  width: 180px;
-  padding: 0 36px 0 14px;
-  border-radius: var(--pill);
-  font-size: 13px;
-}
 .big-account-split-body {
   flex: 1; padding: 8px 12px 0;
   overflow: hidden;
@@ -2480,8 +2469,7 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 .big-account-search-input {
   width: 200px; height: 36px;
 }
-.ba-multi-mode-label,
-.big-account-remember-label {
+.ba-multi-mode-label {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--muted);
   white-space: nowrap;
@@ -3069,6 +3057,30 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
 .manual-balance-source-tag.is-saved { background: var(--bg-soft); color: var(--muted); }
 .manual-balance-confirm-row.is-saved td { color: var(--muted); }
 .manual-balance-source-reason { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.manual-balance-source-tag.is-chosen { background: var(--chip-active-bg); color: var(--primary); }
+/* v3.2.22：导入余额文件「选择余额」——同日多个不同余额逐账号单选；卡片加宽，正文滚动，按钮常驻 */
+.manual-balance-card.balance-file-choice-card {
+  width: min(100%, 1120px);
+  max-height: calc(100vh - 56px);
+  display: flex; flex-direction: column;
+}
+.balance-file-choice-card .dialog-actions { flex: 0 0 auto; }
+.balance-file-choice-actions .balance-file-choice-message { margin: 0 auto 0 0; }
+.balance-file-choice-group { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; scroll-margin-top: 12px; }
+.balance-file-choice-title { font-weight: 600; }
+.balance-file-choice-table-wrap {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  overflow: auto;
+}
+.balance-file-choice-group.is-invalid .balance-file-choice-table-wrap { border-color: var(--danger, #d93025); }
+.balance-file-choice-table thead th { padding: 10px 12px 8px; white-space: nowrap; }
+.balance-file-choice-table tbody td { padding: 8px 12px; white-space: nowrap; }
+.balance-file-choice-row { cursor: pointer; }
+.balance-file-choice-row:hover td { background: var(--bg-soft); }
+.balance-file-choice-row:has(.balance-file-choice-radio:checked) td { background: var(--chip-active-bg); }
+.balance-file-choice-amount { font-variant-numeric: tabular-nums; font-weight: 600; }
+.balance-file-choice-table tbody td.balance-file-choice-text { white-space: normal; min-width: 6em; max-width: 16em; overflow-wrap: break-word; }
 
 /* Alert card */
 .alert-card .alert-body {
@@ -4085,12 +4097,6 @@ select.mapping-text-input {
      min-width:24px 保证 a/b/c 字母列至少 24px 宽；text-align:center 字母居中（与其它 letter 列视觉一致）*/
   min-width: 24px;
   text-align: center;
-}
-.big-account-order-text-item {
-  font-size: 13px; font-weight: 500;
-  color: var(--text);
-  font-family: "Roboto Mono", ui-monospace, monospace;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .big-account-order-empty {
   font-size: 12px; color: var(--muted);

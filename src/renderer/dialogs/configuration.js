@@ -789,9 +789,10 @@
       return `${part(account?.merchantId)}@@${part(account?.currency)}`;
     }
 
-    // 只有缺种子的普通补录 prompt 可导入余额文件、可被确认后连续保存（断档、核对、确认类都不行）。
-    function isPlainManualBalancePrompt(prompt) {
-      return Boolean(prompt) && !prompt.reason && !prompt.seedMismatch;
+    // 缺种子的普通补录与「核对上一账单日余额」（v3.2.22 D1）prompt 可导入余额文件、可被确认后连续保存
+    //   （断档、余额不一致、人工补录替换确认都不行）。
+    function isImportableManualBalancePrompt(prompt) {
+      return Boolean(prompt) && !prompt.reason;
     }
 
     // 预填余额用普通小数：String 会把 1e-7 这类小额写成指数，主进程补录校验不接受指数写法。保留 12 位小数（余额链路口径）。
@@ -815,6 +816,140 @@
 
     function manualBalanceGroupName(prompt) {
       return String(prompt?.templateName ?? '').trim();
+    }
+
+    // v3.2.22：导入余额文件时同一账号同一账单日有多个不同的期末余额（D4）——逐账号列出该日全部行供单选，
+    //   附「余额来源」「余额获取方式」供参考；这三列紧跟「选择」，窗口放大时不必横向滚动就能比较。onConfirm(selections) 收到 Map（账号键 → 所选行）；取消或关闭即放弃本次导入。
+    let balanceFileChoiceSeq = 0;
+    function createBalanceFileChoiceDialog({ accounts, fileName, onConfirm }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card balance-file-choice-card';
+      const choiceAccounts = (Array.isArray(accounts) ? accounts : [])
+        .filter((account) => account?.source === 'choice' && Array.isArray(account.choices) && account.choices.length);
+      const radioPrefix = `balance-file-choice-${balanceFileChoiceSeq += 1}`;
+      const cell = (value) => escapeHtml(String(value ?? '') || '-');
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">选择余额</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-gap-body balance-file-choice-body">
+          <p class="balance-gap-intro">${escapeHtml(fileName || '余额文件')} 中以下 ${choiceAccounts.length} 个账号在同一账单日有多个不同的期末余额，请为每个账号选择一条作为上一账单日余额：</p>
+          ${choiceAccounts.map((account, groupIndex) => `
+          <section class="balance-file-choice-group" data-group-index="${groupIndex}">
+            <div class="balance-file-choice-title">银行账号 ${escapeHtml(String(account.merchantId || ''))}（${escapeHtml(String(account.currency || '(空)'))}）· 当前账单日期 ${escapeHtml(String(account.targetBillDate || ''))}</div>
+            <div class="table-wrapper balance-file-choice-table-wrap">
+              <table class="data-table balance-file-choice-table">
+                <thead>
+                  <tr>
+                    <th>选择</th>
+                    <th>期末余额</th>
+                    <th>余额来源</th>
+                    <th>余额获取方式</th>
+                    <th>账单日期</th>
+                    <th>银行名</th>
+                    <th>开户地</th>
+                    <th>币种</th>
+                    <th>银行账户号</th>
+                    <th>行号</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${account.choices.map((choice, choiceIndex) => `
+                  <tr class="balance-file-choice-row" data-choice-index="${choiceIndex}">
+                    <td><input class="balance-file-choice-radio" type="radio" name="${radioPrefix}-${groupIndex}" value="${choiceIndex}" aria-label="选择文件第 ${escapeHtml(String(choice.rowNumber ?? ''))} 行" /></td>
+                    <td class="balance-file-choice-amount">${cell(formatImportedBalanceInput(choice.endBalance))}</td>
+                    <td class="balance-file-choice-text">${cell(choice.balanceSource)}</td>
+                    <td class="balance-file-choice-text">${cell(choice.balanceMethod)}</td>
+                    <td>${cell(choice.billDate)}</td>
+                    <td class="balance-file-choice-text">${cell(choice.bankName)}</td>
+                    <td class="balance-file-choice-text">${cell(choice.location)}</td>
+                    <td>${cell(choice.currency)}</td>
+                    <td class="manual-balance-context-account">${cell(choice.merchantId)}</td>
+                    <td>${cell(choice.rowNumber)}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </section>`).join('')}
+        </div>
+        <div class="dialog-actions right balance-file-choice-actions">
+          <p class="balance-gap-warning balance-file-choice-message" data-role="choice-message" role="alert" hidden></p>
+          <button class="secondary-btn small" type="button" data-action="choice-cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="choice-confirm">确认</button>
+        </div>
+      `;
+      const message = dialog.querySelector('[data-role="choice-message"]');
+      const cancel = () => closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+      dialog.querySelector('.icon-close').addEventListener('click', cancel);
+      dialog.querySelector('[data-action="choice-cancel"]').addEventListener('click', cancel);
+      // 已提示过未选账号时，选择变化后同步重算剩余数；都选好后隐藏提示。
+      const refreshMissingMessage = () => {
+        if (message.hidden) return;
+        const missing = [...dialog.querySelectorAll('.balance-file-choice-group')]
+          .filter((group) => !group.querySelector('.balance-file-choice-radio:checked')).length;
+        if (missing) message.textContent = `还有 ${missing} 个账号未选择余额（已标红）`;
+        else message.hidden = true;
+      };
+      // 点整行即选中该行（单选）；键盘切换单选同样清除该组红框。
+      dialog.querySelectorAll('.balance-file-choice-row').forEach((row) => {
+        const radio = row.querySelector('.balance-file-choice-radio');
+        const markChosen = () => {
+          row.closest('.balance-file-choice-group')?.classList.remove('is-invalid');
+          refreshMissingMessage();
+        };
+        row.addEventListener('click', (event) => {
+          if (event.target !== radio) radio.checked = true;
+          markChosen();
+        });
+        radio.addEventListener('change', markChosen);
+      });
+      dialog.querySelector('[data-action="choice-confirm"]').addEventListener('click', () => {
+        const selections = new Map();
+        let missing = 0;
+        dialog.querySelectorAll('.balance-file-choice-group').forEach((group) => {
+          const account = choiceAccounts[Number(group.dataset.groupIndex)];
+          const checked = group.querySelector('.balance-file-choice-radio:checked');
+          group.classList.toggle('is-invalid', !checked);
+          if (!checked) {
+            missing += 1;
+            return;
+          }
+          selections.set(manualBalanceAccountKey(account), account.choices[Number(checked.value)]);
+        });
+        if (missing) {
+          // 提示在常驻的按钮栏里；正文滚到第一个未选的账号并聚焦，账号多或窗口放大时也看得到漏选的是哪个
+          message.textContent = `还有 ${missing} 个账号未选择余额（已标红）`;
+          message.hidden = false;
+          const firstInvalid = dialog.querySelector('.balance-file-choice-group.is-invalid');
+          if (firstInvalid && typeof firstInvalid.scrollIntoView === 'function') firstInvalid.scrollIntoView({ block: 'start' });
+          firstInvalid?.querySelector('.balance-file-choice-radio')?.focus({ preventScroll: true });
+          return;
+        }
+        onConfirm(selections);
+        closeModal(overlay, { status: 'submitted', value: selections.size });
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // 把选择余额弹窗的结果填回导入结果：所选行的日期与余额作为预填值，来源标为「已选择」并写明所选行。
+    function applyBalanceFileChoices(importResult, selections) {
+      const accounts = (Array.isArray(importResult?.accounts) ? importResult.accounts : []).map((account) => {
+        if (account?.source !== 'choice') return account;
+        const choice = selections.get(manualBalanceAccountKey(account));
+        if (!choice) return account;
+        const total = Array.isArray(account.choices) ? account.choices.length : 0;
+        return {
+          ...account,
+          billDate: String(choice.billDate || ''),
+          endBalance: choice.endBalance,
+          source: 'chosen',
+          reason: `已从同日 ${total} 条中选择第 ${choice.rowNumber} 行${choice.balanceSource ? `（余额来源：${choice.balanceSource}）` : ''}`
+        };
+      });
+      return { ...importResult, accounts };
     }
 
     function createManualBalanceSeedDialog(prompt, draft = {}, queueState = null) {
@@ -854,9 +989,10 @@
       const manualTitle = isGapPrompt
         ? '补录断档前一日余额'
         : (seedMismatch ? '核对上一账单日余额' : '补录上一账单日余额');
-      // v3.2.17：普通缺种子补录可从余额文件批量提取待补录账号的余额，转到「余额确认」视图。
-      const canImportBalanceFile = isPlainManualBalancePrompt(prompt)
-        && Array.isArray(prompt.pendingAccounts) && prompt.pendingAccounts.length > 0
+      // v3.2.17：普通缺种子补录可从余额文件批量提取待补录账号的余额，转到「余额确认」视图；
+      //   v3.2.22：核对上一账单日余额也可导入（清单为当前核对账号与本组缺种子账号）。
+      const canImportBalanceFile = isImportableManualBalancePrompt(prompt)
+        && (Boolean(seedMismatch) || (Array.isArray(prompt.pendingAccounts) && prompt.pendingAccounts.length > 0))
         && typeof api.files?.importBalanceSeedFile === 'function';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -1138,28 +1274,38 @@
       function renderConfirmRows(importResult) {
         const accounts = Array.isArray(importResult.accounts) ? importResult.accounts : [];
         const matchedCount = accounts.filter((account) => account.source === 'file').length;
-        const manualCount = accounts.length - matchedCount;
+        const chosenCount = accounts.filter((account) => account.source === 'chosen').length;
+        const manualCount = accounts.length - matchedCount - chosenCount;
         importedFileName = String(importResult.fileName || '');
-        confirmSummary.textContent = `已从 ${importedFileName || '余额文件'} 提取 ${matchedCount} 个账号的余额`
+        confirmSummary.textContent = `已从 ${importedFileName || '余额文件'} 提取 ${matchedCount + chosenCount} 个账号的余额`
+          + (chosenCount ? `（其中 ${chosenCount} 个从同日多个余额中选择）` : '')
           + (manualCount ? `，${manualCount} 个需手工录入` : '')
-          + (importResult.skippedRowCount ? `；文件中 ${importResult.skippedRowCount} 行因银行账号、账单日期或期末余额无效被跳过` : '');
+          + (importResult.skippedRowCount ? `；文件中 ${importResult.skippedRowCount} 行因银行账户号、账单日期或期末余额无效被跳过` : '');
         confirmTbody.innerHTML = accounts.map((account) => {
-          const fromFile = account.source === 'file';
+          const chosen = account.source === 'chosen';
+          const fromFile = account.source === 'file' || chosen;
+          const sourceText = chosen ? '已选择' : (fromFile ? '来自文件' : '需手工录入');
           const accountText = String(account.merchantId || '');
           const currencyText = String(account.currency || '');
+          // 核对上一账单日余额的账号：早于已有余额日期的余额不会用于本次核对（主进程同样拒绝）
+          const minDate = String(account.minBillDate || '');
           return `
             <tr class="manual-balance-confirm-row${fromFile ? '' : ' is-manual'}"
               data-merchant-id="${escapeHtml(accountText)}"
               data-currency="${escapeHtml(currencyText)}"
-              data-target-bill-date="${escapeHtml(String(account.targetBillDate || ''))}">
+              data-target-bill-date="${escapeHtml(String(account.targetBillDate || ''))}"
+              data-min-bill-date="${escapeHtml(minDate)}">
               <td class="manual-balance-context-account">${escapeHtml(accountText)}</td>
               <td>${escapeHtml(currencyText || '(空)')}</td>
               <td>${escapeHtml(String(account.targetBillDate || ''))}</td>
-              <td><input class="mapping-text-input manual-balance-confirm-date" type="date" aria-label="上一账单日日期" value="${escapeHtml(String(account.billDate || ''))}" /></td>
+              <td>
+                <input class="mapping-text-input manual-balance-confirm-date" type="date" aria-label="上一账单日日期" value="${escapeHtml(String(account.billDate || ''))}"${minDate ? ` min="${escapeHtml(minDate)}"` : ''} />
+                ${minDate ? `<div class="manual-balance-source-reason manual-balance-confirm-date-hint">不早于已有余额日期 ${escapeHtml(minDate)}</div>` : ''}
+              </td>
               <td><input class="mapping-text-input manual-balance-confirm-amount" type="text" spellcheck="false" aria-label="上一账单日余额" value="${escapeHtml(formatImportedBalanceInput(account.endBalance))}" /></td>
               <td>
-                <span class="manual-balance-source-tag ${fromFile ? 'is-file' : 'is-manual'}">${fromFile ? '来自文件' : '需手工录入'}</span>
-                ${!fromFile && account.reason ? `<div class="manual-balance-source-reason">${escapeHtml(String(account.reason))}</div>` : ''}
+                <span class="manual-balance-source-tag ${chosen ? 'is-chosen' : (fromFile ? 'is-file' : 'is-manual')}">${sourceText}</span>
+                ${(chosen || !fromFile) && account.reason ? `<div class="manual-balance-source-reason">${escapeHtml(String(account.reason))}</div>` : ''}
               </td>
             </tr>`;
         }).join('');
@@ -1193,9 +1339,11 @@
           const billDate = row.querySelector('.manual-balance-confirm-date').value.trim();
           const endBalance = row.querySelector('.manual-balance-confirm-amount').value.trim();
           const targetDate = row.dataset.targetBillDate || '';
+          const minDate = row.dataset.minBillDate || '';
           let problem = '';
           if (!billDate || !endBalance) problem = '请填写上一账单日日期与余额';
           else if (targetDate && billDate >= targetDate) problem = '上一账单日日期必须早于当前账单日期';
+          else if (minDate && billDate < minDate) problem = `上一账单日日期不能早于已有余额的日期 ${minDate}`;
           row.classList.toggle('is-invalid', Boolean(problem));
           row.title = problem;
           if (problem) {
@@ -1212,7 +1360,7 @@
       //   下一个仍是清单内的普通缺种子账号就继续，否则停下交给原有处理（断档、不一致、覆盖确认、报错或完成）。
       // 本弹窗分组内、清单里、尚未保存成功的普通缺种子账号才自动保存。
       function canAutoSave(nextPrompt, entries) {
-        if (!isPlainManualBalancePrompt(nextPrompt)) return false;
+        if (!isImportableManualBalancePrompt(nextPrompt)) return false;
         if (manualBalanceGroupName(nextPrompt) !== importGroupName) return false;
         const key = manualBalanceAccountKey(nextPrompt);
         return entries.has(key) && !savedAccountKeys.has(key);
@@ -1285,6 +1433,22 @@
             : '';
           pushAlert(overlay, () => createAlertDialog(`导入余额文件失败：${escapeHtml(result.message || '未知错误')}${detail}`, {
             onConfirm: null
+          }));
+          return;
+        }
+        const handle = modalBridge.host.getHandle(overlay);
+        if (!handle?.isOpen()) return;
+        // v3.2.22：同日多个不同余额先弹「选择余额」，选定后再进入余额确认；取消即放弃本次导入，留在原视图。
+        const needsChoice = (Array.isArray(result.accounts) ? result.accounts : []).some((account) => account?.source === 'choice');
+        if (needsChoice) {
+          pushModal(overlay, () => createBalanceFileChoiceDialog({
+            accounts: result.accounts,
+            fileName: result.fileName,
+            onConfirm: (selections) => {
+              if (!modalBridge.host.getHandle(overlay)?.isOpen()) return;
+              renderConfirmRows(applyBalanceFileChoices(result, selections));
+              showView('confirm');
+            }
           }));
           return;
         }
@@ -2480,7 +2644,6 @@
       }
 
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-      const rowsWithEmptyBlocks = Array.isArray(payload?.rowsWithEmptyBlocks) ? payload.rowsWithEmptyBlocks : rows;
       const expandedOptions = Array.isArray(payload?.expandedBigAccountOptions) ? payload.expandedBigAccountOptions : [];
       const templateId = payload?.templateId;
 
@@ -2488,8 +2651,8 @@
       const dialog = document.createElement('div');
       dialog.className = 'modal-card big-account-selection-card big-account-selection-split';
 
-      let currentMode = 'unfixed';
-      let currentFileRows = rows;
+      // v3.2.22：去掉「账号顺序固定」，每次都按不含无交易空段的账号块手动选择
+      const currentFileRows = rows;
       let checkedOrder = [];
       let searchMatchIndex = -1;
       let searchMatches = [];
@@ -2499,11 +2662,6 @@
         <div class="dialog-header">
           <div class="dialog-title">网银账单解析大账号确认</div>
           <div class="big-account-selection-toolbar">
-            <span class="big-account-mode-label">多账号账单导入解析模式</span>
-            <select class="mapping-select big-account-mode-select">
-              <option value="unfixed">账号顺序不固定</option>
-              <option value="fixed">账号顺序固定</option>
-            </select>
             <button class="icon-close" type="button">×</button>
           </div>
         </div>
@@ -2529,22 +2687,14 @@
           <button class="secondary-btn small ba-multi-toggle-btn is-hidden" type="button">编辑</button>
           <span class="big-account-search-label">定位大账号</span>
           <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
-          <label class="big-account-remember-label is-disabled">
-            <input class="new-account-checkbox big-account-remember-checkbox" type="checkbox" />
-            <span>记住顺序</span>
-          </label>
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
 
-      const modeSelect = dialog.querySelector('.big-account-mode-select');
-      const scrollContainer = dialog.querySelector('.ba-scroll-container');
       const fileListContainer = dialog.querySelector('.big-account-file-list');
       const orderListContainer = dialog.querySelector('.big-account-order-list');
       const searchInput = dialog.querySelector('.big-account-search-input');
       const extractOrderBtn = dialog.querySelector('[data-action="extract-order"]');
-      const rememberLabel = dialog.querySelector('.big-account-remember-label');
-      const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
       const doneBtn = dialog.querySelector('[data-action="done"]');
       // v1.5.2 需求 2：多对一工具条 DOM 引用
       const multiModeCheckbox = dialog.querySelector('.ba-multi-mode-checkbox');
@@ -2628,18 +2778,16 @@
       let multiGroups = [];
       let pendingGroup = null;
 
-      let isRememberMode = false;
-
-      // 左右面板同步滚动（仅在非记住顺序模式下生效）
+      // 左右面板同步滚动
       let mainSyncingScroll = false;
       fileListContainer.addEventListener('scroll', () => {
-        if (isRememberMode || mainSyncingScroll) return;
+        if (mainSyncingScroll) return;
         mainSyncingScroll = true;
         orderListContainer.scrollTop = fileListContainer.scrollTop;
         mainSyncingScroll = false;
       });
       orderListContainer.addEventListener('scroll', () => {
-        if (isRememberMode || mainSyncingScroll) return;
+        if (mainSyncingScroll) return;
         mainSyncingScroll = true;
         fileListContainer.scrollTop = orderListContainer.scrollTop;
         mainSyncingScroll = false;
@@ -3067,162 +3215,14 @@
         multiToggleBtn.textContent = multiEditing ? '完成' : '编辑';
       }
 
-      function syncModeUI() {
-        currentFileRows = currentMode === 'fixed' ? rowsWithEmptyBlocks : rows;
-        if (currentMode !== 'fixed') {
-          rememberCheckbox.checked = false;
-          rememberCheckbox.disabled = true;
-          rememberLabel.classList.add('is-disabled');
-        } else {
-          rememberCheckbox.disabled = false;
-          rememberLabel.classList.remove('is-disabled');
-        }
-        // v1.5.2 需求 2：mode 切换导致 currentFileRows / rowIndex 空间变化 → 清空多对一状态避免对不上
-        multiGroups = [];
-        pendingGroup = null;
-        checkedOrder = [];
-        searchInput.value = '';
-        searchMatchIndex = -1;
-        searchMatches = [];
-        lastSearchQuery = '';
+      function initializeState() {
+        if (selectionClosed) return;
         renderFileList();
         renderOrderList();
-
-        if (currentMode === 'fixed' && savedOrder && Array.isArray(savedOrder.assignments) && savedOrder.assignments.length) {
-          rememberCheckbox.checked = true;
-          applyPrefilledOrder(savedOrder.assignments);
-          switchToRememberMode();
-        } else {
-          switchToNormalMode();
-        }
-      }
-
-      function switchToRememberMode() {
-        isRememberMode = true;
-        scrollContainer.style.overflowY = 'auto';
-        fileListContainer.parentElement.style.overflowY = 'visible';
-        orderListContainer.parentElement.style.overflowY = 'visible';
-        scrollContainer.classList.add('ba-single-scroll-active');
-        renderOrderListAsText();
-      }
-
-      function switchToNormalMode() {
-        isRememberMode = false;
-        scrollContainer.style.overflowY = '';
-        fileListContainer.parentElement.style.overflowY = '';
-        orderListContainer.parentElement.style.overflowY = '';
-        scrollContainer.classList.remove('ba-single-scroll-active');
-        renderOrderListAsCheckbox();
-      }
-
-      function renderOrderListAsText() {
-        orderListContainer.innerHTML = '';
-        orderListContainer.classList.add('text-readonly');
-        if (!checkedOrder.length) {
-          orderListContainer.innerHTML = '<div class="big-account-order-empty">暂无已选大账号</div>';
-          return;
-        }
-        checkedOrder.forEach((item, index) => {
-          const div = document.createElement('div');
-          div.className = 'big-account-order-item big-account-order-text-item ba-order-row';
-          const indexSpan = document.createElement('span');
-          indexSpan.className = 'concat-picker-index big-account-order-index ba-order-badge';
-          indexSpan.textContent = `${index + 1}.`;
-          const textSpan = document.createElement('span');
-          textSpan.className = 'big-account-order-text ba-order-content';
-          textSpan.textContent = `${item.merchantId} ${item.currency}`;
-          div.append(indexSpan, textSpan);
-          orderListContainer.appendChild(div);
-        });
-      }
-
-      function renderOrderListAsCheckbox() {
-        orderListContainer.classList.remove('text-readonly');
-        renderOrderList();
-        // Restore checked state
-        checkedOrder.forEach((co) => {
-          const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
-            (el) => el.dataset.merchantId === co.merchantId && el.dataset.currency === co.currency
-          );
-          if (item) {
-            item.querySelector('.big-account-order-checkbox').checked = true;
-          }
-        });
         syncOrderIndices();
         syncCheckboxDisabled();
-      }
-
-      let savedOrder = null;
-
-      function applyPrefilledOrder(assignments) {
-        checkedOrder = [];
-        assignments.forEach((a) => {
-          const key = `${a.merchantId}@@${a.currency}`;
-          const exists = expandedOptions.some((o) => o.merchantId === a.merchantId && o.currency === a.currency);
-          if (exists && checkedOrder.length < currentFileRows.length) {
-            checkedOrder.push({ merchantId: a.merchantId, currency: a.currency, key });
-            const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
-              (el) => el.dataset.merchantId === a.merchantId && el.dataset.currency === a.currency
-            );
-            if (item) {
-              item.querySelector('.big-account-order-checkbox').checked = true;
-            }
-          }
-        });
-        syncOrderIndices();
-        syncCheckboxDisabled();
-      }
-
-      function setInteractive(enabled) {
-        const interactiveElements = [modeSelect, searchInput, doneBtn];
-        interactiveElements.forEach((el) => { el.disabled = !enabled; });
-        orderListContainer.style.pointerEvents = enabled ? '' : 'none';
-        orderListContainer.style.opacity = enabled ? '' : '0.5';
-      }
-
-      async function initializeState() {
-        setInteractive(false);
-        try {
-          const modeResult = await api.bigAccount.loadMode(templateId);
-          if (selectionClosed) return;
-          currentMode = modeResult.mode || 'unfixed';
-
-          // forceMode 优先：记住的顺序与本次文件对不上（文件个数、账号或账号块顺序不符、无法唯一对应）时后端强制指定模式
-          const savedOrderRejected = payload?.forceMode === 'unfixed' || payload?.forceMode === 'fixed';
-          if (savedOrderRejected) {
-            currentMode = payload.forceMode;
-          }
-
-          modeSelect.value = currentMode;
-
-          const orderResult = await api.bigAccount.loadOrder(templateId);
-          if (selectionClosed) return;
-          // 后端已判定记住的分配不能按位置套用到本次文件：之后手动切回固定模式也不预填，避免账号 / 币种填到别的文件或块上。
-          savedOrder = savedOrderRejected ? null : orderResult.order;
-        } catch (_error) {}
-        if (selectionClosed) return;
-        syncModeUI();
-        // v1.5.2 需求 2：初始同步多对一工具条状态 + 互斥
         syncMultiToolbar();
-        syncMultiModeMutualDisabled();
-        setInteractive(true);
       }
-
-      modeSelect.addEventListener('change', async () => {
-        currentMode = modeSelect.value;
-        await api.bigAccount.saveMode({ templateId, mode: currentMode });
-        syncModeUI();
-        syncMultiModeMutualDisabled();
-      });
-
-      rememberCheckbox.addEventListener('change', () => {
-        if (rememberCheckbox.checked) {
-          switchToRememberMode();
-        } else {
-          switchToNormalMode();
-        }
-        syncMultiModeMutualDisabled();
-      });
 
       // ===== v1.5.2 需求 2：多对一工具条事件 =====
       // "单个账号匹多个文件" 勾选框：开/关切换
@@ -3252,7 +3252,6 @@
         syncOrderIndices();
         syncCheckboxDisabled();
         syncMultiToolbar();
-        syncMultiModeMutualDisabled();
       });
 
       // toggle 按钮：编辑↔完成 切换
@@ -3275,36 +3274,6 @@
         }
         syncMultiToolbar();
       });
-
-      // "单个账号匹多个文件" 与 "记住顺序" 互斥
-      function syncMultiModeMutualDisabled() {
-        // 记住顺序勾上 → 多对一模式勾选框 disabled 并取消；立即重渲染左侧避免遗留勾选框
-        if (rememberCheckbox.checked) {
-          multiModeCheckbox.disabled = true;
-          if (multiModeCheckbox.checked) {
-            multiModeCheckbox.checked = false;
-            multiMode = false;
-            multiEditing = false;
-            multiGroups = [];
-            pendingGroup = null;
-            renderFileList();
-          }
-          syncMultiToolbar();
-          return;
-        }
-        // 多对一模式勾上 → 记住顺序 disabled
-        if (multiModeCheckbox.checked) {
-          rememberCheckbox.disabled = true;
-          rememberLabel.classList.add('is-disabled');
-        } else {
-          // 仅在 fixed 模式才允许启用记住顺序；unfixed 下 syncModeUI 已强制 disable
-          if (currentMode === 'fixed') {
-            rememberCheckbox.disabled = false;
-            rememberLabel.classList.remove('is-disabled');
-          }
-        }
-        multiModeCheckbox.disabled = false;
-      }
 
       searchInput.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
@@ -3356,7 +3325,6 @@
           : currentFileRows;
         const result = await api.files.extractBigAccountOrder({
           contextId: payload.contextId,
-          mode: currentMode,
           rowIndexes: extractableRows.map((row, index) => (
             Number.isInteger(row.index) ? row.index : index
           ))
@@ -3644,9 +3612,7 @@
         try {
           result = await api.files.completeBigAccountSelection({
             contextId: payload.contextId,
-            assignments: finalAssignments,
-            mode: currentMode,
-            ...(currentMode === 'fixed' ? { rememberOrder: rememberCheckbox.checked } : {})
+            assignments: finalAssignments
           });
         } catch (error) {
           // IPC 本身抛错：按能否释放本次选择区分未开始与无法确认（见 resolveContinuationIpcRejection）
@@ -9885,42 +9851,6 @@
       return overlay;
     }
 
-    // 记忆顺序不匹配提示，由当前弹窗会话处理后续选择。
-    function createRememberOrderMismatchDialog({ message, bigAccountResult }) {
-      const overlay = createOverlay();
-      const dialog = document.createElement('div');
-      dialog.className = 'modal-card alert-card';
-      dialog.innerHTML = `
-        <div class="alert-body">
-          <div class="alert-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="rememberMismatchIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 3L2 20h20L12 3z" fill="none" stroke="url(#rememberMismatchIconG)" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" stroke="url(#rememberMismatchIconG)" stroke-width="2" stroke-linecap="round"/></svg>
-          </div>
-          <div class="alert-message">${message}</div>
-        </div>
-        <div class="dialog-actions center">
-          <button class="secondary-btn small" type="button" data-action="change-config">变更配置</button>
-          <button class="primary-btn small" type="button" data-action="confirm">确认</button>
-        </div>
-      `;
-
-      dialog.querySelector('[data-action="change-config"]').addEventListener('click', () => {
-        closeModal();
-        const selectionPayload = {
-          ...bigAccountResult,
-          status: 'select-big-account'
-        };
-        openModal(() => createBigAccountSelectionDialog(selectionPayload));
-      });
-
-      dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
-        api.files.cancelBigAccountSelection(bigAccountResult.contextId);
-        closeModal();
-      });
-
-      overlay.appendChild(dialog);
-      return overlay;
-    }
-
     function createAccountMappingMigrationDialog({ rows = [], templates = [], onDone }) {
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
@@ -10041,7 +9971,7 @@
     //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
     //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
 
-    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createDuplicateRowsReviewDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
+    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createDuplicateRowsReviewDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
   }
   global.ConfigurationDialogs = Object.freeze({ createConfigurationDialogs, buildBalanceSeedConfirmationRequest });
 })(window);

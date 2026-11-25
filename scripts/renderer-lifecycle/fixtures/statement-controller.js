@@ -35,8 +35,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         monthlyBalance:{assemble:payload=>f.invoke('assemble',[payload],{status:'ready',summary:{count:6}}),export:()=>f.invoke('monthly',[],{status:'success',message:'月度导出成功'})},
         errors:{exportLast:()=>f.invoke('error',[],{status:'success',message:'错误报告已导出'})},
         accountMappings:{checkMigrationPending:()=>f.invoke('migration',[],{pending:false}),list:id=>f.invoke('mappingList',[id],{status:'success',rows:[]}),
-          listChannelConflicts:()=>f.invoke('conflicts',[],{status:'success',channels:[]})},
-        bigAccount:{loadMode:async()=>({mode:'unfixed'}),loadOrder:async()=>({order:null})}};
+          listChannelConflicts:()=>f.invoke('conflicts',[],{status:'success',channels:[]})}};
       f.config=ConfigurationServices.createConfigurationServices({templatesApi:f.api.templates});
       f.config.acceptBootstrap({currencyOptions:['USD'],accountMappingCount:2});
       f.config.applyPreviewTemplates([{id:21,name:'测试模板',headers:['Currency']}]);
@@ -49,7 +48,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         applyManualBalancePromptStatus:value=>f.controller.createFeedbackScope().applyManualBalancePromptStatus(value)});
       const ui={modalHost:f.host,modalBridge:f.bridge,status(element,message,tone,options){element.querySelector('.status-box-text').textContent=message;element.dataset.tone=tone;f.feedback.push({message,tone,options});},
         alertNative:message=>f.alerts.push(message),reportError:error=>f.errors.push(String(error.message||error))};
-      for(const name of ['createAlertDialog','createTemplateManagerDialog','createBigAccountSelectionDialog','createRememberOrderMismatchDialog','createDuplicateRowsReviewDialog','createExportScopeDialog','createMonthlyBalanceExportDialog','createManualBalanceSeedDialog','createAccountMappingDialog','createAccountMappingMigrationDialog','createTemplateImportNameDialog'])ui[name]=f.dialogs[name];
+      for(const name of ['createAlertDialog','createTemplateManagerDialog','createBigAccountSelectionDialog','createDuplicateRowsReviewDialog','createExportScopeDialog','createMonthlyBalanceExportDialog','createManualBalanceSeedDialog','createAccountMappingDialog','createAccountMappingMigrationDialog','createTemplateImportNameDialog'])ui[name]=f.dialogs[name];
       f.controller=StatementController.createStatementController({api:f.api,panel:f.panel,config:f.config,ui,initialInfo:{hasEnum:true}});
       f.controller.enter(); void 0;
     `);
@@ -188,14 +187,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       assert.deepEqual(await js(`statementFixture.calls.find(call=>call.name==='assemble').args[0]`), {templateScope:'all',templateName:'',year:new Date().getFullYear(),month:8});
     });
   }
-  await test('导入分流真实大账号选择/记忆顺序异常窗口，手工余额提示按原结果进入', async () => {
+  await test('导入分流真实大账号选择窗口，手工余额提示按原结果进入', async () => {
     await setup();
-    await js(`statementFixture.next.import={status:'select-big-account',contextId:'fixture-selection',templateId:21,templateName:'测试模板',rows:[{index:0,fileIndex:0,fileName:'fixture.xlsx',sourceRowNumber:1}],expandedBigAccountOptions:[{merchantId:'FIXTURE',currency:'USD'}],canRemember:false};statementFixture.controller.commands.importFile()`); await tick();
+    await js(`statementFixture.next.import={status:'select-big-account',contextId:'fixture-selection',templateId:21,templateName:'测试模板',rows:[{index:0,fileIndex:0,fileName:'fixture.xlsx',sourceRowNumber:1}],expandedBigAccountOptions:[{merchantId:'FIXTURE',currency:'USD'}]};statementFixture.controller.commands.importFile()`); await tick();
     assert.equal(await js(`!!document.querySelector('.big-account-selection-card')`), true);
-    await js(`statementFixture.host.dispose();`);
-    await setup();
-    await js(`statementFixture.next.import={status:'remember-order-mismatch',failedFileNames:['fixture.xlsx'],contextId:'fixture-order',rows:[]};statementFixture.controller.commands.importFile()`); await tick();
-    assert.match(await js(`statementFixture.top().textContent`), /fixture.xlsx的账户个数或账户号匹配不上/);
     await js(`statementFixture.host.dispose();`);
     // v3.2.19：重复账单过滤发现重复 → 打开真实的重复账单提醒
     await setup();
@@ -425,18 +420,6 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.controller.commands.importFile()`); await tick();
     assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1);
-  });
-  await test('大账号顺序不匹配的提示被正在提交的弹窗阻止打开时保留结果：提示等待确认，再点「导入文件」打开原提示且不重新导入', async () => {
-    await setup();
-    await js(`{const fx=statementFixture;fx.busy=true;const overlay=fx.modal('提交中的窗口');fx.bridge.registerModal(overlay,{canClose:()=>!fx.busy});
-      fx.bridge.openModal(()=>overlay,{owner:'statement-generator'});
-      fx.next.import={status:'remember-order-mismatch',contextId:'order-context',failedFileNames:['fixture.xlsx'],rows:[],rowsWithEmptyBlocks:[],expandedBigAccountOptions:[]};
-      fx.controller.commands.importFile();}void 0;`); await tick();
-    assert.match(await js('statementFixture.text()'), /导入等待确认/);
-    await js(`statementFixture.busy=false;statementFixture.host.closeTop();`); await tick();
-    await js(`statementFixture.controller.commands.importFile()`); await tick();
-    assert.match(await js('statementFixture.top().textContent'), /fixture\.xlsx的账户个数或账户号匹配不上/);
-    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1, '不重新导入');
   });
   await test('待继续的导入确认与导出选择分别保存：离页期间的导出选择不覆盖待确认的重复账单提醒', async () => {
     await setup();

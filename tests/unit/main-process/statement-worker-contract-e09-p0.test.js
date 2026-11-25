@@ -487,11 +487,8 @@ test('Main token handle冻结TechDoc exact字段，Renderer DTO剥离reservation
   });
   const legacyMessage = legacyMainMismatchMessage(maxLegacyBasenames);
   const mainSource = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
-  assert.match(
-    mainSource,
-    /failedFileNames\s*\.map\(\(name\) => `\$\{name\}的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。`\)\s*\.join\('\\n'\)/,
-    '测试拼接公式必须与Main真实legacy producer保持一致'
-  );
+  // v3.2.22：「账号顺序固定」下线后 Main 不再产生记住顺序不匹配提示；休眠 worker 契约仍按旧拼接公式核对上限（见 knowledge/backlog.md B134）
+  assert.equal(mainSource.includes('账户个数或账户号匹配不上'), false);
   assert.ok(
     Buffer.byteLength(legacyMessage, 'utf8') >
       STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes,
