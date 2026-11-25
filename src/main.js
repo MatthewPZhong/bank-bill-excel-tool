@@ -317,7 +317,7 @@ const {
 } = require('./main-process/linked-derive-rebuild');
 // v3.0.6 需求1（T3）：调拨对账单派生纯函数（mid-allocation 导入触发 → in/out 两行落 linked_fund_transfer_recon）。
 const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
-const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
+const { createStoredCellAssert, streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 // v3.2.18：链接表按数据日期统计 / 删除 + 派生联动的共享实现（手工删除与链接表过期清理共用，禁复制 = R-5）。
 const {
   isLinkedDeleteTable,
@@ -645,8 +645,10 @@ const {
   LEGACY_FEATURE_FILTER_ID,
   parseDateValue,
   parseNumericValue,
+  prepareWorkbookTextForWrite,
   readRows,
   readRowsWithMetadata,
+  assertBalanceRecordsWritable,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('./backend/file-service');
@@ -3053,24 +3055,32 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
 //   长整数换成文件原文（readRows 的不可枚举属性 sourceText：Map<行下标, Map<列下标, 原文>>），账号按原文匹配。
 //   生成时的识别依据（buildBigAccountRecognitionBasis）在窗口内逐行取原文，口径相同。
 //   headerRowNumbers 为 findHeaderRowNumbersInRawRows 的结果（下标 + 1）。返回新数组，保留 firstRowNumber。
+//   v3.2.22（B133 审查）：没有原文、仍是读取库读成的超出安全整数范围的数字（二进制 .xls、原文无法核对的 XLSX 等）末几位
+//   可能已变，可能精确命中维护列表里的另一个账号，不作为识别的依据：换成空值，并记下所在行（不可枚举属性
+//   unverifiedRowIndexes）。识别窗口里有这样的数字时，无法排除它就是本段的账号，整段不自动识别（精确、模糊命中与账户映射
+//   桥接都不用），由用户选择大账号（buildBigAccountRecognitionBasis 同一口径，见 resolveDirectBigAccountRecognition）。
+//   判定就地内联（测试夹具按函数源码加载，不另加自由标识符）
 function applyBigAccountRecognitionSourceText(rawRows, headerRowNumbers) {
   const sourceText = rawRows && rawRows.sourceText instanceof Map ? rawRows.sourceText : null;
-  if (!sourceText || !sourceText.size) return rawRows;
   const headerIndexes = new Set((headerRowNumbers || []).map((rowNumber) => rowNumber - 1));
+  const unverifiedRowIndexes = new Set();
   const rows = rawRows.map((row, index) => {
-    const rowText = headerIndexes.has(index) ? null : sourceText.get(index);
-    if (!rowText || !Array.isArray(row)) return row;
-    const next = row.slice();
-    rowText.forEach((text, columnIndex) => {
-      if (columnIndex < next.length) next[columnIndex] = text;
+    if (headerIndexes.has(index) || !Array.isArray(row)) return row;
+    const rowText = sourceText ? sourceText.get(index) : null;
+    return row.map((cell, columnIndex) => {
+      if (rowText && rowText.has(columnIndex)) return rowText.get(columnIndex);
+      if (!(typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell))) return cell;
+      unverifiedRowIndexes.add(index);
+      return '';
     });
-    return next;
   });
   if (rawRows.firstRowNumber !== undefined) {
     Object.defineProperty(rows, 'firstRowNumber', { value: rawRows.firstRowNumber, enumerable: false });
   }
+  Object.defineProperty(rows, 'unverifiedRowIndexes', { value: unverifiedRowIndexes, enumerable: false });
   return rows;
 }
+
 
 function buildBigAccountRecognitionBasis({
   rawRows,
@@ -3095,14 +3105,22 @@ function buildBigAccountRecognitionBasis({
     const previousBoundary = index === 0 ? 0 : headerRowNumbers[index - 1];
     const startIndex = Math.max(previousBoundary, headerRowNumber - 10);
     const endIndex = headerRowNumber - 2;
+    let unverifiedLongNumber = false;
     const candidateRowsWithSource = rows
       .slice(startIndex, Math.max(startIndex, endIndex + 1))
       .map((row, candidateIndex) => {
         const rowText = sourceText && sourceText.get(startIndex + candidateIndex);
         return {
           sourceRow: startIndex + candidateIndex + 1 + rowNumberOffset,
+          // v3.2.22（B133 审查）：没有原文、无法核对原值的长整数不参与识别，有这样的数字时整段不自动识别、不按账户映射
+          //   桥接（与 applyBigAccountRecognitionSourceText 同一口径）
           cells: (Array.isArray(row) ? row : [])
-            .map((cell, columnIndex) => normalizeCell(rowText && rowText.has(columnIndex) ? rowText.get(columnIndex) : cell))
+            .map((cell, columnIndex) => {
+              if (rowText && rowText.has(columnIndex)) return normalizeCell(rowText.get(columnIndex));
+              if (!(typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell))) return normalizeCell(cell);
+              unverifiedLongNumber = true;
+              return '';
+            })
             .filter((cell) => cell !== '')
         };
       });
@@ -3111,7 +3129,7 @@ function buildBigAccountRecognitionBasis({
     const exactBridgeCandidates = [];
     const fuzzyBridgeCandidates = [];
     const seenBridgeCandidates = new Set();
-    for (let rowIndex = candidateRowsWithSource.length - 1; rowIndex >= 0; rowIndex -= 1) {
+    for (let rowIndex = unverifiedLongNumber ? -1 : candidateRowsWithSource.length - 1; rowIndex >= 0; rowIndex -= 1) {
       const candidateRow = candidateRowsWithSource[rowIndex];
       for (const cellText of candidateRow.cells) {
         for (const mapping of bridgeMappings) {
@@ -3132,7 +3150,8 @@ function buildBigAccountRecognitionBasis({
       headerRowNumber: headerRowNumber + rowNumberOffset,
       candidateRows: Object.freeze(candidateRowsWithSource.map(
         (candidateRow) => Object.freeze(candidateRow.cells)
-      ))
+      )),
+      ...(unverifiedLongNumber ? { unverifiedLongNumber: true } : {})
     });
   });
   return Object.freeze({
@@ -3219,17 +3238,19 @@ function identifyAccountsFromRecognitionBasis({
   const headerWindows = basis && Array.isArray(basis.headerWindows)
     ? basis.headerWindows
     : [];
-  const matches = headerWindows.map((window) => findBigAccountMatchInRows(
+  // v3.2.22（B133 审查）：窗口里有无法核对原值的长整数时该段不自动识别（见 applyBigAccountRecognitionSourceText）
+  const matches = headerWindows.map((window) => (window.unverifiedLongNumber ? null : findBigAccountMatchInRows(
       window.candidateRows,
       0,
       window.candidateRows.length - 1,
       allMerchantIds,
       allowSubstringMatch
-    ));
+    )));
   return {
     accounts: matches.filter(Boolean),
     isSingleAccount: headerWindows.length <= 1,
-    matches
+    matches,
+    hasUnverifiedLongNumber: headerWindows.some((window) => window.unverifiedLongNumber === true)
   };
 }
 
@@ -3286,6 +3307,11 @@ function identifyAccountsFromFile({
 
   const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
+  let hasUnverifiedLongNumber = false;
+  // 下标区间内是否有无法核对原值的长整数（见 applyBigAccountRecognitionSourceText）
+  const unverifiedIndexes = rawRows.unverifiedRowIndexes instanceof Set ? Array.from(rawRows.unverifiedRowIndexes) : [];
+  const hasUnverifiedRecognitionRow = (startIndex, endIndex) => unverifiedIndexes
+    .some((index) => index >= startIndex && index <= endIndex);
 
   headerRowNumbers.forEach((headerRowNum, idx) => {
     // 只搜索 header 前面有限行（避免搜到上一个账户的交易数据行里的账户号）
@@ -3293,6 +3319,10 @@ function identifyAccountsFromFile({
     const prevBoundary = idx === 0 ? 0 : headerRowNumbers[idx - 1];
     const narrowStart = Math.max(prevBoundary, headerRowNum - 10);
     const candidateEndIdx = headerRowNum - 2;
+    if (hasUnverifiedRecognitionRow(narrowStart, candidateEndIdx)) {
+      hasUnverifiedLongNumber = true;
+      return;
+    }
     const match = findBigAccountMatchInRows(
       rawRows,
       narrowStart,
@@ -3306,19 +3336,23 @@ function identifyAccountsFromFile({
   });
 
   if (headerRowNumbers.length === 0) {
-    const match = findBigAccountMatchInRows(
-      rawRows,
-      0,
-      rawRows.length - 1,
-      allMerchantIds,
-      allowSubstringMatch
-    );
-    if (match) {
-      identified.push(match);
+    if (hasUnverifiedRecognitionRow(0, rawRows.length - 1)) {
+      hasUnverifiedLongNumber = true;
+    } else {
+      const match = findBigAccountMatchInRows(
+        rawRows,
+        0,
+        rawRows.length - 1,
+        allMerchantIds,
+        allowSubstringMatch
+      );
+      if (match) {
+        identified.push(match);
+      }
     }
   }
 
-  return { accounts: identified, isSingleAccount };
+  return { accounts: identified, isSingleAccount, hasUnverifiedLongNumber };
 }
 
 function isMultiBigAccountMapping(mappings = []) {
@@ -3413,13 +3447,26 @@ function resolveDirectBigAccountRecognition({
       (fileResult.accounts || []).map((account) => account.merchantId)
     );
 
-    if (identifiedMerchantIds.length === 0) {
-      return resolveRecognizedBigAccount({
+    // v3.2.22（B133 审查）：账号位置上有无法核对原值的长数字时，该文件按未识别处理（本函数只在至多一个维护选项时调用，
+    //   与普通未识别一样报错，不套用唯一选项；多个选项时由调用方的选择流程处理，该块不自动识别），不按其他段的识别结果
+    //   代替；报错时说明原因。不另走人工选择：选择窗口会覆盖同批每个文件、每个账号块的账号与币种，且结果会随文件顺序
+    //   变化（Codex 第四轮）
+    if (identifiedMerchantIds.length === 0 || fileResult.hasUnverifiedLongNumber) {
+      const unrecognized = resolveRecognizedBigAccount({
         extractedMerchantId: '',
         maintainedBigAccounts,
         sourceFileName: fileName,
         templateName
       });
+      if (!fileResult.hasUnverifiedLongNumber || unrecognized.status !== 'failed') return unrecognized;
+      return {
+        ...unrecognized,
+        // 只能确定识别窗口里有无法核对的长数字，不能确定它就是账号（可能是批次号等），提示不断言账号失真（Codex 第十二轮）
+        message: '账单表头上方的识别范围内有超出精度范围的数字（超过 15 位且存成了数字），无法核对原值，不能确认哪个值是账号，'
+          + '未自动识别大账号。文件里存的已可能是近似值，另存或改单元格格式都无法恢复：请从银行原系统把账号及表头上方的长编号按文本'
+          + '重新导出后重新导入。',
+        detailLines: Array.isArray(unrecognized.detailLines) ? unrecognized.detailLines.slice() : []
+      };
     }
 
     if (identifiedMerchantIds.length > 1) {
@@ -3752,6 +3799,15 @@ function markContinuationPrepareRejection(outcome, { keepErrorCodes = [] } = {})
   if (!outcome || outcome.proceed !== false || !outcome.result || outcome.result.status !== 'error') return outcome;
   if (keepErrorCodes.includes(String(outcome.result.errorCode || ''))) return outcome;
   return { ...outcome, result: { ...outcome.result, preservesSession: true } };
+}
+
+// 指定模板按记住的固定顺序自动套用大账号时，生成失败是否照常按导入失败报错（而不是降级为重新选择大账号）：
+//   - v3.2.19：重复账单【确认】后的续跑：条目已按记住的顺序分配并经用户确认，生成失败（如收支同时有值）照常报错
+//     （复核窗口会把它当作最终结果）；
+//   - v3.2.22 B113：明细含无法写入 Excel 的字符（带行列位置的拒绝）改选大账号也修不好，照常报错并列出位置（Codex 第五轮）
+function shouldPropagateAutoMatchError(error, prepared) {
+  if (prepared && prepared.duplicateReviewConfirmation && !prepared.previewOnly) return true;
+  return Boolean(error && error.positionsOnly);
 }
 
 function createBigAccountRecognitionErrorResult(resolution, context = {}) {
@@ -8640,14 +8696,6 @@ function registerAccountMappingHandlers() {
       const allTemplates = database.listTemplates();
       const validTemplateIds = new Set(allTemplates.map((t) => t.id));
 
-      // 获取迁移源数据的行数，用于完整性校验
-      const migrationSourceRows = database.listAllAccountMappings
-        ? database.listAllAccountMappings()
-        : [];
-      const uniqueSourceKeys = new Set(
-        migrationSourceRows.map((m) => `${normalizeCell(m.bankAccountId)}@@${normalizeCell(m.clearingAccountId)}`)
-      );
-
       const droppedRows = [];
       // v3.2.15（D7）：渠道子模板不再持有模板级账户映射，迁移分配只面向普通模板。
       const channelTemplateIds = new Set(allTemplates.filter((t) => t.channelId).map((t) => t.id));
@@ -9372,7 +9420,8 @@ function validateTemplateConfiguration({
       }
 
       item.currencies.forEach((currency) => {
-        const compositeKey = `${item.merchantId}@@${currency}`;
+        // B132：结构化键，账号或币种本身含 @@ 时不同账户不同键
+        const compositeKey = JSON.stringify([item.merchantId, currency]);
 
         if (duplicateKeys.has(compositeKey)) {
           throw new FileValidationError('FILE_READ', `大账号 ${item.merchantId} 的币种 ${currency} 重复`);
@@ -12881,6 +12930,11 @@ function assertStatementEntriesWritable(options) {
   return statementGenerationHelpers.assertStatementEntriesWritable(options);
 }
 
+// v3.2.22 B113：多组校验共用计数记下的无法写入的字符，各组校验完后一并拒绝（列出全批前 20 处与总数）
+function assertNoCollectedUnwritableText(found) {
+  return statementGenerationHelpers.assertNoUnwritableRowText(found);
+}
+
 // v1.5.2 #9 修复：按文件名映射模板导入多个文件匹配不同模板时，按 matchedTemplateId 分组，
 // 每组独立生成明细+余额文件，确保余额账单的银行名称/所在地使用各自模板的值。
 // v1.5.2：合并多组生成的 xlsx 文件（直接操作单元格，保留日期/数字格式）
@@ -12941,6 +12995,8 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
       font: { ...existingFont, name: 'Courier New' }
     };
   }
+  // v3.2.22 B113：读回时字面 _xHHHH_ 已还原成原文，写出前须与单组写出同样转义，否则合并文件中的流水号等被改写
+  prepareWorkbookTextForWrite(baseWb);
   fs.mkdirSync(path.dirname(mergedOutputPath), { recursive: true });
   applyWatermark(baseWb);
   XLSXStyle.writeFile(baseWb, mergedOutputPath);
@@ -13443,6 +13499,8 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
   const balanceModeConflictGroups = [];
   const balanceRowIssueGroups = [];
   const issueLineBudget = { remaining: 200 };
+  // 各组无法写入的字符共用计数，校验完一并拒绝
+  const unwritableText = { total: 0, labels: [] };
   // 其他组的错误（如映射失效）暂存，先完成各渠道的余额校验；有渠道余额错误时优先报出，否则照常抛出
   let otherError = null;
   for (const group of generationGroups) {
@@ -13473,7 +13531,7 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
         issueLineBudget
       });
       // 写出前的检查（收支同时有值、账单日期等）在任何组写出余额与种子之前做完
-      assertStatementBatchWritable({ config: groupGenConfig, preparedBatch: groupPreparedBatch, includeBalance: true });
+      assertStatementBatchWritable({ config: groupGenConfig, preparedBatch: groupPreparedBatch, includeBalance: true, unwritableText });
       groupPlans.push({ config: groupGenConfig, preparedBatch: groupPreparedBatch });
     } catch (error) {
       // v3.2.21（D3）：补录重算同样汇总各渠道的冲突账户与缺字段的行，在写种子、生成之前一并阻断
@@ -13496,6 +13554,7 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
     throw buildChannelBalancePlanningError(balanceModeConflictGroups, balanceRowIssueGroups);
   }
   if (otherError) throw otherError;
+  assertNoCollectedUnwritableText(unwritableText);
   return { scope, generationGroups, groupPlans, skippedGroups };
 }
 
@@ -13646,6 +13705,8 @@ function generateMultiTemplateGroupFiles({
   const isMultiBigAccountConfig = (config) => normalizeCell((config.exportMappings || []).find(
     (m) => normalizeCell(m.templateField) === 'MerchantId'
   )?.mappedField) === multiBigAccountMarker;
+  // 各组无法写入的字符共用计数，校验完一并拒绝（Codex 第六轮）
+  const unwritableText = { total: 0, labels: [] };
   // 其他组的错误（如映射失效）暂存，先完成各渠道的余额校验；有渠道余额错误时优先报出，否则照常抛出
   let otherError = null;
   for (const group of generationGroups) {
@@ -13721,7 +13782,7 @@ function generateMultiTemplateGroupFiles({
         issueLineBudget
       });
       // 写出前的检查（收支同时有值、账单日期等）在任何组写出、移除旧会话条目之前做完
-      assertStatementBatchWritable({ config: groupConfig, preparedBatch: groupPreparedBatch });
+      assertStatementBatchWritable({ config: groupConfig, preparedBatch: groupPreparedBatch, unwritableText });
 
       groupPlans.push({
         groupTemplateConfig,
@@ -13749,6 +13810,7 @@ function generateMultiTemplateGroupFiles({
     throw buildChannelBalancePlanningError(balanceModeConflictGroups, balanceRowIssueGroups);
   }
   if (otherError) throw otherError;
+  assertNoCollectedUnwritableText(unwritableText);
 
   // 所有组先完成 source-stable 解析，再进入 session/输出副作用。
   // v3.2.15（release 复审）：进入副作用前，按各组实际生成用的配置整批核对输出名称。等待确认期间配置可能已变化，
@@ -14479,6 +14541,8 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       const balanceModeConflictGroups = [];
       const balanceRowIssueGroups = [];
       const issueLineBudget = { remaining: 200 };
+      // 各组无法写入的字符共用计数，校验完一并拒绝（Codex 第六轮）
+      const unwritableText = { total: 0, labels: [] };
       // 其他组的错误（如映射缺字段）暂存，先完成各渠道的余额校验；有渠道余额错误时优先返回，否则照常抛出
       let otherError = null;
       for (const group of generationGroups) {
@@ -14510,7 +14574,8 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
             config: groupGenConfig,
             fileEntries: groupEntries,
             balancePlan,
-            includeBalance: kind === 'balance'
+            includeBalance: kind === 'balance',
+            unwritableText
           });
         } catch (error) {
           if (error && error.code === 'CHANNEL_BALANCE_MODE_MISMATCH' && Array.isArray(error.conflictGroups)) {
@@ -14545,6 +14610,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         });
       }
       if (otherError) throw otherError;
+      assertNoCollectedUnwritableText(unwritableText);
       for (const { templateConfig, groupGenConfig, groupEntries, balancePlan } of exportGroupPlans) {
         lastGroupTemplateConfig = templateConfig;
         const tid = templateConfig.template.id;
@@ -17150,9 +17216,7 @@ function registerFileHandlers() {
                     return directResult;
                   }
                 } catch (autoMatchError) {
-                  // v3.2.19：重复账单【确认】后的续跑：条目已按记住的顺序分配并经用户确认，生成失败（如收支同时有值）
-                  //   照常按导入失败报错，不降级为重新选择大账号（复核窗口会把它当作最终结果）
-                  if (prepared && prepared.duplicateReviewConfirmation && !prepared.previewOnly) throw autoMatchError;
+                  if (shouldPropagateAutoMatchError(autoMatchError, prepared)) throw autoMatchError;
                   // Fall through to manual selection
                 }
               }
@@ -18430,6 +18494,9 @@ function registerFileHandlers() {
     }),
     async execute(_event, prepared, taskContext) {
     const payload = prepared.payload;
+    // v3.2.22 B113（Codex 第七轮）：新一轮装配开始即失效上一期的待导出引用（不删除已归档文件）：任何失败出口（输入无效、
+    //   余额模板缺失、记录无法写出等）都不再让导出拿到上一期的文件；装配成功时换成本期
+    lastGeneratedExports.monthlyBalance = null;
     try {
       const templateScopeRaw = payload && typeof payload.templateScope === 'string' ? payload.templateScope : '';
       const templateNameRaw = payload && typeof payload.templateName === 'string' ? payload.templateName : '';
@@ -18524,6 +18591,8 @@ function registerFileHandlers() {
         kind: 'balance',
         outputFileName: publicFileName
       });
+      // 校验失败不建批、不占号：预留归档批次前先核对最终记录（写出边界仍兜底）
+      assertBalanceRecordsWritable({ records, templateFields: balanceTemplateFields });
       const promotionManifest = buildStatementDeferredOutputManifest(
         output.outputFilePath,
         'monthly-balance:assemble'
@@ -18582,6 +18651,19 @@ function registerFileHandlers() {
         }
       };
     } catch (error) {
+      // 装配失败：与装配结果为空时一样清除待导出引用（不删除已归档的上一份文件），之后的「导出」不再拿到上一期的文件
+      //   （Codex 第六轮；rules/important-variables.md 导出缓存生命周期）
+      lastGeneratedExports.monthlyBalance = null;
+      // v3.2.22 B113：业务校验错误（如余额记录含无法写入 Excel 的字符）把消息与逐处位置交给弹窗和报错文件，不改报系统错误
+      if (error instanceof FileValidationError) {
+        return createDetailedErrorResult({
+          step: '装配月度余额账单',
+          message: error.message,
+          errorCode: error.code || 'BUSINESS_ERROR',
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+          context: error.context || {}
+        });
+      }
       return createErrorResult({
         step: '装配月度余额账单',
         message: '装配月度余额账单失败，请导出报错文件查看详情',
@@ -18753,6 +18835,8 @@ function registerNewAccountHandlers() {
         kind: 'new-account',
         outputFileName: generated.fileName
       });
+      // 校验失败不建批、不占号：预留归档批次前先核对最终记录（写出边界仍兜底）
+      assertBalanceRecordsWritable({ records: generated.records, templateFields: balanceTemplateFields });
       const promotionManifest = buildStatementDeferredOutputManifest(
         output.outputFilePath,
         'new-account:generate'
@@ -18810,17 +18894,20 @@ function registerNewAccountHandlers() {
           errorCode: error.code,
           detailLines: error.detailLines,
           originalError: error,
-          context: {
-            accounts: accounts.map((account) => ({
-              bankName: account.bankName,
-              location: account.location,
-              currency: account.currency,
-              currencies: account.currencies,
-              bankAccount: account.bankAccount,
-              openingDate: account.openingDate ? formatDateLabel(account.openingDate) : account.openingDateRaw
-            })),
-            moduleName: NEW_ACCOUNT_EXPORT_NAME
-          },
+          // v3.2.22 B113：无法写入的字符的拒绝只需行列位置（positionsOnly），不把整批账号写进报错文件
+          context: error.positionsOnly
+            ? { accountCount: accounts.length, moduleName: NEW_ACCOUNT_EXPORT_NAME }
+            : {
+              accounts: accounts.map((account) => ({
+                bankName: account.bankName,
+                location: account.location,
+                currency: account.currency,
+                currencies: account.currencies,
+                bankAccount: account.bankAccount,
+                openingDate: account.openingDate ? formatDateLabel(account.openingDate) : account.openingDateRaw
+              })),
+              moduleName: NEW_ACCOUNT_EXPORT_NAME
+            },
           templateName: NEW_ACCOUNT_EXPORT_NAME
         });
       }
@@ -19784,7 +19871,9 @@ function registerNewAccountHandlers() {
   //   既有 readLinkedRowsAsObjects 退化为只取 objects 的薄封装 → 所有旧调用方零行为变化。
   //   🔴 rowNumbers[i] = objects[i] 所在的原文件物理行号（1-based）；空行被 readRowsWithMetadata 过滤造成的
   //      行号断档（前后差 > 1）是 BOC 分组分隔符的唯一可还原依据（流式路径不透传行号，见 §2.5）。
-  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null) {
+  // storedProjection：结果要写入 SQLite（链接表入库）时传入落库前的投影（裁列、改名），实际落库的列含空字符时拒绝；
+  //   退款订单等只在内存中使用的读取不传，保留原有读取契约（v3.2.22 B113，Codex 第十一至十三轮）
+  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null, { storedProjection = null } = {}) {
     const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
     if (expected.length === 0) {
       return { objects: [], rowNumbers: [] };
@@ -19819,10 +19908,14 @@ function registerNewAccountHandlers() {
       throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
     }
 
+    const assertStoredCells = storedProjection ? createStoredCellAssert(expected, storedProjection) : null;
     const objects = [];
     const rowNumbers = [];
     for (let ri = headerRowIdx + 1; ri < rows.length; ri += 1) {
       const row = Array.isArray(rows[ri]) ? rows[ri] : [];
+      // 物理行号：allRowNumbers 同下标取；缺失退化为 ri+1（与 readRowsWithMetadata 无表头分支口径一致）。
+      const rn = allRowNumbers[ri];
+      const rowNumber = rn === undefined || rn === null ? ri + 1 : rn;
       const obj = {};
       for (let i = 0; i < expected.length; i += 1) {
         const headerName = normalizeLinkedCell(expected[i]);
@@ -19830,10 +19923,10 @@ function registerNewAccountHandlers() {
         const cell = row[colOffset + i];
         obj[headerName] = normalizeLinkedCell(cell === undefined ? '' : cell);
       }
+      // 落库的列含空字符时拒绝入库（与流式导入同口径，v3.2.22 B113，Codex 第十一、十三轮）
+      if (assertStoredCells) assertStoredCells(obj, rowNumber);
       objects.push(obj);
-      // 物理行号：allRowNumbers 同下标取；缺失退化为 ri+1（与 readRowsWithMetadata 无表头分支口径一致）。
-      const rn = allRowNumbers[ri];
-      rowNumbers.push(rn === undefined || rn === null ? ri + 1 : rn);
+      rowNumbers.push(rowNumber);
     }
     return { objects, rowNumbers };
   }
@@ -19891,7 +19984,9 @@ function registerNewAccountHandlers() {
     let fxRowNumbers = null;
     if (useStreamingPath) {
       const feedRows = async (writeOne) => {
-        const { matched } = await streamLinkedRowsToInsert(filePath, signature, writeOne, transform);
+        // 按键幂等写入的两张表核对键列（见 streamLinkedRowsToInsert）
+        const keyField = isGatewayBill ? 'ReconBillBizId' : (isBankDeposit ? 'BizId' : null);
+        const { matched } = await streamLinkedRowsToInsert(filePath, signature, writeOne, transform, { keyField });
         if (!matched) {
           throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
         }
@@ -19908,7 +20003,7 @@ function registerNewAccountHandlers() {
       }
     } else {
       // 数组路径：fx-settlement 用 WithMeta 同时取物理行号（BOC 分组扫描热依赖）；其余表零行为变化。
-      const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName);
+      const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName, { storedProjection: transform });
       // 一行对应一行，物理行号 rowNumbers 与之对齐不变（BOC 分组依赖行号断档）。
       const rows = meta.objects.map((row) => projectLinkedRow(signature, row));
       if (repoKey === 'fx-settlement') {

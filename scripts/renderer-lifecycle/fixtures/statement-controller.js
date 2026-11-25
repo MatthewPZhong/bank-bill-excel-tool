@@ -346,6 +346,56 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('statementFixture.text()'), '重进后完成');
     assert.equal(await js(`document.getElementById('exportDetailBtn').disabled`), false);
   });
+  // v3.2.22 B113（Codex 第六轮）：装配失败（如记录含无法写入 Excel 的字符）→ 关闭弹窗 → 点击状态框导出报错文件
+  await test('月度装配失败后状态框可导出报错文件', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',detailLines:['第 3 行「银行账号」列'],errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    assert.match(await js('statementFixture.text()'), /含无法写入 Excel 的字符/);
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 1);
+  });
+  // v3.2.22 B113（Codex 第十轮）：同一弹窗内装配失败后改选月份重试得到空结果：状态框不留上一次的报错，不能再导出旧报告
+  await test('月度装配失败后重试得到空结果：状态框清掉上一次的报错状态', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.next.assemble={status:'empty',message:'该模板 / 月份范围内无余额数据'};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    assert.equal(await js('statementFixture.text()'), '该模板 / 月份范围内无余额数据');
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+  });
+  // v3.2.22 B113（Codex 第十一轮）：装配返回业务错误后重试、请求本身被拒绝：状态框同步本次失败，不能再导出上一次的报错文件
+  await test('月度装配失败后重试请求被拒绝：状态框清掉上一次的报错状态', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.next.assemble={promise:Promise.reject(new Error('IPC 已断开'))};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    assert.equal(await js('statementFixture.text()'), '装配月度余额账单失败：IPC 已断开');
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+  });
+  // v3.2.22 B113（Codex 第十三轮）：装配失败后在同一弹窗改回「选择月份」再点完成：本地校验未通过也同步状态框，不能再导出旧报告
+  await test('月度装配失败后改成未选月份再点完成：状态框清掉上一次的报错状态', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.top().querySelector('[data-role="month"]').value='';statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='assemble').length`), 1, '本地校验未通过不发送装配请求');
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    assert.equal(await js('statementFixture.text()'), '请选择时间');
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+  });
   await test('真实月度装配双击只发送一次assemble且busy时不能关闭', async () => {
     await setup(); await openMonthly();
     await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.assemble=statementFixture.pending;const done=statementFixture.top().querySelector('[data-action="done"]');done.click();done.click();`);

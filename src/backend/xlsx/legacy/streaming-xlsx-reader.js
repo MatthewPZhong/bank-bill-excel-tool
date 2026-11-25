@@ -49,6 +49,127 @@ function xmlUnescape(s) {
 //   若漏的是「对账金额」列 → 后续按空值计 0 → 少算发生额 + 错期末 OP（不报错的静默资金事故）。
 //   改为：先匹配整个 <c> 标签取 attrs（分支1 自闭合 / 分支2 带 body），再用 CELL_R_RE/extractTypeFromAttrs
 //   从 attrs 任意位置提取 r、t，不依赖属性顺序。
+// OOXML 文本转义 _xHHHH_ 还原为对应字符（Excel 与 SheetJS 读取时的口径；字面下划线写成 _x005F_）。
+//   只在调用方要求时（decodeTextEscapes）用：工具箱大文件通道的写出端（excel-text.js，B140）尚未转义字面 _xHHHH_，
+//   其读写目前按原文往返，单独还原会使字面 _xHHHH_ 写出后被 Excel 读成别的字符
+function decodeOoxmlTextEscapes(value) {
+  if (typeof value !== 'string' || value.indexOf('_x') < 0 && value.indexOf('_X') < 0) return value;
+  return value.replace(TEXT_ESCAPE_RE, (_match, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+const TEXT_ESCAPE_RE = /_[xX]([0-9A-Fa-f]{4})_/g;
+
+// 还原后无法确认原值的单元格文本（只在 decodeTextEscapes 时出现）；value 为先拼接各 <t> 段再还原的结果（与 SheetJS 相同）
+class UnverifiableCellText {
+  constructor(value) {
+    this.value = value;
+  }
+}
+
+// 还原了转义的单元格文本（只在 decodeTextEscapes 时出现）：Excel、SheetJS 还原，ExcelJS 等按字面读写，不同写出端写出的同一段
+//   原文可能表示不同的值，按键幂等写入的键列据此不能确认原值（Codex 第十八轮 P1）。trimSensitive：还原出的空白落在首尾，
+//   调用方去掉首尾空白时「TX_x000D_」与「TX」读成同一个值（第十七轮 P1）。值照常给出，另行标出列下标，由调用方决定是否拒绝
+class DecodedCellText {
+  constructor(value, trimSensitive) {
+    this.value = value;
+    this.trimSensitive = trimSensitive;
+  }
+}
+
+function cellTextValue(cell) {
+  return cell instanceof UnverifiableCellText || cell instanceof DecodedCellText ? cell.value : cell;
+}
+
+// 一格文本按 OOXML 转义还原（runs：各 <t> 段经 XML 实体还原后的文本）。以下情形两种读取方式或与 Excel 显示的值不一致，
+//   返回 UnverifiableCellText 由调用方决定是否拒绝（Codex 第七轮 P1 ×3）：
+//   - 转义由相邻 <t> 段拼成：Excel 按段还原（原样显示），SheetJS 与此处先拼接再还原，不同的原值会读成同一个值；
+//   - 转义表示非 ASCII 字符：SheetJS 对公式字符串（t="str"）还原后再按 UTF-8 解码，读成「�」等，与此处不同
+//     （Excel 写出时不把非 ASCII 字符写成转义，只有手工生成的文件会这样）；
+//   - 还原后含未配对的代理项：写入数据库时被替换为同一个字符，不同的值落成同一个键；
+//   - 大写 X 的转义（_XHHHH_）：SheetJS 与此处还原，XlsxWriter、openpyxl 等按字面保存与读取，「TX_X0041_」与「TXA」
+//     会读成同一个键（Codex 第十四轮 P1）；
+//   - 表示可打印字符的转义（如 _x004a_）：Excel 写出端只把控制字符写成转义、只在字面「_xHHHH」前把下划线写成 _x005F_，
+//     不会这样写；ExcelJS 等不转义的写出端会把字面「TX_x004a_」原样写出，Excel 与 SheetJS 读成「TXJ」，ExcelJS 读回原文，
+//     与另一笔「TXJ」会落成同一个键（Codex 第十五轮 P1）。只还原控制字符（含 DEL，第十六轮 P2），以及在同一文本段内后接
+//     「x + 4 位十六进制」、起保护作用的 _x005F_：保护目标在下一个富文本段时，Excel 按段还原、ExcelJS 读回原文，两者不同
+//     （第十六轮 P1）。按从左到右的还原顺序判断，被 _x005F_ 保护的字面「_X0041_」「_x0041_」不受影响。
+const ESCAPE_PROTECTED_TAIL_RE = /^[xX][0-9A-Fa-f]{4}/;
+function isExcelWrittenEscape(match, run) {
+  if (match[0][1] !== 'x') return false;
+  const code = parseInt(match[1], 16);
+  if (code < 0x20 || code === 0x7F) return true;
+  return code === 0x5F && ESCAPE_PROTECTED_TAIL_RE.test(run.slice(match.index + match[0].length));
+}
+
+function decodeCellTextRuns(runs) {
+  const joined = runs.join('');
+  const value = decodeOoxmlTextEscapes(joined);
+  const consistent = value.isWellFormed() && (value === joined || (
+    runs.map(decodeOoxmlTextEscapes).join('') === value
+    && runs.every((run) => Array.from(run.matchAll(TEXT_ESCAPE_RE)).every((match) => isExcelWrittenEscape(match, run)))
+  ));
+  if (!consistent) return new UnverifiableCellText(value);
+  if (value === joined) return value;
+  return new DecodedCellText(value, value.trim() !== decodeOoxmlTextEscapes(joined.trim()));
+}
+
+// decode 时文本段内出现标记（CDATA、注释等）也按无法确认原值处理：此处的 XML 实体还原不区分 CDATA 与字面文本，
+//   SheetJS 对 CDATA 按字面保留、富文本段内的 CDATA 直接丢弃，不同的原值可能读成同一个值（Codex 第八轮 P1）；
+//   原始回车同样如此：XML 解析（Excel）把它规范为换行，此处与 SheetJS 保留为回车，与 _x000D_ 读成同一个值（Codex 第九轮 P1）
+function textOf(runs, decode) {
+  if (!decode) return xmlUnescape(runs.join(''));
+  if (runs.some((run) => run.includes('<') || run.includes('\r'))) {
+    return new UnverifiableCellText(decodeOoxmlTextEscapes(xmlUnescape(runs.join(''))));
+  }
+  return decodeCellTextRuns(runs.map(xmlUnescape));
+}
+
+// 字符引用（&#…;）表示非 ASCII 字符：SheetJS 对公式字符串（t="str"）还原后再按 UTF-8 解码，读成「�」等，与此处不同（Codex 第九轮 P2）
+const CHAR_REFERENCE_RE = /&#(x[0-9A-Fa-f]+|\d+);/g;
+function hasNonAsciiCharReference(raw) {
+  return Array.from(raw.matchAll(CHAR_REFERENCE_RE))
+    .some((match) => (match[1][0] === 'x' ? parseInt(match[1].slice(1), 16) : parseInt(match[1], 10)) >= 0x80);
+}
+
+// 行内出现注释、CDATA、处理指令、带命名空间前缀的元素，或单元格缺少 r（坐标）时，按坐标逐格读取与 SheetJS 的结果不能对应
+//   （注释中的单元格被读出、带前缀或缺坐标的单元格被跳过），该行各列都按无法确认原值处理（Codex 第九轮）
+const ROW_NONCANONICAL_RE = /<!--|<!\[CDATA\[|<\?|<\/?[A-Za-z_][\w.-]*:/;
+const CELL_TAG_RE = /<c\b([^>]*?)\/?>/g;
+function isRowNonCanonical(rowXml) {
+  if (ROW_NONCANONICAL_RE.test(rowXml)) return true;
+  CELL_TAG_RE.lastIndex = 0;
+  let m;
+  while ((m = CELL_TAG_RE.exec(rowXml))) {
+    if (!CELL_R_RE.test(m[1])) return true;
+  }
+  return false;
+}
+
+const RPH_RE = /<rPh\b[^>]*>[\s\S]*?<\/rPh>/g;
+const PREFIXED_STRING_ITEM_RE = /<[A-Za-z_][\w.-]*:si[\s/>]/;
+const PREFIXED_ELEMENT_RE = /<\/?[A-Za-z_][\w.-]*:/;
+const PLAIN_TEXT_START_RE = /^\s*<t[\s/>]/;
+const RICH_RUN_RE = /<r>/;
+
+// 共享字符串 <si> 与内联字符串 <is> 的正文。decode 时与 SheetJS（parse_si）同口径，只接受 Excel 写出的规范结构：
+//   注音（<rPh>，日文输入法生成）不计入正文（Codex 第八轮 P1）；纯文本形式只取唯一的 <t>，富文本形式拼接各段 <t>；
+//   多个纯文本 <t>、既非纯文本也非富文本却含 <t>、带命名空间前缀的元素、注释（其中的 <t> 会被取出，Codex 第九轮 P1）、
+//   CDATA 与处理指令按无法确认原值处理（两种读取方式结果不同）
+function stringItemText(inner, decode) {
+  const source = decode ? inner.replace(RPH_RE, '') : inner;
+  T_CONTENT_RE.lastIndex = 0;
+  const parts = [];
+  let m;
+  while ((m = T_CONTENT_RE.exec(source))) parts.push(m[1]);
+  if (!decode) return textOf(parts, false);
+  const plain = PLAIN_TEXT_START_RE.test(inner);
+  const canonical = !PREFIXED_ELEMENT_RE.test(inner) && !/<!--|<!\[CDATA\[|<\?/.test(inner)
+    && (plain ? parts.length <= 1 : (RICH_RUN_RE.test(inner) || parts.length === 0));
+  const text = textOf(parts, true);
+  if (canonical) return text;
+  return text instanceof UnverifiableCellText ? text : new UnverifiableCellText(cellTextValue(text));
+}
+
 const CELL_OPEN_RE = /<c\b([^>]*?)\/>|<c\b([^>]*?)>([\s\S]*?)<\/c>/g;
 const CELL_R_RE = /\br="([A-Z]+)\d+"/;   // 从 attrs 提取列字母（r 可在任意位置）
 const T_CONTENT_RE = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g;
@@ -65,7 +186,7 @@ function extractTypeFromAttrs(attrs) {
 }
 
 // 解析单行 XML → 31 列字符串数组
-function parseRowXml(rowXml, colCount, sharedStrings) {
+function parseRowXml(rowXml, colCount, sharedStrings, decode = false) {
   const cells = new Array(colCount).fill('');
   CELL_OPEN_RE.lastIndex = 0;
   let m;
@@ -86,18 +207,21 @@ function parseRowXml(rowXml, colCount, sharedStrings) {
     }
 
     const type = extractTypeFromAttrs(attrs);
-    cells[colIdx] = parseCellBody(body, type, sharedStrings);
+    cells[colIdx] = parseCellBody(body, type, sharedStrings, decode);
   }
   return cells;
 }
 
-function parseCellBody(body, type, sharedStrings) {
+// decode：还原 OOXML 文本转义（见 decodeCellTextRuns）；共享字符串在读取 sharedStrings 时已按同一选项还原
+function parseCellBody(body, type, sharedStrings, decode = false) {
   if (type === 'inlineStr') {
-    T_CONTENT_RE.lastIndex = 0;
-    const parts = [];
-    let tm;
-    while ((tm = T_CONTENT_RE.exec(body))) parts.push(tm[1]);
-    return xmlUnescape(parts.join(''));
+    if (decode) {
+      // 与 SheetJS 同口径只读 <is> 内的正文；没有 <is> 却有 <t> 时两种读取方式不同
+      const is = /<is>([\s\S]*?)<\/is>/.exec(body);
+      if (is) return stringItemText(is[1], true);
+      return /<t[\s/>]/.test(body) ? new UnverifiableCellText(stringItemText(body, false)) : '';
+    }
+    return stringItemText(body, false);
   }
   if (type === 'n' || type === '') {
     const v = V_CONTENT_RE.exec(body);
@@ -114,13 +238,19 @@ function parseCellBody(body, type, sharedStrings) {
     const v = V_CONTENT_RE.exec(body);
     if (!v) return '';
     const idx = parseInt(v[1], 10);
+    // 共享字符串表含带前缀的 <si>（被扫描跳过，后续索引错位）：所有共享字符串都无法确认原值（Codex 第九轮 P1）
+    if (decode && sharedStrings && sharedStrings.unverifiable) {
+      return new UnverifiableCellText(idx >= 0 && idx < sharedStrings.length ? String(cellTextValue(sharedStrings[idx])) : '');
+    }
     if (!sharedStrings || idx < 0 || idx >= sharedStrings.length) return '';
     return sharedStrings[idx];
   }
   if (type === 'str') {
     // formula string
     const v = V_CONTENT_RE.exec(body);
-    return v ? xmlUnescape(v[1]) : '';
+    if (!v) return '';
+    if (decode && hasNonAsciiCharReference(v[1])) return new UnverifiableCellText(decodeOoxmlTextEscapes(xmlUnescape(v[1])));
+    return textOf([v[1]], decode);
   }
   if (type === 'b') {
     const v = V_CONTENT_RE.exec(body);
@@ -128,14 +258,14 @@ function parseCellBody(body, type, sharedStrings) {
   }
   // 'd' (ISO date string), 'e' (error), 其他未知 —— 降级取 <v> 或 <t> 首选
   const v = V_CONTENT_RE.exec(body);
-  if (v) return xmlUnescape(v[1]);
+  if (v) return textOf([v[1]], decode);
   T_CONTENT_RE.lastIndex = 0;
   const tm = T_CONTENT_RE.exec(body);
-  return tm ? xmlUnescape(tm[1]) : '';
+  return tm ? textOf([tm[1]], decode) : '';
 }
 
 // 流式读 sharedStrings.xml 到数组；不存在返回 null
-async function readSharedStrings(zip) {
+async function readSharedStrings(zip, decode = false) {
   const entry = zip.file('xl/sharedStrings.xml');
   if (!entry) return null;
 
@@ -144,10 +274,14 @@ async function readSharedStrings(zip) {
     const decoder = new StringDecoder('utf8');
     let pending = '';
     const strings = [];
+    const notePrefixed = () => {
+      if (decode && PREFIXED_STRING_ITEM_RE.test(pending)) strings.unverifiable = true;
+    };
 
     stream.on('data', (chunk) => {
       try {
         pending += typeof chunk === 'string' ? chunk : decoder.write(chunk);
+        notePrefixed();
         // 逐个提取 <si>...</si>
         while (true) {
           const siStart = pending.indexOf('<si>');
@@ -155,8 +289,8 @@ async function readSharedStrings(zip) {
             // 兼容 <si 带属性（极少见）
             const siStart2 = pending.indexOf('<si ');
             if (siStart2 < 0) {
-              // 保留缓冲少量前缀（防 <si 开标签跨 chunk）
-              if (pending.length > 8) pending = pending.slice(-8);
+              // 保留缓冲少量前缀（防 <si 开标签、带前缀的 <x:si 跨 chunk）
+              if (pending.length > 64) pending = pending.slice(-64);
               break;
             }
             const gt = pending.indexOf('>', siStart2);
@@ -165,14 +299,14 @@ async function readSharedStrings(zip) {
             if (siEnd2 < 0) { pending = pending.slice(siStart2); break; }
             const inner = pending.slice(gt + 1, siEnd2);
             pending = pending.slice(siEnd2 + 5);
-            strings.push(siInnerToText(inner));
+            strings.push(siInnerToText(inner, decode));
             continue;
           }
           const siEnd = pending.indexOf('</si>', siStart);
           if (siEnd < 0) { pending = pending.slice(siStart); break; }
           const inner = pending.slice(siStart + 4, siEnd);
           pending = pending.slice(siEnd + 5);
-          strings.push(siInnerToText(inner));
+          strings.push(siInnerToText(inner, decode));
         }
       } catch (err) {
         try { stream.destroy(); } catch (_e) { /* ignore */ }
@@ -181,6 +315,7 @@ async function readSharedStrings(zip) {
     });
     stream.on('end', () => {
       pending += decoder.end();
+      notePrefixed();
       // 最后再扫一遍剩余的 <si>
       while (true) {
         const siStart = pending.indexOf('<si>');
@@ -189,7 +324,7 @@ async function readSharedStrings(zip) {
         if (siEnd < 0) break;
         const inner = pending.slice(siStart + 4, siEnd);
         pending = pending.slice(siEnd + 5);
-        strings.push(siInnerToText(inner));
+        strings.push(siInnerToText(inner, decode));
       }
       resolve(strings);
     });
@@ -197,14 +332,10 @@ async function readSharedStrings(zip) {
   });
 }
 
-function siInnerToText(inner) {
+function siInnerToText(inner, decode = false) {
   // 单 <si> 可能：纯 <t>文本</t> | 富文本 <r>...<t>X</t>...</r><r>...<t>Y</t></r>
-  // 所有 <t>...</t> 拼接（无论嵌在 <r> 内外）
-  T_CONTENT_RE.lastIndex = 0;
-  const parts = [];
-  let m;
-  while ((m = T_CONTENT_RE.exec(inner))) parts.push(m[1]);
-  return xmlUnescape(parts.join(''));
+  // 不还原时所有 <t>...</t> 拼接（无论嵌在 <r> 内外，既有行为）；还原时见 stringItemText
+  return stringItemText(inner, decode);
 }
 
 // 主入口：流式读取 xlsx 的 sheet1.xml，逐行回调
@@ -216,7 +347,37 @@ function siInnerToText(inner) {
 //            在开始扫描前仍须完整读取 ZIP 和 SST，整体内存/耗时不受 maxRows 有界约束。
 //            缺省（undefined/0/负数）= 不设上限，全量扫描（既有调用方行为 100% 不变）。
 //   返回值新增 truncated：true 表示因 maxRows 提前终止（文件可能还有更多行），全量读时为 false。
-async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } = {}) {
+//   decodeTextEscapes 可选（v3.2.22 B113）：为 true 时把单元格文本中的 OOXML 转义 _xHHHH_ 还原（与 SheetJS 读取同一口径；
+//            本应用的 XLSX 写出端已把字面 _xHHHH_ 写成 _x005F_xHHHH_），回调另收第三个参数
+//            { rowNumber, unverifiableColumns, escapedColumns, trimSensitiveColumns }：rowNumber 为工作表行号，
+//            unverifiableColumns 为还原后无法确认原值的列下标（见 decodeCellTextRuns；这些格按 SheetJS 的结果给出），
+//            escapedColumns 为还原了转义的列下标，trimSensitiveColumns 为其中还原出的空白落在首尾的列下标（见 DecodedCellText）。
+//            缺省不还原（既有调用方行为不变）。
+async function readXlsxStreamed(filePath, onRowCallback, { colCount = 31, maxRows = 0, decodeTextEscapes = false } = {}) {
+  let lastRowNumber = 0;
+  const parseRow = (rowXml, rowIdx) => {
+    const cells = parseRowXml(rowXml, colCount, sharedStrings, decodeTextEscapes);
+    if (!decodeTextEscapes) return onRowCallback(cells, rowIdx);
+    const nonCanonical = isRowNonCanonical(rowXml);
+    const unverifiableColumns = [];
+    const escapedColumns = [];
+    const trimSensitiveColumns = [];
+    cells.forEach((cell, index) => {
+      if (cell instanceof DecodedCellText) {
+        cells[index] = cell.value;
+        escapedColumns.push(index);
+        if (cell.trimSensitive) trimSensitiveColumns.push(index);
+      }
+      if (cell instanceof UnverifiableCellText) cells[index] = cell.value;
+      if (nonCanonical || cell instanceof UnverifiableCellText) unverifiableColumns.push(index);
+    });
+    // 行号以单元格坐标为准（扫描器会把自闭合的空行与后一行切成同一段，Codex 第九轮 P3）；没有带坐标的单元格时取 <row r>
+    //   （单双引号均可），省略时按上一行行号顺推（与 SheetJS 相同；Codex 第八轮 P3）
+    const cellRow = /<c\b[^>]*?\sr="[A-Z]+(\d+)"/.exec(rowXml);
+    const explicit = /^<row\b[^>]*?\sr=(?:"(\d+)"|'(\d+)')/.exec(rowXml);
+    lastRowNumber = cellRow ? Number(cellRow[1]) : (explicit ? Number(explicit[1] || explicit[2]) : lastRowNumber + 1);
+    return onRowCallback(cells, rowIdx, { rowNumber: lastRowNumber, unverifiableColumns, escapedColumns, trimSensitiveColumns });
+  };
   // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误，
   //   不再让 JSZip 抛 `uncompressed data size mismatch` 天书）；预检自身失败时 fail-open 放行。
   //   PR#71 二轮 codex review（P2）：本 reader 硬编码只 inflate xl/worksheets/sheet1.xml（下方第一句）
@@ -229,7 +390,7 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } 
   if (!sheetEntry) throw new Error('xlsx 缺少 xl/worksheets/sheet1.xml');
 
   // 先载入 sharedStrings（可能几 MB - 几百 MB；对 t="s" 类型 cell 必需）
-  const sharedStrings = await readSharedStrings(zip);
+  const sharedStrings = await readSharedStrings(zip, decodeTextEscapes);
 
   // maxRows ≤ 0 视为不限制（保持既有「全量扫描」语义）
   const hasLimit = Number.isInteger(maxRows) && maxRows > 0;
@@ -286,7 +447,7 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } 
             const rowXml2 = pending.slice(rowStart2, rowEnd2 + 6);
             pending = pending.slice(rowEnd2 + 6);
             rowIdx += 1;
-            onRow(parseRowXml(rowXml2, colCount, sharedStrings), rowIdx);
+            parseRow(rowXml2, rowIdx);
             if (hasLimit && rowIdx >= maxRows) { finishTruncated(); return; }
             continue;
           }
@@ -299,7 +460,7 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } 
           const rowXml = pending.slice(rowStart, rowEnd + 6);
           pending = pending.slice(rowEnd + 6);
           rowIdx += 1;
-          onRow(parseRowXml(rowXml, colCount, sharedStrings), rowIdx);
+          parseRow(rowXml, rowIdx);
           if (hasLimit && rowIdx >= maxRows) { finishTruncated(); return; }
         }
       } catch (err) {
@@ -321,7 +482,7 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } 
         const rowXml = pending.slice(rowStart, rowEnd + 6);
         pending = pending.slice(rowEnd + 6);
         rowIdx += 1;
-        onRow(parseRowXml(rowXml, colCount, sharedStrings), rowIdx);
+        parseRow(rowXml, rowIdx);
         if (hasLimit && rowIdx >= maxRows) { settled = true; resolve({ rowCount: rowIdx, truncated: true }); return; }
       }
       settled = true;
@@ -336,6 +497,9 @@ module.exports = {
   parseRowXml,
   parseCellBody,
   lettersToIndex,
+  decodeOoxmlTextEscapes,
+  decodeCellTextRuns,
+  UnverifiableCellText,
   xmlUnescape,
   // v2.1.12 需求1：vcc-op-calc reader 复用（JSZip + central directory 解析，支持 data descriptor）
   readSharedStrings

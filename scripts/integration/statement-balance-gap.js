@@ -166,6 +166,7 @@ function loadRegenerateFunction(deps) {
     buildStatementGenerationConfig: deps.buildStatementGenerationConfig,
     buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: deps.statementGenerationHelpers.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: deps.statementGenerationHelpers.assertNoUnwritableRowText,
     FileValidationError
   });
   const assertVirtualTemplateBalanceOutputPaths = loadMainFunction('assertVirtualTemplateBalanceOutputPaths', {
@@ -276,7 +277,7 @@ async function verifyMergedScopeIsolation(dir) {
     buildDateRangeLabel,
     buildOutputFilePath,
     mergeGeneratedXlsxFiles: loadMainFunction('mergeGeneratedXlsxFiles', {
-      require, fs, path, applyWatermark: () => {}
+      require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
     }),
     getToday: () => today,
     path,
@@ -339,7 +340,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
     getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   });
   const mergeGeneratedXlsxFiles = loadMainFunction('mergeGeneratedXlsxFiles', {
-    require, fs, path, applyWatermark: () => {}
+    require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
   });
   const buildGenerationConfig = ({ template }) => ({
     template,
@@ -365,6 +366,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
     rebuildMatchedTemplateFileEntries: ({ fileEntries: entries }) => entries,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: generation.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
     FileValidationError,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,

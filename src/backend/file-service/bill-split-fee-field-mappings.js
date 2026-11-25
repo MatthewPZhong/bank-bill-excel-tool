@@ -6,7 +6,7 @@
 //   改变金额 / 余额，或让费用行与交易行的账单日期不同而影响余额按日计算、分段账号识别与查重账期）。
 // 渲染端 configuration.js 有同口径的保存前校验，改校验规则时两边一起改。
 
-const { FileValidationError, normalizeCell } = require('./common');
+const { FileValidationError, isWorksheetWritableText, normalizeCell } = require('./common');
 
 const FEE_FIELD_MAPPING_VALUE_TYPES = Object.freeze(['blank', 'input', 'field']);
 // 规范化后无法使用的取值类型统一记为 invalid（非空标记）：保证规范化可重复执行，坏行在模板包导入、落库、读取的多次规范化后
@@ -26,23 +26,6 @@ const FEE_FIELD_MAPPING_INPUT_MAX_LENGTH = 32767;
 
 function fail(message) {
   throw new FileValidationError('FILE_READ', message);
-}
-
-// 写出后读回会被改写的文本：XLSX 写出器把控制字符（\u0000-\u0008、\u000b-\u001f，含回车）编码成 _xHHHH_，却不转义字面的
-//   _xHHHH_；读回时所有 _xHHHH_（不分大小写）都按转义还原。因此字面 FEE_x0041_ 读回为 FEEA，REF_x0041 后接回车时与回车的
-//   编码拼成 _x0041_，读回为 REFAx000d_。按同一规则模拟写出再读回，结果与原文不同即视为会被改写——两个不同的参考号可能变成
-//   同一个值。写出器修复前（knowledge/backlog.md B113），费用账单覆盖值遇此拒绝，不交付被改写的标识。
-//   渲染端 configuration.js 的保存前校验同口径。
-function hasWorksheetEscapeLikeText(value) {
-  if (typeof value !== 'string' || !/_x/i.test(value)) return false;
-  const written = value.replace(/[\u0000-\u0008\u000b-\u001f]/g, (char) => `_x${char.charCodeAt(0).toString(16).padStart(4, '0')}_`);
-  return written.replace(/_x([\da-f]{4})_/gi, (_match, code) => String.fromCharCode(parseInt(code, 16))) !== value;
-}
-
-// 能原样写入 XLSX 工作表的文本：未配对 UTF-16 代理项写出后变成「�」；U+FFFE、U+FFFF 是 XML 1.0 禁止的字符，写出后工作表无法解析。
-//   其他控制字符写出时按 _xHHHH_ 转义，可原样读回。
-function isWorksheetWritableText(value) {
-  return typeof value === 'string' && value.isWellFormed() && !/[\uFFFE\uFFFF]/.test(value);
 }
 
 // 接受数组或 JSON 字符串；值去首尾空白，blank 的值清空；丢弃模板字段与映射都为空白的项（界面上清空一行即视为删除）。
@@ -79,7 +62,7 @@ function normalizeFeeFieldMappings(raw) {
       //   （长卡号 9007199254740993 读成 …992、20261119.000000001 读成 20261119、1.10 读成 1.1），用作参考号等对账标识会被
       //   静默改写；布尔、对象、数组等也不按字符串化后的 'false'、'[object Object]' 使用。非文本时取值类型记为无效，
       //   保存与生成时拒绝，须以文本重新填写；空白类型不看值。
-      // 文本还须能原样写入工作表（见 isWorksheetWritableText；如上游按长度截断留下的 'ref\ud83d'），否则费用行的参考号等标识
+      // 文本还须能原样写入工作表（见 common.js isWorksheetWritableText；如上游按长度截断留下的 'ref\ud83d'），否则费用行的参考号等标识
       //   将与设置不同或工作表无法解析，同样记为无效（合法的代理对照常接受）。
       const isText = (value) => isWorksheetWritableText(value);
       const rawType = typeof item.valueType === 'string' ? normalizeCell(item.valueType) : '';
@@ -137,9 +120,6 @@ function validateFeeFieldMappings(raw, { headers = null, allowedTemplateFields =
     if (item.valueType === 'input' && item.value.length > FEE_FIELD_MAPPING_INPUT_MAX_LENGTH) {
       fail(`${rowLabel}：「${item.templateField}」的映射值超过 ${FEE_FIELD_MAPPING_INPUT_MAX_LENGTH} 个字符（Excel 单元格上限）`);
     }
-    if (item.valueType === 'input' && hasWorksheetEscapeLikeText(item.value)) {
-      fail(`${rowLabel}：「${item.templateField}」的映射值含写入 Excel 后会被改写的文本（形如 _x0041_，或与回车等控制字符相连后构成此形式），请修改`);
-    }
     if (item.valueType === 'field') {
       if (!item.value) {
         fail(`${rowLabel}：请选择映射字段`);
@@ -165,20 +145,15 @@ function resolveFeeFieldMappingValue(item, readSourceCell) {
   return '';
 }
 
-// 最终写入明细的费用账单行里、取自源列的覆盖值须能原样写入工作表：含无法写入 Excel 的字符（U+FFFE、U+FFFF、
-//   未配对代理项）或超过单元格 32767 个字符上限时拒绝生成，列出源行、源列与目标字段，不截断、不交付被改写或
-//   无法打开的明细。只校验实际输出的行（合计行、合并时不作代表行的费用行不写出，不因其值拒绝整份账单）。
+// 最终写入明细的费用账单行里、取自源列的覆盖值超过单元格 32767 个字符上限时拒绝生成，列出源行、源列与目标字段，不截断。
+//   只校验实际输出的行（合计行、合并时不作代表行的费用行不写出，不因其值拒绝整份账单）。
+//   含无法写入 Excel 的字符（U+FFFE、U+FFFF、未配对代理项）的值照常写进明细行，由生成前按最终明细的检查与主映射的值一并
+//   列出全批位置（statement-generation.js assertStatementRowsWritable，v3.2.22 B113，Codex 第七轮）
 function assertFeeFieldOutputWritable(item, value, { sourceRowNumber } = {}) {
   if (!item || item.valueType !== 'field' || typeof value !== 'string' || !value) return;
   const location = `源文件${sourceRowNumber === undefined ? '' : `第 ${sourceRowNumber} 行`}「${item.value}」列的值`;
-  if (!isWorksheetWritableText(value)) {
-    fail(`费用账单「字段映射特殊处理」：${location}含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符），无法输出到「${item.templateField}」，请修正源文件后重新生成`);
-  }
   if (value.length > FEE_FIELD_MAPPING_INPUT_MAX_LENGTH) {
     fail(`费用账单「字段映射特殊处理」：${location}超过 ${FEE_FIELD_MAPPING_INPUT_MAX_LENGTH} 个字符（Excel 单元格上限），无法输出到「${item.templateField}」，请修正源文件后重新生成`);
-  }
-  if (hasWorksheetEscapeLikeText(value)) {
-    fail(`费用账单「字段映射特殊处理」：${location}含写入 Excel 后会被改写的文本（形如 _x0041_，或与回车等控制字符相连后构成此形式），无法原样输出到「${item.templateField}」，请修正源文件后重新生成`);
   }
 }
 
@@ -187,7 +162,6 @@ module.exports = {
   FEE_FIELD_MAPPING_EXCLUDED_TEMPLATE_FIELDS,
   FEE_FIELD_MAPPING_INVALID_VALUE_TYPE,
   FEE_FIELD_MAPPING_VALUE_TYPES,
-  hasWorksheetEscapeLikeText,
   isFeeFieldMappingTemplateFieldExcluded,
   isWorksheetWritableText,
   normalizeFeeFieldMappings,

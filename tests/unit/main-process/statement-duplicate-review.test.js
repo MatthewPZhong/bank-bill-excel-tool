@@ -197,7 +197,7 @@ test('主进程：预检暂停与续跑接在导入 prepare 中，执行路径�
   assert.match(source, /review\(\{ entries: scopeDuplicateEntries\(entries\), prepared, phase: 'preview'/);
   assert.match(source, /review\(\{ entries: scopeDuplicateEntries\(entries\), prepared, phase: 'execute'[\s\S]{0,200}unscopeDuplicateEntries\(outcome\.entries\)/);
   // 自动套用：确认后的续跑生成失败照常报错，不降级为重新选择大账号
-  assert.match(source, /catch \(autoMatchError\) \{[\s\S]{0,400}if \(prepared && prepared\.duplicateReviewConfirmation && !prepared\.previewOnly\) throw autoMatchError;/);
+  assert.match(source, /catch \(autoMatchError\) \{\s*if \(shouldPropagateAutoMatchError\(autoMatchError, prepared\)\) throw autoMatchError;/);
   const autoBranch = source.slice(source.indexOf('const reviewedAutoEntries = applyConfirmedDuplicateRowFilter('));
   assertBefore(autoBranch, 'if (reviewedAutoEntries.result) return reviewedAutoEntries.result;', 'buildPreparedStatementBatchFromEntries(', '自动套用先复核再组批');
   // 勾选时普通路径改走复用条目分支（不再直接 prepareGeneratedFiles 映射并生成）
@@ -709,4 +709,28 @@ test('同一重复账单确认的两个请求都通过 beforeStart：业务入�
   const secondResult = await handler.execute(null, second, taskContext, 7);
   assert.deepEqual([secondResult.status, secondResult.errorCode, secondResult.preservesSession], ['error', 'DUPLICATE_REVIEW_MISSING', true]);
   assert.equal(calls.batches.length, 1, '只组批一次');
+});
+
+test('记住顺序自动套用失败：确认后的续跑与无法写入的字符照常报错，其他失败降级为重新选择大账号（v3.2.19、v3.2.22 B113）', () => {
+  const acorn = require('acorn');
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'main.js'), 'utf8');
+  const node = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script' }).body
+    .find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === 'shouldPropagateAutoMatchError');
+  const decide = Function(`return (${source.slice(node.start, node.end)});`)();
+  const { FileValidationError } = require('../../../src/backend/file-service');
+  const { assertNoUnwritableRowText, collectUnwritableRowText } = require('../../../src/backend/file-service/common');
+  let unwritable = null;
+  try {
+    assertNoUnwritableRowText(collectUnwritableRowText([['交易摘要'], ['坏\uFFFF']], { rowMetas: [{ sourceRowNumber: 5 }] }));
+  } catch (error) {
+    unwritable = error;
+  }
+  assert.ok(unwritable && unwritable.positionsOnly, '前置：拒绝带行列位置');
+  assert.equal(decide(unwritable, {}), true, '无法写入的字符：改选大账号修不好，照常报错');
+  assert.equal(decide(unwritable, { previewOnly: true }), true);
+  const other = new FileValidationError('FILE_READ', '收支同时有值');
+  assert.equal(decide(other, {}), false, '其他失败降级为重新选择');
+  assert.equal(decide(other, null), false);
+  assert.equal(decide(other, { duplicateReviewConfirmation: { digest: 'd' } }), true, '确认后的续跑照常报错');
+  assert.equal(decide(other, { duplicateReviewConfirmation: { digest: 'd' }, previewOnly: true }), false);
 });

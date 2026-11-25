@@ -363,6 +363,28 @@ function stripXmlComments(text) {
   return String(text).replace(/<!--[\s\S]*?-->/g, '');
 }
 
+// 读取库与本模块对下列写法的解析口径不同，无法证明两边读的是同一张表、同一行（B133）：
+//   - 内容含尖括号的 XML 注释或 CDATA：读取库不跳过注释（注释里的 <sheet>、关系、<row>、<c> 都会被解析），本模块按
+//     有效内容定位；未闭合的注释或 CDATA 同样无法核对；
+//   - 标签内出现空格、回车、换行以外的空白（制表符等）：读取库（parsexmltag）只把这三种当作标签名的结束，
+//     认不出 <Relationship\t…> 这类标签，本模块的正则却认得出。
+//   Excel、WPS 与银行系统不会生成这些写法；出现时整张表不还原，按无法核对原值提示，也不参与重复账单过滤。
+//   内容不含尖括号的注释、CDATA 里没有标签，两边读到的结构相同，照常还原（Codex 第三轮：一律不还原会让普通注释的文件
+//   只剩近似值），检查标签内空白时也不把其中的文字（如 CDATA 正文里的制表符）当作标签。
+//   标签按引号边界识别（属性值里的 > 不是标签结尾），属性值内的这类空白同样算在内
+const UNVERIFIABLE_TAG_WHITESPACE = /<(?:[^\s>"']|[ \r\n]|"[^"]*"|'[^']*')*?(?:[^\S \r\n]|"[^"]*?[^\S \r\n]|'[^']*?[^\S \r\n])/;
+function hasUnverifiableXmlMarkup(text) {
+  let markupInside = false;
+  const outside = String(text).replace(/<!--([\s\S]*?)-->|<!\[CDATA\[([\s\S]*?)\]\]>/g, (_match, comment, cdata) => {
+    if (/[<>]/.test(comment !== undefined ? comment : cdata)) markupInside = true;
+    return '';
+  });
+  return markupInside
+    || outside.includes('<!--')
+    || outside.includes('<![CDATA[')
+    || UNVERIFIABLE_TAG_WHITESPACE.test(outside);
+}
+
 // OOXML 关系命名空间（过渡与严格两种写法）
 const OOXML_RELATIONSHIP_NAMESPACES = new Set([
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
@@ -395,8 +417,8 @@ function attributeHasReference(tag, name) {
 }
 
 // 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null。
-//   注释里的标签不算；同一关系 Id 有多条有效关系、或 <sheet> 的关系属性无法唯一确认时无法确认来源，同样返回 null
-//   （按无法核对原值处理）
+//   workbook.xml 或关系文件含注释、标签内有制表符等写法时（hasUnverifiableXmlMarkup）直接返回 null（B133）；
+//   同一关系 Id 有多条有效关系、或 <sheet> 的关系属性无法唯一确认时无法确认来源，同样返回 null（按无法核对原值处理）
 //   还须确认读取库实际读的就是这个条目（release 审查）：
 //   - 读取库只要有一张表的关系解析不到，就放弃整份关系表、改按物理序号（xl/worksheets/sheetN.xml）读表：每张表的关系都须
 //     唯一确认，否则返回 null；
@@ -416,6 +438,8 @@ function findXlsxSheetXml(workbook, sheetName) {
   const relsXml = getZipEntryBuffer(files, `${relsDirPrefix}_rels/${String(workbookPath).split('/').pop()}.rels`);
   if (!relsXml) return null;
   const rawWorkbookText = workbookXml.toString('utf8');
+  const relsText = relsXml.toString('utf8');
+  if (hasUnverifiableXmlMarkup(rawWorkbookText) || hasUnverifiableXmlMarkup(relsText)) return null;
   const workbookText = stripXmlComments(rawWorkbookText);
   const sheetTagPattern = /<(?:[\w.-]+:)?sheet\b[^>]*>/g;
   const sheetTags = workbookText.match(sheetTagPattern) || [];
@@ -423,7 +447,6 @@ function findXlsxSheetXml(workbook, sheetName) {
   const sheetIndex = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.indexOf(sheetName) : -1;
   const sheetTag = sheetIndex >= 0 ? sheetTags[sheetIndex] : null;
   if (!sheetTag || readXmlAttribute(sheetTag, 'name') !== sheetName) return null;
-  const relsText = relsXml.toString('utf8');
   const relationTagsById = new Map();
   (stripXmlComments(relsText).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || []).forEach((tag) => {
     const id = readXmlAttribute(tag, 'Id');
@@ -695,6 +718,11 @@ function markXlsxSourceEvidence(workbook, sheetName, sheet, range, specials) {
     return;
   }
   const text = xml.toString('utf8');
+  // 与长数字还原同一判定（B133）：读取库可能按注释里的行取值，原文行与读到的行无法一一对应
+  if (hasUnverifiableXmlMarkup(text)) {
+    markAllRows('工作表原文含注释或非常规空白，无法核对');
+    return;
+  }
   markConditionalNumberFormatRows(workbook, sheet, text, range, specials);
   // 单元格实际的数字格式（显示文本可以因格式不同）：单元格自身的样式，没有时继承行样式（customFormat）、再继承列样式。
   //   读取库只按单元格自身的样式给格式（继承的读成 General），这里按原文解析
@@ -1112,8 +1140,11 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
   const wanted = new Set(candidates.map(({ r, c }) => `${r}:${c}`));
   const literals = new Map();
   const duplicated = new Set();
-  // XML 注释不是内容：先去掉，避免注释里的 <c> / <v> 被当成单元格或值
-  const text = stripXmlComments(xml.toString('utf8'));
+  // 含注释掉的标签或标签内有制表符等写法时，读取库可能按注释里的行、单元格取值（与本模块取到的原文不是同一行），整张表不给
+  //   原文（B133）。其余注释不含标签，按 XML 语义去掉后取原文（与 v3.2.21 相同；还原前仍核对原文与读取库的值相等）
+  const rawText = xml.toString('utf8');
+  if (hasUnverifiableXmlMarkup(rawText)) return null;
+  const text = stripXmlComments(rawText);
   // 各 <row> 的起点与行号（没有 r 属性时按前一行顺推，与读取库相同）
   const rowStarts = [];
   const rowTagPattern = /<(?:[\w.-]+:)?row\b([^>]*?)\/?>/g;
@@ -1731,7 +1762,12 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
 //   故 detector 的 L1（连续子序列全等）/ L2（指纹命中率）/ 列宽守卫逻辑可直接复用、识别语义不变。
 //   maxColCount：流式解析每行的固定列宽上界（须 ≥ 任何候选表头可能的列数，避免宽表头被截断；detector 传足够大值）。
 //   返回 { rows, truncated }：rows 为前 N 个有意义行的 cell 数组；truncated 表示文件还有更多行（已达 maxRows 上限）。
-async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256 } = {}) {
+//   decodeTextEscapes：还原 OOXML 文本转义（与 SheetJS 读取同一口径；链接表的表头识别与预检传 true，与流式导入一致）；
+//     无法确认原值的格读成 UNVERIFIABLE_CELL_TEXT，不与任何表头相等（流式导入同样不认这类格为表头，Codex 第八轮 P1）
+// 含未配对的代理项：XLSX、CSV 读出的表头与保存的模板表头都不可能含有，不会与任何可配置的列名相等（Codex 第九轮 P3）
+const UNVERIFIABLE_CELL_TEXT = '\uD800（无法确认原值的文本）';
+
+async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256, decodeTextEscapes = false } = {}) {
   ensureSupportedFile(filePath);
 
   if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
@@ -1742,13 +1778,15 @@ async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256 } =
   // readXlsxStreamed 缺 sheet1.xml 时会 throw（如极罕见的非 sheet1 物理名/真损坏）；由调用方捕获回退/转 read-error。
   const { truncated } = await readXlsxStreamed(
     filePath,
-    (cells) => {
+    (cells, _rowIdx, textInfo) => {
+      // 还原出的首尾空白去掉后才与表头相等的格同样读成标记，不认作表头（与流式导入一致，Codex 第十八轮 P1）
+      if (textInfo) [...textInfo.unverifiableColumns, ...textInfo.trimSensitiveColumns].forEach((index) => { cells[index] = UNVERIFIABLE_CELL_TEXT; });
       const trimmed = trimTrailingEmptyCells(cells);
       if (isRowMeaningful(trimmed)) {
         rows.push(trimmed);
       }
     },
-    { colCount: maxColCount, maxRows }
+    { colCount: maxColCount, maxRows, decodeTextEscapes }
   );
 
   return { rows, truncated: !!truncated };
@@ -1910,6 +1948,7 @@ module.exports = {
   listSheetNames,
   loadEnumValues,
   readMeaningfulRowsHead,
+  UNVERIFIABLE_CELL_TEXT,
   readCsvRowsWithinBudget,
   readRows,
   readRowsWithMetadata,

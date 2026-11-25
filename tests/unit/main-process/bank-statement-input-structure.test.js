@@ -149,6 +149,53 @@ test('模板预检：读取「渠道对账单」，必用列与场景引用保�
   assert.equal((await service.get('bank-statement')).resource.twin, 'bank-statement-input');
 });
 
+// v3.2.22 B113（Codex 第十七轮 P2）：同一结构供入金链接表导入，单表 .xlsx 导入时走流式读取。ExcelJS 原样写出的含原始回车的
+//   表头，SheetJS 与平盘读法都能读出，入金流式导入却认不出表头：预检须拦下。对照：ExcelJS 写出的普通表头照常通过
+test('模板预检：单表 .xlsx 的表头须与入金链接表的流式读法一致，含原始回车的表头被拦下', async (t) => {
+  const ExcelJS = require('exceljs');
+  const { streamLinkedRowsToInsert } = require('../../../src/main-process/linked-table-stream-source');
+  const { ws, prepare } = templates(t);
+  const writeExcelJs = async (name, headers) => {
+    const filePath = path.join(ws.root, name);
+    const book = new ExcelJS.Workbook();
+    const sheet = book.addWorksheet('渠道对账单');
+    sheet.addRow(headers);
+    sheet.addRow(headers.map((header) => ROW[header] ?? ''));
+    await book.xlsx.writeFile(filePath);
+    return filePath;
+  };
+  const crlfHeaders = BANK_V2.map((header) => (header === '新增列' ? '新增\r\n列' : header));
+  const crlf = await writeExcelJs('crlf.xlsx', crlfHeaders);
+  const rejected = await prepare(crlf);
+  assert.equal(rejected.verdict, 'fail');
+  assert.match(check(rejected, '表头读取').detail, /第 46 列「新增\r\n列」导入时读作「新增\r\n列 \/ （无法确认原值的文本）」/);
+  assert.deepEqual(await streamLinkedRowsToInsert(crlf, { expectedHeaders: crlfHeaders }, () => {}), { matched: false }, '入金流式导入同样认不出表头');
+
+  const plain = await writeExcelJs('plain.xlsx', BANK_V2);
+  const accepted = await prepare(plain);
+  assert.equal(check(accepted, '表头读取'), undefined, accepted.checks.map((item) => `${item.label}:${item.detail}`).join('；'));
+  assert.deepEqual(await streamLinkedRowsToInsert(plain, { expectedHeaders: BANK_V2 }, () => {}), { matched: true });
+
+  // 唯一的工作表不在 sheet1.xml（ExcelJS 新建两张表、删掉第一张后保存）：识别器按单表走流式，导入读不出；预检同样不通过（第十八轮 P2）
+  const movedPath = path.join(ws.root, 'moved.xlsx');
+  const moved = new ExcelJS.Workbook();
+  const scratch = moved.addWorksheet('临时');
+  const movedSheet = moved.addWorksheet('渠道对账单');
+  movedSheet.addRow(BANK_V2);
+  movedSheet.addRow(BANK_V2.map((header) => ROW[header] ?? ''));
+  moved.removeWorksheet(scratch.id);
+  await moved.xlsx.writeFile(movedPath);
+  const JSZip = require('jszip');
+  const entries = Object.keys((await JSZip.loadAsync(fs.readFileSync(movedPath))).files).filter((name) => name.startsWith('xl/worksheets/sheet'));
+  assert.deepEqual(entries, ['xl/worksheets/sheet2.xml'], '前提：唯一的工作表存于 sheet2.xml');
+  const movedPrepared = await prepare(movedPath);
+  assert.equal(movedPrepared.verdict, 'fail');
+  assert.match(check(movedPrepared, '表头读取').detail, /导入时无法读取表头：.*sheet1\.xml/);
+  const detected = await detectTableType(movedPath, [{ tableKey: 'bank-deposit', structureExact: true, expectedHeaders: BANK_V2 }]);
+  assert.equal(detected.streamingEligible, true, '识别器按单表走流式');
+  await assert.rejects(streamLinkedRowsToInsert(movedPath, { expectedHeaders: BANK_V2 }, () => {}), /sheet1\.xml/, '入金流式导入同样读不出');
+});
+
 test('场景引用保护按对应回内置列后的列名：原位改名的版本可稍后启用，之后删掉该列的版本被拦下', async (t) => {
   const scenario = { id: 1, category: 'extract-recon-id', config: { conditions: [{ field: '合并单号', op: '包含', value: 'X' }] } };
   const { ws, service, prepare } = templates(t, [scenario]);

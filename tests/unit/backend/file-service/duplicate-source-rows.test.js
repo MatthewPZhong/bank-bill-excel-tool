@@ -377,6 +377,60 @@ function patchUncachedTextFormula(buffer, cellRef, formulaXml) {
   return XLSX.CFB.write(cfb, { type: 'buffer', fileType: 'zip' });
 }
 
+// v3.2.22 B133：工作表原文含注释或标签内有制表符等写法时（读取库可能按注释里的行取值），与长数字还原同一判定，
+//   整张表不参与查重：两行内容相同也不进删除清单（否则用户确认后会少一行明细）
+test('buildMappedRows：工作表原文含注释掉的标签或标签内有制表符时整张表不参与查重', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-source-rows-markup-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['日期', '收入', '支出', '流水号'],
+    ['2026-11-01', '100', '', 'S1'],
+    ['2026-11-01', '100', '', 'S1']
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Sheet1');
+  const base = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  const patchSheet = (transform) => {
+    const cfb = XLSX.CFB.read(base, { type: 'buffer' });
+    const entry = cfb.FileIndex[cfb.FullPaths.findIndex((fullPath) => fullPath.endsWith('xl/worksheets/sheet1.xml'))];
+    const xml = Buffer.from(entry.content).toString('utf8');
+    const patched = transform(xml);
+    assert.notEqual(patched, xml);
+    entry.content = Buffer.from(patched, 'utf8');
+    entry.size = entry.content.length;
+    return XLSX.CFB.write(cfb, { type: 'buffer', fileType: 'zip' });
+  };
+  const scan = (fileName, buffer) => {
+    const filePath = path.join(dir, fileName);
+    fs.writeFileSync(filePath, buffer);
+    const mapped = buildMappedRows({
+      inputFilePath: filePath,
+      orderedTargetFields: ['BillDate', 'MerchantId', 'Credit Amount', 'Debit Amount'],
+      mappingByField: { BillDate: '日期', MerchantId: '__FIXED__:ACC1', 'Credit Amount': '收入', 'Debit Amount': '支出' },
+      expectedSourceHeaders: ['日期', '收入', '支出'],
+      duplicateRowKeys: true
+    });
+    return { keys: mapped.rowMetas.map((meta) => Boolean(meta.sourceRowKey)), dropPlan: scanDuplicateSourceRows([{ filePath, detailRows: mapped }]).dropPlan };
+  };
+  assert.deepEqual(scan('plain.xlsx', base), { keys: [true, true], dropPlan: [[3]] }, '对照：原文无特殊写法时第 3 行判为重复');
+  // 不含尖括号的注释、CDATA 正文里的制表符不是标签，两边读到的结构相同，照常查重（Codex 第三轮）
+  for (const [fileName, transform] of [
+    ['plain-comment.xlsx', (xml) => xml.replace('<sheetData>', '<!-- 旧数据 --><sheetData>')],
+    ['cdata-tab.xlsx', (xml) => xml.replace('<sheetData>', '<!-- 备注 --><sheetData>').replace('</worksheet>', '<extLst><![CDATA[fee	ref]]></extLst></worksheet>')]
+  ]) {
+    assert.deepEqual(scan(fileName, patchSheet(transform)), { keys: [true, true], dropPlan: [[3]] }, fileName);
+  }
+  for (const [fileName, transform] of [
+    ['comment.xlsx', (xml) => xml.replace('<sheetData>', '<!-- 旧数据 <row r="9"/> --><sheetData>')],
+    ['unclosed-cdata.xlsx', (xml) => xml.replace('<sheetData>', '<![CDATA[ 未闭合 <sheetData>')],
+    ['tab.xlsx', (xml) => xml.replace('<sheetData>', '<sheetData\t>')],
+    // 属性值里的 > 不是标签结尾，其后的制表符同样识别
+    ['quoted-gt.xlsx', (xml) => xml.replace('<sheetData>', '<sheetData a=">"\tb="1">')]
+  ]) {
+    assert.deepEqual(scan(fileName, patchSheet(transform)), { keys: [false, false], dropPlan: [[]] }, fileName);
+  }
+});
+
 test('buildMappedRows：含公式的行（数值、文本、布尔公式，不论是否读到缓存结果）值无法证明，不参与查重（保留）', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-source-rows-formula-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

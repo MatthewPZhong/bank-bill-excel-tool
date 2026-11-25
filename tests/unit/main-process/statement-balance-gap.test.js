@@ -164,11 +164,14 @@ function regenerationPlanDeps({
   const assertStatementBatchWritable = statementGenerationHelpers
     ? statementGenerationHelpers.assertStatementBatchWritable
     : () => {};
+  const assertNoCollectedUnwritableText = statementGenerationHelpers
+    ? statementGenerationHelpers.assertNoUnwritableRowText
+    : () => {};
   return {
     planVirtualTemplateBalanceRegeneration: loadMainFunction(
       'planVirtualTemplateBalanceRegeneration',
-      ['getStatementSessionEntries', 'groupStatementEntriesForGeneration', 'buildStatementGenerationConfig', 'buildPreparedStatementBatchFromEntries', 'assertStatementBatchWritable', 'FileValidationError'],
-      [getStatementSessionEntries, groupStatementEntriesForGeneration, buildStatementGenerationConfig, buildPreparedStatementBatchFromEntries, assertStatementBatchWritable, FileValidationError]
+      ['getStatementSessionEntries', 'groupStatementEntriesForGeneration', 'buildStatementGenerationConfig', 'buildPreparedStatementBatchFromEntries', 'assertStatementBatchWritable', 'assertNoCollectedUnwritableText', 'FileValidationError'],
+      [getStatementSessionEntries, groupStatementEntriesForGeneration, buildStatementGenerationConfig, buildPreparedStatementBatchFromEntries, assertStatementBatchWritable, assertNoCollectedUnwritableText, FileValidationError]
     ),
     assertVirtualTemplateBalanceOutputPaths: loadMainFunction(
       'assertVirtualTemplateBalanceOutputPaths',
@@ -830,6 +833,7 @@ function virtualExportAllDeps({ session, groups, generated }) {
     // v3.2.21：导出全部执行时先逐组校验渠道余额（这里的组都不是余额方式不同的渠道）与写出前的检查（桩条目不含明细行）
     resolveEntryBalancePlan: () => null,
     assertStatementEntriesWritable: () => {},
+    assertNoCollectedUnwritableText: () => {},
     FileValidationError,
     // 生成配置失败的组按会话明细校验渠道余额（这里的组都没有问题）
     collectGroupBalanceIssuesWithoutConfig: () => {},
@@ -1318,8 +1322,8 @@ function loadOutputPathHelpers(storageRoot, today) {
   );
   const mergeGeneratedXlsxFiles = loadMainFunction(
     'mergeGeneratedXlsxFiles',
-    ['require', 'fs', 'path', 'applyWatermark'],
-    [require, fs, path, () => {}]
+    ['require', 'fs', 'path', 'applyWatermark', 'prepareWorkbookTextForWrite'],
+    [require, fs, path, () => {}, require('../../../src/backend/file-service/writers').prepareWorkbookTextForWrite]
   );
   return {
     buildOutputFilePath,
@@ -1666,6 +1670,15 @@ test('写出前的只读校验与生成时的检查同口径：收支同时有�
       { rows: [['2026-09-01', 'M001', 'USD', '1', ''], ['2026-09-02', 'M001', 'USD', '2', '']], noMetas: true },
       { rows: [['2026-09-03', 'M001', 'USD', '5', '6'], ['2026-09-04', 'M001', 'USD', '7', '8']], metaBase: 10 }
     ] },
+    // v3.2.22 B113：映射后才写进的值（按币种回填或手动选择的大账号）含无法写入 Excel 的字符时，预检与生成同样按最终明细拒绝，
+    //   报合并后的源行号；只出现在不导出的行（收支都为 0）时不拒绝
+    { label: '回填的大账号含无法写入的字符', rawFiles: [
+      { rows: [['2026-09-01', 'M001', 'USD', '1', '']] },
+      { rows: [['2026-09-02', 'M\uFFFF', 'USD', '2', ''], ['2026-09-03', 'M\ud83d', 'USD', '3', '']], metaBase: 7 }
+    ] },
+    { label: '无法写入的字符只在不导出的行', rawFiles: [
+      { rows: [['2026-09-01', 'M001', 'USD', '1', ''], ['2026-09-02', 'M\uFFFF', 'USD', '0', '0']] }
+    ] },
     { label: '只有收支都为 0 的行、日期有效', files: [[['2026-09-01', 'M001', 'USD', '0', '']]] },
     { label: '只有收支都为 0 的行、没有日期', files: [[['', 'M001', 'USD', '0', '']]] },
     { label: '出余额未映射 MerchantId', files: [[['2026-09-01', 'M001', 'USD', '100', '']]], config: { mappingByTargetField: {} } },
@@ -1695,6 +1708,9 @@ test('写出前的只读校验与生成时的检查同口径：收支同时有�
     ['账单日期无效', '账单日期存在无效值：abc', []],
     ['收支同时有值（前一段无行元数据）', '存在2条明细的 Credit Amount 与 Debit Amount 同时有值',
       ['第4行，Credit Amount="5"，Debit Amount="6"', '第5行，Credit Amount="7"，Debit Amount="8"']],
+    ['回填的大账号含无法写入的字符',
+      '源文件第 7 行写进「MerchantId」列的值含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）等 2 处，请按值的来源修正源文件或模板的大账号、固定值配置后重新生成',
+      ['第 7 行写进「MerchantId」列的值', '第 8 行写进「MerchantId」列的值']],
     ['只有收支都为 0 的行、没有日期', '导入文件中未找到有效的 BillDate', []],
     ['出余额未映射 MerchantId', '当前模板启用 Balance 时必须映射 MerchantId 字段', []]
   ]);
@@ -1713,7 +1729,7 @@ function findFileNames(root, pattern) {
 }
 
 test('主进程：按文件名映射多模板导入，任一模板组需补录或确认断档时不合并、不缓存部分余额', (t) => {
-  for (const scenario of ['gap', 'seed-required', 'bulk-warnings', 'invalid-date', 'merged-dates']) {
+  for (const scenario of ['gap', 'seed-required', 'bulk-warnings', 'invalid-date', 'merged-dates', 'unwritable']) {
     const root = createTempRoot(t);
     const storageRoot = path.join(root, 'storage');
     const generation = createGenerationSeam(storageRoot);
@@ -1733,8 +1749,13 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
         billDate: '2026-08-31', endBalance: 1000, generationMethod: '人工录入'
       });
     }
+    // v3.2.22 B113（Codex 第六轮）：前两组各 12 行的账号含无法写入的字符——各组校验完一并拒绝，列全批前 20 处、总计 24 处
+    const unwritableRows = (group) => Array.from({ length: 12 }, (_value, index) => [
+      `2026-09-${String(index + 1).padStart(2, '0')}`, `${group.merchantId}\uFFFF`, 'USD', '100', '']);
     const fileEntries = groups.map((group) => ({
-      ...mappedSourceEntry(root, `${scenario}-${group.id}.xlsx`, group.dates.map((date) => [date, group.merchantId, 'USD', '100', ''])
+      ...mappedSourceEntry(root, `${scenario}-${group.id}.xlsx`, scenario === 'unwritable' && group.id <= 2
+        ? unwritableRows(group)
+        : group.dates.map((date) => [date, group.merchantId, 'USD', '100', ''])
         // 只有一条零金额行的日期：生成时跳过，不进明细与余额文件，也不进汇总文件名
         .concat(scenario === 'merged-dates' && group.id === 1 ? [['2026-08-30', group.merchantId, 'USD', '0', '']] : [])),
       matchedTemplateId: group.id
@@ -1765,6 +1786,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
       },
       buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
       assertStatementBatchWritable: generation.assertStatementBatchWritable,
+      assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
       FileValidationError,
       removeStatementSessionEntriesByFilePath: () => {},
       generateStatementFiles: (options) => {
@@ -1805,6 +1827,26 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
       Object.values(dependencies)
     );
 
+    if (scenario === 'unwritable') {
+      let rejected = null;
+      try {
+        generateGroups({
+          fileEntries,
+          fallbackTemplateConfig: {},
+          selectedBigAccount: null,
+          session: { key: 'session-1' },
+          inputFilePaths: fileEntries.map((entry) => entry.filePath)
+        });
+      } catch (error) {
+        rejected = error;
+      }
+      assert.ok(rejected && rejected.positionsOnly, scenario);
+      assert.match(rejected.message, /含无法写入 Excel 的字符.*等 24 处/, scenario);
+      assert.equal(rejected.detailLines.length, 21, scenario);
+      assert.equal(rejected.detailLines[20], '另有 4 处，共 24 处', scenario);
+      assert.deepEqual([imported, findFileNames(storageRoot, /COMMON|BALANCE/)], [[], []], scenario);
+      continue;
+    }
     if (scenario === 'invalid-date') {
       // v3.2.21：最后一组有交易却没有有效账单日期时，在任何组写出之前拦下：前两组不写出明细、余额，也不写当日种子
       assert.throws(() => generateGroups({
@@ -2050,6 +2092,7 @@ test('主进程：导出全部时后一组写出前检查失败，任何组都�
       resolvedTids.push(config.template.id);
       return null;
     },
+    assertNoCollectedUnwritableText: () => {},
     assertStatementEntriesWritable: ({ config, balancePlan, includeBalance }) => {
       checked.push([config.template.id, balancePlan, includeBalance]);
       if (config.template.id === 2) throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
@@ -2070,6 +2113,7 @@ test('主进程：导出全部时后一组写出前检查失败，任何组都�
       configuredTids.push(template.id);
       return { template };
     },
+    assertNoCollectedUnwritableText: () => {},
     assertStatementEntriesWritable: ({ config }) => {
       if (config.template.id === 1) throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
     }
@@ -2791,4 +2835,18 @@ test('generateStatementFiles：明细与余额结果的 billDates 只有首末�
   const preparedBatch = generation.buildPreparedStatementBatchFromEntries({ config, fileEntries: [entry] });
   const result = generation.generateStatementFiles({ config, preparedBatch, scope: 'current' });
   assert.deepEqual([result.detail.billDates, result.balance.billDates], [['2026-09-01', '2026-09-02'], ['2026-09-01', '2026-09-02']]);
+});
+
+// v3.2.22 B113：多组明细合并时读回的字面 _xHHHH_ 已还原成原文，合并写出须同样转义，合并文件中原样保留
+test('mergeGeneratedXlsxFiles：各组明细中的字面 _xHHHH_ 合并写出后读回原样保留', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-escape-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { writeWorkbookRows } = require('../../../src/backend/file-service');
+  const { mergeGeneratedXlsxFiles } = loadOutputPathHelpers(dir, '2026-11-23');
+  const first = writeWorkbookRows({ rows: [['Ref'], ['FEE_x0041_']], outputFilePath: path.join(dir, 'a.xlsx') });
+  const second = writeWorkbookRows({ rows: [['Ref'], ['REF_x0041\r\nB']], outputFilePath: path.join(dir, 'b.xlsx') });
+  const merged = mergeGeneratedXlsxFiles([first, second], path.join(dir, 'merged.xlsx'));
+  const workbook = XLSX.readFile(merged);
+  assert.deepEqual(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }),
+    [['Ref'], ['FEE_x0041_'], ['REF_x0041\r\nB']]);
 });

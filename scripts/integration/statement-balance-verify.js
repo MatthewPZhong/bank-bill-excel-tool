@@ -177,6 +177,7 @@ function loadRegenerateFunction(deps) {
     buildStatementGenerationConfig: deps.buildStatementGenerationConfig,
     buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: deps.statementGenerationHelpers.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: deps.statementGenerationHelpers.assertNoUnwritableRowText,
     FileValidationError
   });
   const assertVirtualTemplateBalanceOutputPaths = loadMainFunction('assertVirtualTemplateBalanceOutputPaths', {
@@ -233,7 +234,7 @@ function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEnt
     getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   });
   const mergeGeneratedXlsxFiles = loadMainFunction('mergeGeneratedXlsxFiles', {
-    require, fs, path, applyWatermark: () => {}
+    require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
   });
   const buildGenerationConfig = ({ template }) => ({ ...STATEMENT_CONFIG, template });
   const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
@@ -254,6 +255,7 @@ function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEnt
     rebuildMatchedTemplateFileEntries: ({ fileEntries: entries }) => entries,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: generation.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
     FileValidationError,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,

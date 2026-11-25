@@ -588,38 +588,56 @@ function verifyFeeFieldMapping(dir, database, main) {
   database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'field', value: '记账日期' }] });
   const xmlIllegalOut = path.join(dir, 'fm-xml-illegal.xlsx');
   assertThrows(() => generateFieldMapping(main, template, xmlIllegalCsv, xmlIllegalOut),
-    /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*Transaction Description/, '⑤ 取源列的值含禁止字符时拒绝生成并列出源行与列');
+    /^第 3 行「Transaction Description」列的值含无法写入 Excel 的字符/, '⑤ 取源列的值含禁止字符时写出边界兜底拒绝');
   assertTrue(!fs.existsSync(xmlIllegalOut), '⑤ 拒绝时不写出明细');
+  // v3.2.22 B113（Codex 第七轮）：映射时不再逐个拒绝，费用行取自源列的禁止字符随最终明细留到生成前的检查，与其他文件、
+  //   其他组的位置一并列出（按源行号）：两份源文件各一处，共 2 处
+  const { collectUnwritableRowText, assertNoUnwritableRowText } = require('../../src/backend/file-service/common');
+  const xmlIllegalCsv2 = path.join(dir, 'field-mapping-xml-illegal-2.csv');
+  fs.writeFileSync(xmlIllegalCsv2, [FM_HEADERS.join(','), '2026-11-02,USD,50,2,货款,ok', '2026-11-03,USD,60,3,货款,REF\uFFFF02'].join('\n'), 'utf8');
+  const sharedUnwritable = { total: 0, labels: [] };
+  for (const source of [xmlIllegalCsv, xmlIllegalCsv2]) {
+    const mapped = buildMappedRows({ inputFilePath: source, orderedTargetFields: FM_FIELDS, mappingByField: FM_MAPPING,
+      expectedSourceHeaders: FM_HEADERS, billSplitMerge: main.buildBillSplitMergeConfig(template, SPLIT_MAPPINGS) });
+    collectUnwritableRowText(mapped, { rowMetas: mapped.rowMetas || [], found: sharedUnwritable });
+  }
+  let aggregated = null;
+  try {
+    assertNoUnwritableRowText(sharedUnwritable);
+  } catch (error) {
+    aggregated = error;
+  }
+  assertEq(aggregated && [aggregated.message, aggregated.detailLines],
+    ['源文件第 2 行写进「Transaction Description」列的值含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）等 2 处，请按值的来源修正源文件或模板的大账号、固定值配置后重新生成',
+      ['第 2 行写进「Transaction Description」列的值', '第 3 行写进「Transaction Description」列的值']],
+    '⑤ 费用行取自源列的禁止字符从源文件映射起随最终明细汇总，列出两份文件的源行');
 
-  // 形如 _xHHHH_ 的字面参考号：XLSX 写出后读回会被还原成其他字符（写出器问题见 backlog B113）。真实 CSV 与写出回读：
-  //   正常参考号原样往返；含 _x0041_ 的源列值或固定文本映射到费用行时拒绝，不交付被改写的标识
+  // v3.2.22 B113：形如 _xHHHH_ 的字面文本在写出边界转义（_x005F_），真实 CSV 生成、写出、读回原样保留：
+  //   费用行取自源列的值、固定文本，与主映射取到的摘要两条路径都覆盖（不分大小写；含与回车相连的情形）
   const escapeLikeCsv = path.join(dir, 'field-mapping-escape-like.csv');
-  fs.writeFileSync(escapeLikeCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款,FEE_x0041_', '2026-11-02,USD,50,2,退款,FEE_0041'].join('\n'), 'utf8');
-  const escapeLikeOut = path.join(dir, 'fm-escape-like.xlsx');
-  assertThrows(() => generateFieldMapping(main, template, escapeLikeCsv, escapeLikeOut),
-    /第 2 行「记账日期」列的值含写入 Excel 后会被改写的文本.*Transaction Description/, '⑤ 源列值含 _xHHHH_ 时拒绝生成并列出源行与列');
-  assertTrue(!fs.existsSync(escapeLikeOut), '⑤ 拒绝时不写出明细');
-  // 源列值（CSV 引号内含真实 CRLF）中 _x0041 与回车的写出编码 _x000d_ 拼成转义：同样拒绝；只含 CRLF 的参考号写出回读原样保留
+  fs.writeFileSync(escapeLikeCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货_x0041_款,FEE_x0041_', '2026-11-02,USD,50,2,退款,FEE_0041'].join('\n'), 'utf8');
+  assertEq(generateFieldMapping(main, template, escapeLikeCsv, path.join(dir, 'fm-escape-like.xlsx')).map((row) => row[4]),
+    ['货_x0041_款', 'FEE_x0041_', '退款', 'FEE_0041'], '⑤ 主映射与费用行的 _xHHHH_ 字面值写出回读原样保留');
   const crlfEscapeCsv = path.join(dir, 'field-mapping-crlf-escape.csv');
-  fs.writeFileSync(crlfEscapeCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款,"REF_x0041\r\nB"'].join('\n'), 'utf8');
-  const crlfEscapeOut = path.join(dir, 'fm-crlf-escape.xlsx');
-  assertThrows(() => generateFieldMapping(main, template, crlfEscapeCsv, crlfEscapeOut),
-    /第 2 行「记账日期」列的值含写入 Excel 后会被改写的文本.*Transaction Description/, '⑤ 与回车相连构成转义的源列值拒绝生成');
-  assertTrue(!fs.existsSync(crlfEscapeOut), '⑤ 拒绝时不写出明细');
+  fs.writeFileSync(crlfEscapeCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,"M_X0041\r\nB","REF_x0041\r\nB"'].join('\n'), 'utf8');
+  assertEq(generateFieldMapping(main, template, crlfEscapeCsv, path.join(dir, 'fm-crlf-escape.xlsx')).map((row) => row[4]),
+    ['M_X0041\r\nB', 'REF_x0041\r\nB'], '⑤ _xHHHH 与回车相连的值写出回读原样保留');
   const crlfPlainCsv = path.join(dir, 'field-mapping-crlf-plain.csv');
   fs.writeFileSync(crlfPlainCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款,"REF\r\nB"'].join('\n'), 'utf8');
   assertEq(generateFieldMapping(main, template, crlfPlainCsv, path.join(dir, 'fm-crlf-plain.xlsx')).map((row) => row[4]), ['货款', 'REF\r\nB'],
     '⑤ 只含 CRLF 的参考号写出回读原样保留');
-  const plainRefCsv = path.join(dir, 'field-mapping-plain-ref.csv');
-  fs.writeFileSync(plainRefCsv, [FM_HEADERS.join(','), '2026-11-02,USD,50,2,退款,FEE_0041_x12'].join('\n'), 'utf8');
-  assertEq(generateFieldMapping(main, template, plainRefCsv, path.join(dir, 'fm-plain-ref.xlsx')).map((row) => row[4]), ['退款', 'FEE_0041_x12'],
-    '⑤ 不构成转义序列的参考号写出回读原样保留');
   database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'input', value: 'FEE_X0041_' }] });
-  assertThrows(() => main.buildBillSplitMergeConfig(template, SPLIT_MAPPINGS), /映射值含写入 Excel 后会被改写的文本/,
-    '⑤ 固定文本含 _xHHHH_（不分大小写）时生成前拒绝');
-  database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'input', value: 'REF_x0041\r\nB' }] });
-  assertThrows(() => main.buildBillSplitMergeConfig(template, SPLIT_MAPPINGS), /映射值含写入 Excel 后会被改写的文本/,
-    '⑤ 固定文本中 _xHHHH 与回车相连时生成前拒绝');
+  assertEq(generateFieldMapping(main, template, crlfPlainCsv, path.join(dir, 'fm-input-escape.xlsx')).map((row) => row[4]), ['货款', 'FEE_X0041_'],
+    '⑤ 固定文本含 _xHHHH_ 时照常生成并原样写出');
+  // 主映射取到的值含 XML 禁止字符：整份拒绝并列出行与列，不写出明细。这里直接调用写出器，由写出边界按输出行列兜底；
+  //   生成时在写出前按最终明细、按源行号拒绝（generateStatementFiles，statement-balance-gap.test.js 覆盖）
+  database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'input', value: '手续费' }] });
+  const mainIllegalCsv = path.join(dir, 'field-mapping-main-illegal.csv');
+  fs.writeFileSync(mainIllegalCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款\uFFFF,2026-11-01'].join('\n'), 'utf8');
+  const mainIllegalOut = path.join(dir, 'fm-main-illegal.xlsx');
+  assertThrows(() => generateFieldMapping(main, template, mainIllegalCsv, mainIllegalOut),
+    /^第 2 行「Transaction Description」列的值含无法写入 Excel 的字符/, '⑤ 主映射取值含禁止字符时拒绝并列出行与列');
+  assertTrue(!fs.existsSync(mainIllegalOut), '⑤ 主映射拒绝时不写出明细');
 
   // 模板表头删掉「记账日期」：生成前拦截列出位置；未勾选时标为未启用
   database.saveBillSplitMeta(template.id, { feeFieldMappings: FEE_FIELD_MAPPINGS });
