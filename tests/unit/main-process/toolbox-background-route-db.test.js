@@ -706,3 +706,50 @@ test('Route DB codec在BIFF8/CSV真实Scanner与Writer路径保持行序和长�
   assert.deepEqual(shutdown.leakedTransports, []);
   assert.deepEqual(shutdown.errors, []);
 });
+
+// v3.2.22 B58（Codex 第十轮）：后台多文件拆分生成失败（如找不到所选字段）时先核对源文件：生成期间被替换时报输入已变化，
+//   源文件未变时保留原错误；不调用发布器
+test('多文件拆分后台生成失败：源文件被替换时报输入已变化，未变时保留原错误，均不发布', async () => {
+  const groups = [{ outputId: 'split-1', fileName: 'A.xlsx', field: 'Group', values: ['A'] }];
+  // Worker 经协议回传的错误（真实编码器）：源文件未变时原样还原为该错误（Codex 第十二轮）
+  const { toProtocolError } = require('../../../src/main-process/background-execution/error-codec');
+  const workerError = toProtocolError(Object.assign(new Error('源文件中找不到字段「Group」'), { code: 'TOOLBOX_SPLIT_FIELD_MISSING' }));
+  for (const replaced of [true, false]) {
+    const dir = tempDir();
+    const sourcePath = path.join(dir, 'source.xlsx');
+    await writeStyledFixture(sourcePath);
+    const filePlan = multiFilePlan(sourcePath, [path.join(dir, 'final-A.xlsx')]);
+    let publisherCalls = 0;
+    // 失败后的核对在主进程异步读取，不同步访问源文件（Codex 第十一轮）
+    const lstatSync = fs.lstatSync;
+    let syncSourceLstats = 0;
+    fs.lstatSync = (filePath, ...rest) => {
+      if (path.resolve(String(filePath)) === path.resolve(sourcePath)) syncSourceLstats += 1;
+      return lstatSync(filePath, ...rest);
+    };
+    await assert.rejects(generateValidateAndPublishMultiOutput({
+      runtime: {
+        async execute() {
+          if (replaced) {
+            fs.writeFileSync(`${sourcePath}.tmp`, fs.readFileSync(sourcePath));
+            fs.renameSync(`${sourcePath}.tmp`, sourcePath);
+          }
+          return replaced
+            ? { outcome: 'failed', terminalSource: 'job:error' }
+            : { outcome: 'failed', terminalSource: 'job:error', error: workerError };
+        }
+      },
+      filePlan,
+      batchContext: operationContext(`toolbox-route-failed-${replaced}`),
+      groups,
+      generationPaths: [path.join(dir, `route-${replaced}.xlsx`)],
+      routeDbPath: path.join(dir, `route-${replaced}.sqlite`),
+      routeManifestPath: path.join(dir, `route-${replaced}.sealed.json`),
+      production: false,
+      publisher: async () => { publisherCalls += 1; }
+    }), replaced ? { code: 'ARCHIVE_INPUT_CHANGED' } : { code: 'TOOLBOX_SPLIT_FIELD_MISSING', message: '源文件中找不到字段「Group」' })
+      .finally(() => { fs.lstatSync = lstatSync; });
+    assert.equal(publisherCalls, 0);
+    assert.equal(syncSourceLstats, 0, '不同步访问源文件');
+  }
+});

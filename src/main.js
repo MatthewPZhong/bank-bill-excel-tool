@@ -119,6 +119,8 @@ const {
 } = require('./main-process/archive-center/source-snapshot');
 const {
   artifactManifestFromFilePlan,
+  assertFilePlanFresh,
+  assertFilePlanInputsFreshAsync,
   normalizeFilePlanV1
 } = require('./main-process/archive-center/file-plan');
 const {
@@ -512,6 +514,7 @@ const {
   toolboxRecoveryOutputFiles: toolboxFinalOutputFiles
 } = require('./main-process/toolbox-archive-recovery');
 const {
+  normalizeTargetAliasKey,
   pathsAlias
 } = require('./main-process/toolbox-target-identity');
 const {
@@ -22571,6 +22574,31 @@ function buildToolboxAuditDetailLines(files, warningSummary = null) {
   return details;
 }
 
+// v3.2.22 B58（spec D3，Codex 第十轮）：前台生成器失败时先核对冻结的输入：源文件在生成期间被替换（如换成缺少所选字段的版本）时
+//   按计划的失效口径报源文件已变化，不把另一版本引起的错误（「找不到字段」等）报给用户；输入未变或已取消时保留原错误。
+//   改报源文件已变化时保留原错误的暂存保留标志、清理诊断与人工恢复路径，清理失败的暂存文件不被外层删除（Codex 第十一轮）
+const TOOLBOX_CLEANUP_FAILURE_LINE_PREFIX = '清理工具箱临时产物失败：';
+async function generateToolboxCheckingInputs(filePlan, generate) {
+  try {
+    return await generate();
+  } catch (error) {
+    if (!filePlan || /_CANCELLED$/.test(String(error && error.code || ''))) throw error;
+    try {
+      await assertFilePlanInputsFreshAsync(filePlan);
+    } catch (staleError) {
+      if (error && typeof error === 'object') {
+        if (error.preserveTemporaryFiles === true) staleError.preserveTemporaryFiles = true;
+        const cleanupLines = (Array.isArray(error.detailLines) ? error.detailLines : [])
+          .filter((line) => String(line).startsWith(TOOLBOX_CLEANUP_FAILURE_LINE_PREFIX));
+        if (cleanupLines.length) staleError.detailLines = [...(staleError.detailLines || []), ...cleanupLines];
+        if (Array.isArray(error.recoveryPaths)) staleError.recoveryPaths = error.recoveryPaths.slice();
+      }
+      throw staleError;
+    }
+    throw error;
+  }
+}
+
 async function publishToolboxArtifacts(
   kind,
   artifacts,
@@ -22581,13 +22609,36 @@ async function publishToolboxArtifacts(
   const targetSnapshots = Array.isArray(options.targetSnapshots)
     ? options.targetSnapshots
     : [];
+  const targetList = Array.isArray(targets) ? targets : [];
+  // v3.2.22 B58：带冻结 FilePlan 的发布，目标须与计划输出一一对应；父目录身份统一取自冻结计划交给发布器复核
+  //   （目录被同路径替换即拒绝），并在发布前再核对一次输入，生成期间源文件被替换或改写时不形成正式输出。
+  //   目标文件与父目录由发布器在提交时复核，这里只补发布器不掌握的输入快照。
+  const plan = options.fileEvidence && options.fileEvidence.filePlan;
+  if (plan) {
+    if (plan.outputs.length !== targetList.length) {
+      throw new Error('工具箱发布目标与 FilePlan 输出数量不一致');
+    }
+    // 按计划输出的下标逐项核对：数组空槽也拒绝（forEach 会跳过空槽，Codex 第八轮）
+    plan.outputs.forEach((output, index) => {
+      const target = targetList[index];
+      const targetPath = target && typeof target === 'object' ? target.targetPath : target;
+      if (!targetPath || path.resolve(String(targetPath)) !== output.filePath) {
+        throw new Error('工具箱发布目标与 FilePlan 输出不一致');
+      }
+    });
+    // 异步核对：输入在网络盘上断连或高延迟时不阻塞主进程（Codex 第六轮）
+    await assertFilePlanInputsFreshAsync(plan);
+  }
   const publication = await publishToolboxPublicationAsync({
     taskId: `toolbox-${kind}-${Date.now()}-${randomUUID()}`,
     artifacts,
-    targets: (Array.isArray(targets) ? targets : []).map((target, index) => ({
+    targets: targetList.map((target, index) => ({
       ...(target && typeof target === 'object' ? target : { targetPath: target }),
       ...(targetSnapshots[index]
         ? { expectedTargetSnapshot: targetSnapshots[index] }
+        : {}),
+      ...(plan && plan.outputs[index].targetParentIdentity
+        ? { expectedTargetParentIdentity: plan.outputs[index].targetParentIdentity }
         : {})
     })),
     protectedSourcePaths: options.protectedSourcePaths,
@@ -22729,6 +22780,59 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
       }
     }
   }
+}
+
+// v3.2.22 B57：保存框 / 目录选择返回后先只冻结目标（目标快照与父目录身份），再访问输入（别名检查、输入快照）。
+//   完整计划沿用先冻结的输出证据、不重新采样（normalizeFilePlanV1 的 reuseFrozenOutputsOf），返回给执行阶段的计划携带的
+//   就是用户确认时的目标版本（父目录身份的可靠性也按首次冻结：首次不可靠时之后只核对路径）；之后再按冻结的证据核对当前
+//   磁盘。输入多或在网络盘上时，遍历输入期间外部新建、替换（含建成文件夹）的目标报目标变化。
+//   别名检查或完整计划规范化失败时先核对目标：目标变了、或系统错误指向输出路径与其任一级上级目录（目录被移走后又移回等），
+//   报目标变化（中文提示）；否则是输入本身的问题（或真的别名到输入），原样抛出
+function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
+  const targetsOnly = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs });
+  const targetChanged = () => Object.assign(new TypeError('输出目标在任务确认后已变化'), { code: 'ARCHIVE_TARGET_CHANGED' });
+  const assertTargetsUnchanged = () => {
+    try {
+      assertFilePlanFresh(targetsOnly);
+    } catch (_error) {
+      throw targetChanged();
+    }
+  };
+  // 系统错误的路径是输出路径本身或其任一级上级目录（字面路径与冻结时解析出的真实路径）时，按目标变化处理：
+  //   输出所在目录的上级被移走又移回时，解析报的是第一个缺失的上级（Codex 第五轮 P3）
+  const targetPaths = targetsOnly.outputs.flatMap((output) => [
+    path.resolve(output.filePath),
+    path.join(output.targetParentIdentity.canonicalRealPath, path.basename(output.filePath))
+  ]);
+  // 按工具箱既有的路径别名规则比较（macOS 不区分大小写与组合 / 分解字符，Windows 不区分大小写；只影响报错归类，
+  //   Codex 第六、七轮）
+  const comparable = (value) => normalizeTargetAliasKey(path.resolve(value));
+  const comparableTargets = targetPaths.map(comparable);
+  const matchesTargetOrAncestor = (candidate) => {
+    const resolved = comparable(candidate);
+    const prefix = resolved.endsWith(path.sep) ? resolved : resolved + path.sep;
+    return comparableTargets.some((targetPath) => targetPath === resolved || targetPath.startsWith(prefix));
+  };
+  // 字面路径未命中时按解析后的真实路径再比（错误经指向输出目录的目录链接报出，目录随后已移回，Codex 第八轮）
+  const isTargetOrAncestor = (errorPath) => {
+    if (matchesTargetOrAncestor(errorPath)) return true;
+    try {
+      return matchesTargetOrAncestor(fs.realpathSync.native(errorPath));
+    } catch (_error) {
+      return false;
+    }
+  };
+  let plan;
+  try {
+    assertToolboxTargetsDoNotAliasSources(inputs.map((item) => item.filePath), outputs.map((item) => item.filePath));
+    plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs, outputs }, { reuseFrozenOutputsOf: targetsOnly });
+  } catch (error) {
+    assertTargetsUnchanged();
+    if (error && typeof error.path === 'string' && isTargetOrAncestor(error.path)) throw targetChanged();
+    throw error;
+  }
+  assertTargetsUnchanged();
+  return plan;
 }
 
 let toolboxSplitReadContext = null;
@@ -22897,24 +23001,19 @@ function registerToolboxHandlers() {
         if (saveResult.canceled || !saveResult.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
-        assertToolboxTargetsDoNotAliasSources(choice.filePaths, [saveResult.filePath]);
         const inputFiles = Object.freeze(choice.filePaths.map((filePath) => Object.freeze({
           filePath,
           role: 'input',
           sourceOperation: 'toolbox:merge'
         })));
+        // v3.2.22 B57：保存框返回即先冻结目标、再冻结输入，之后的新建 / 替换由生命周期与发布器拒绝
         const prepared = {
           proceed: true,
-          filePlan: {
-            version: 1,
-            allocation: 'eager',
-            inputs: inputFiles,
-            outputs: [{
-              filePath: saveResult.filePath,
-              role: 'output',
-              sourceOperation: 'toolbox:merge'
-            }]
-          }
+          filePlan: freezeToolboxFilePlanTargetsFirst(inputFiles, [{
+            filePath: saveResult.filePath,
+            role: 'output',
+            sourceOperation: 'toolbox:merge'
+          }])
         };
         return prepared;
       } catch (error) {
@@ -22980,11 +23079,11 @@ function registerToolboxHandlers() {
             };
             publishResult = generated.publication;
           } else {
-            writeRes = await toolboxMergeFilesToXlsx({
+            writeRes = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => toolboxMergeFilesToXlsx({
               filePaths,
               savePath: tempPath,
               sheetBaseName: 'COMMON'
-            });
+            }));
             publishResult = await publishMergeArtifacts([{
               sourcePath: tempPath,
               outputId: 'merge-1',
@@ -23129,6 +23228,19 @@ function registerToolboxHandlers() {
         let targetPlans = null;
         let savePath = '';
         let rows = null;
+        let frozenFilePlan = null;
+        // v3.2.22 B57：选定目标后立即冻结全部目标（含尚不存在的）与源文件，覆盖确认只针对冻结时已存在的目标，
+        //   确认期间的新建 / 替换由确认后的核对拒绝；按行拆分在 prepareRows 中同样处理。
+        const freezeSplitFilePlan = (targetPaths) => freezeToolboxFilePlanTargetsFirst([{
+          filePath: readContext.sourceFilePath,
+          role: 'input',
+          sourceOperation: 'toolbox:split:export',
+          freshnessFailure: { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', message: '拆分源文件在读取后已变化，请重新选择' }
+        }], targetPaths.map((filePath) => ({
+          filePath,
+          role: 'output',
+          sourceOperation: 'toolbox:split:export'
+        })));
         if (payload.mode === 'rows') {
           rows = await prepareToolboxRows(payload, readContext, {
             metadataDirectory: app.getPath('userData'),
@@ -23150,6 +23262,8 @@ function registerToolboxHandlers() {
           });
           if (!rows) return { proceed: false, result: { status: 'cancelled' } };
           outputPaths = rows.targets.map((item) => item.filePath);
+          assertToolboxTargetsDoNotAliasSources([readContext.sourceFilePath], outputPaths);
+          frozenFilePlan = rows.filePlan;
         } else if (payload.mode === 'multiple') {
           const groups = toolboxNormalizeMultiSplitGroups(payload.groups);
           const directoryChoice = await showImportOpenDialog('toolbox-split-export-directory', {
@@ -23180,7 +23294,9 @@ function registerToolboxHandlers() {
               }
             };
           }
-          const conflicts = targetPlans.filter((plan) => fs.existsSync(plan.targetPath));
+          outputPaths = targetPlans.map((plan) => plan.targetPath);
+          frozenFilePlan = freezeSplitFilePlan(outputPaths);
+          const conflicts = targetPlans.filter((_plan, index) => frozenFilePlan.outputs[index].targetSnapshot.exists);
           if (conflicts.length > 0) {
             const overwriteChoice = await dialog.showMessageBox(mainWindow, {
               type: 'warning',
@@ -23195,8 +23311,17 @@ function registerToolboxHandlers() {
             if (!overwriteChoice || overwriteChoice.response !== 1) {
               return { proceed: false, result: { status: 'cancelled' } };
             }
+            // 覆盖确认期间目标可能被新建或替换：确认后再核对整份计划。没有弹窗时冻结刚核对过全部目标、其后没有等待，
+            //   不再重复同步核对（执行前 TaskLifecycle 仍会核对），避免高延迟网络盘上阻塞其他 IPC（Codex 第七轮）
+            try {
+              assertFilePlanFresh(frozenFilePlan);
+            } catch (error) {
+              // 源文件已变化：清除本次拆分读取会话（预取值与字段缓存），与执行前核对到源文件变化时一致；目标变化等其他失败
+              //   保留会话，用户可直接重试（Codex 第十二轮）
+              if (error && error.code === 'TOOLBOX_SPLIT_READ_CONTEXT_STALE') clearToolboxSplitReadContext(readContext);
+              throw error;
+            }
           }
-          outputPaths = targetPlans.map((plan) => plan.targetPath);
           targetPlans = groups.map((group, index) => ({
             ...group,
             outputId: `split-${index + 1}`
@@ -23211,11 +23336,8 @@ function registerToolboxHandlers() {
           }
           savePath = saveResult.filePath;
           outputPaths = [savePath];
+          frozenFilePlan = freezeSplitFilePlan(outputPaths);
         }
-        assertToolboxTargetsDoNotAliasSources(
-          [readContext.sourceFilePath],
-          outputPaths
-        );
         const prepared = {
           proceed: true,
           payload,
@@ -23225,21 +23347,7 @@ function registerToolboxHandlers() {
           targetPlans,
           rows
         };
-        const inputFiles = Object.freeze([Object.freeze({
-          filePath: readContext.sourceFilePath,
-          role: 'input',
-          sourceOperation: 'toolbox:split:export'
-        })]);
-        prepared.filePlan = rows ? rows.filePlan : {
-          version: 1,
-          allocation: 'eager',
-          inputs: inputFiles,
-          outputs: outputPaths.map((filePath) => ({
-            filePath,
-            role: 'output',
-            sourceOperation: 'toolbox:split:export'
-          }))
-        };
+        prepared.filePlan = frozenFilePlan;
         prepared.beforeStart = (_batchContext, planEvidence) => {
           const sourceEvidence = planEvidence.inputFiles[0];
           assertToolboxSplitSourceFresh(readContext, sourceEvidence);
@@ -23275,10 +23383,7 @@ function registerToolboxHandlers() {
               metadataDirectory: app.getPath('userData'),
               publisher: (artifacts) => publishToolboxArtifacts(
                 'split-rows', artifacts,
-                taskContext.fileEvidence.filePlan.outputs.map((output) => ({
-                  targetPath: output.filePath,
-                  expectedTargetParentIdentity: output.targetParentIdentity
-                })),
+                taskContext.fileEvidence.filePlan.outputs.map((output) => ({ targetPath: output.filePath })),
                 taskContext.batchContext, {
                   protectedSourcePaths: [sourceFilePath],
                   targetSnapshots: taskContext.fileEvidence.targetSnapshots,
@@ -23332,7 +23437,7 @@ function registerToolboxHandlers() {
           let generationResult;
           let publishResult = null;
           if (await shouldUseLargeChannel(sourceFilePath)) {
-            generationResult = await dispatchLargeSplit({
+            generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => dispatchLargeSplit({
               op: 'exportMultiFilters',
               filePath: sourceFilePath,
               groups: preparedPlans.map((plan) => ({
@@ -23343,7 +23448,7 @@ function registerToolboxHandlers() {
                 savePath: plan.temporaryPath
               })),
               batchContext: taskContext.batchContext
-            }).promise;
+            }).promise);
           } else if (backgroundExecutionRuntimeManager.isProductionEnabled(
             TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           )) {
@@ -23391,7 +23496,7 @@ function registerToolboxHandlers() {
               inputDataRowCount: generated.summary.inputDataRowCount
             };
           } else {
-            generationResult = await exportToolboxMultiFilters({
+            generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => exportToolboxMultiFilters({
               filePath: sourceFilePath,
               groups: preparedPlans.map((plan) => ({
                 outputId: plan.outputId,
@@ -23400,7 +23505,7 @@ function registerToolboxHandlers() {
                 values: plan.values,
                 savePath: plan.temporaryPath
               }))
-            });
+            }));
           }
 
           const generationFiles = generationResult && Array.isArray(generationResult.files)
@@ -23504,20 +23609,22 @@ function registerToolboxHandlers() {
         const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
         let preserveTempDir = false;
         try {
-          const generationResult = await dispatchLargeSplit({
+          const generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => dispatchLargeSplit({
             op: 'exportFilter',
             filePath: sourceFilePath,
             field,
             values,
             savePath: tempPath,
             batchContext: taskContext.batchContext
-          }).promise;
+          }).promise);
           const matchedCount = Number(generationResult && generationResult.matchedCount) || 0;
           const inputDataRowCount = Number(
             generationResult && generationResult.inputDataRowCount
           ) || 0;
           if (matchedCount === 0) {
             // 0 命中：不弹保存框、不产用户文件（保留现文案，与小文件分支逐字节一致）。临时目录由 finally 清理。
+            //   先核对冻结的输入：生成期间源文件被替换时报源文件已变化，不把另一版本的结果当成本次筛选结果（Codex 第九轮）
+            await assertFilePlanInputsFreshAsync(taskContext.fileEvidence.filePlan);
             return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
           }
           const publishResult = await publishToolboxArtifacts(
@@ -23638,16 +23745,18 @@ function registerToolboxHandlers() {
           inputDataRowCount = generated.summary.inputDataRowCount;
           publishResult = generated.publication;
         } else {
-          const generationResult = await exportToolboxFilter({
+          const generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => exportToolboxFilter({
             filePath: sourceFilePath,
             field,
             values,
             savePath: tempPath,
             outputId: 'split-1'
-          });
+          }));
           matchedCount = Number(generationResult.matchedCount) || 0;
           inputDataRowCount = Number(generationResult.inputDataRowCount) || 0;
           if (matchedCount === 0) {
+            // 同大文件分支：先核对冻结的输入（Codex 第九轮）
+            await assertFilePlanInputsFreshAsync(taskContext.fileEvidence.filePlan);
             return {
               status: 'failed',
               message: '所选值在源文件中无匹配行，未生成文件',
@@ -23707,6 +23816,12 @@ function registerToolboxHandlers() {
         }
       }
     } catch (error) {
+      // 读取、生成或发布前核对到源文件已变化：清除本次拆分读取会话（预取值与字段缓存），与 Renderer 丢弃 token 一致；
+      //   目标变化等可重试的失败保留会话（v3.2.22 B58，Codex 第十二、十三轮）
+      const code = error && error.code;
+      if (code === 'TOOLBOX_SPLIT_READ_CONTEXT_STALE' || code === 'ARCHIVE_INPUT_CHANGED') {
+        clearToolboxSplitReadContext(prepared && prepared.readContext);
+      }
       return toolboxFailureResult(error);
     }
     }
