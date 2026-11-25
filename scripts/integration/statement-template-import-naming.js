@@ -67,6 +67,7 @@ async function run() {
     'templateImportOwnerId',
     'createTemplateImportFileErrorResult',
     'createTemplateHeadersDuplicateResult',
+    'extractStatementTemplateHeaders',
     'prepareOrdinaryTemplateImport',
     'checkOrdinaryTemplateImportName',
     'createTemplateImportExpiredResult',

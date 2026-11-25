@@ -328,6 +328,40 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.controller.enter();`); await tick();
     assert.deepEqual(await js('statementFixture.alerts.slice(3)'), [`${missing.message}\n${missing.detailLines[0]}`]);
   });
+
+  // v3.2.21：交易行全部因「跨 Sheet 回填」未配上、在导入预检即返回（没有报错文件）时，弹窗逐行列出跳过原因
+  await test('导入预检因没有交易数据返回且带回填跳过明细时，弹窗逐行列出；已生成报错文件时不弹窗', async () => {
+    await setup();
+    await js(`statementFixture.next.import={status:'error',message:'导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框查看逐行原因）',
+      errorCode:'NO_TRANSACTION_DATA',detailLines:['以下行命中「跨 Sheet 回填」的待回填行条件但未能回填，已跳过，未写入导出的明细账单：','「a.xlsx」第4行，Desc="Trade - $9"，原因：来源 Sheet 中没有可配对的行'],errorReportReady:false};
+      statementFixture.controller.commands.importFile()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts'), [
+      '导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框查看逐行原因）\n以下行命中「跨 Sheet 回填」的待回填行条件但未能回填，已跳过，未写入导出的明细账单：\n「a.xlsx」第4行，Desc="Trade - $9"，原因：来源 Sheet 中没有可配对的行'
+    ]);
+    assert.equal(await js(`document.getElementById('exportDetailBtn').disabled`), true);
+    // 状态框可点击，再次查看逐行原因（不导出报错文件）
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.detailAlertReady`), true);
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 2);
+    assert.equal(await js('statementFixture.alerts[1]===statementFixture.alerts[0]'), true);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+    await js(`statementFixture.next.import={status:'error',message:'导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框导出报错文件核对）',errorCode:'NO_TRANSACTION_DATA',detailLines:['x'],errorReportReady:true};statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 2);
+  });
+  await test('离页期间导入预检返回带回填跳过明细的失败：不弹窗，回到页面后点击状态框查看逐行原因', async () => {
+    await setup();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();`);
+    await js(`statementFixture.pending.resolve({status:'error',message:'导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框查看逐行原因）',
+      errorCode:'NO_TRANSACTION_DATA',detailLines:['「a.xlsx」第4行，原因：来源 Sheet 中没有可配对的行'],errorReportReady:false});`); await tick();
+    await js(`statementFixture.controller.enter();`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 0);
+    assert.match(await js('statementFixture.text()'), /请点击状态框查看逐行原因/);
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts'), [
+      '导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框查看逐行原因）\n「a.xlsx」第4行，原因：来源 Sheet 中没有可配对的行'
+    ]);
+  });
   await test('导入双击只有一个IPC，离页期间不渲染；重进消费真实在途结果且不新增sessionStatus', async () => {
     await setup();
     await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;document.getElementById('importFileBtn').click();document.getElementById('importFileBtn').click();statementFixture.controller.leave();`);

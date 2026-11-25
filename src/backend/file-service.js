@@ -44,10 +44,29 @@ const {
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,
+  isHtmlWorkbookFile,
+  listSheetNames,
+  odsSheetNameEntries,
   loadEnumValues,
   readRows,
   readRowsWithMetadata
 } = require('./file-service/readers');
+const {
+  CROSS_SHEET_BACKFILL_LABEL,
+  applyCrossSheetBackfill,
+  collectCrossSheetBackfillMainFields,
+  createUnwritableCellLookup,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule
+} = require('./file-service/cross-sheet-backfill');
+const {
+  allocateCrossSheetBackfillOutputPaths,
+  computeBufferFingerprint,
+  computeFileFingerprint,
+  readFingerprintedFile,
+  writeCrossSheetBackfillWorkbook
+} = require('./file-service/cross-sheet-backfill-writer');
 const {
   calculateEndingBalanceFromAmounts,
   compileRegexLiteral,
@@ -229,7 +248,11 @@ function buildMappedRows({
   preprocessRowFilterRules = null,
   // v3.2.19：原始账单预处理「重复账单过滤」——为 true 时每个源行的内容指纹写入 rowMetas[i].sourceRowKey，
   //   供导入时跨文件查重（duplicate-source-rows.js）；不开启时不计算。
-  duplicateRowKeys = false
+  duplicateRowKeys = false,
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」规则（main.js 只在勾选且规则有效时下发，否则为 null）
+  crossSheetBackfillRule = null,
+  // v3.2.21：按金额识别时认作币种的代码（main.js 按币种映射表下发）；未给出时取 currencyMappings 的代码
+  crossSheetBackfillCurrencyCodes = null
 }) {
   // 拿不到 币种 → 大账号 配置时直接拒绝，避免 MerchantId 整列留空静默输出。
   const merchantIdUsesCurrencyMapping = normalizeMappingTokens(mappingByField && mappingByField.MerchantId)[0]
@@ -244,12 +267,39 @@ function buildMappedRows({
     fullRows: sourceFullRows = null,
     fullHeaders: sourceFullHeaders = null,
     fullColumnOffset: sourceFullColumnOffset = 0,
-    longIntegerReadValues: sourceLongIntegerReadValues = null
+    longIntegerReadValues: sourceLongIntegerReadValues = null,
+    columnOffset: sourceColumnOffset = 0,
+    // v3.2.21：工作簿日期系统（1904 工作簿的日期序号加 1462 天换算）；CSV 等没有日期系统的按 1900（原行为）
+    excelDateSystem = '1900',
+    cellMarks: sourceCellMarks = null,
+    unwritableRanges: sourceUnwritableRanges = null,
+    // v3.2.21：读成无效数值的原生日期单元格原文（行号 → 物理列 → 原文），账单日期报错时显示原文
+    invalidDateTexts: sourceInvalidDateTexts = null,
+    // v3.2.21：工作簿的全部 sheet 名（主表读取时一并取得），跨 Sheet 回填核对来源 sheet 时复用，不再重开工作簿
+    sheetNames: workbookSheetNames = null,
+    // v3.2.21：各分段表头的整行（含模板表头范围以外的列），跨 Sheet 回填核对规则引用的列是否重名
+    headerRows: sourceHeaderRows = null,
+    headerColumnOffset: sourceHeaderColumnOffset = 0,
+    // v3.2.21：ODS 的工作表名与读取键（主表读取时按已载入的内容取得；不是 ODS 时为 null），跨 Sheet 回填核对来源 sheet
+    odsSheetEntries: workbookOdsSheetEntries,
+    // 网页表格、分隔符文本中的数值由读取库从显示文本推断（2026-09-25 按本机时区推断成带小数的序号，西半球时区读成前一天的
+    //   18 点等）：这类值不是原生日期序号，不按「取日期部分」处理（照旧按原值，无法识别时拒绝），不把交易记到前一天。
+    //   按读取时已知的格式判断（见 readers.js textContainerValuesInferred），不为此再读文件
+    textInferredValues = false
   } = readRowsWithMetadata(
     inputFilePath,
     expectedSourceHeaders,
+    // v3.2.21：跨 Sheet 回填只读逐格标记（includeCellMarks），区分真正的空单元格与读成空值的 Excel 错误值 / 公式，
+    //   不构造查重整行（按原文核对整张表开销大，只在启用重复账单过滤时做）
+    // 按工作簿日期系统换算日期（D12），1904 工作簿中的 ISO 日期单元格同口径读取
     // v3.2.21 B112：长数字按文件原文读取、CSV 数据行取 Excel 显示值（readers.js exactSourceText）
-    duplicateRowKeys ? { ...readOptions, includeFullRows: true, exactSourceText: true } : { ...readOptions, exactSourceText: true }
+    {
+      ...readOptions,
+      exactIsoDates: true,
+      exactSourceText: true,
+      ...(duplicateRowKeys ? { includeFullRows: true } : {}),
+      ...(crossSheetBackfillRule ? { includeCellMarks: true, onlyTargetSheet: true, includeHeaderRows: true } : {})
+    }
   );
   const sourceHeaders = sourceRows[0] || [];
   // v3.2.19 重复账单过滤：指纹按整行计算——源行与其所属分段的表头都含模板表头范围以外的列（模板没取的列如流水号
@@ -500,11 +550,6 @@ function buildMappedRows({
     return fields;
   }
 
-  // v3.2.19：原始账单预处理「过滤账单」——只保留命中过滤规则的源行（原始账单加工表），未命中的行不参与之后的
-  //   主映射、拆分/合并、合计行识别与各项统计；保留行的行号仍是源文件物理行号。规则字段不在源文件表头中时拒绝生成。
-  const preprocessed = applyPreprocessRowFilter(sourceRows, sourceRowNumbers, preprocessRowFilterRules, sourceIndexByField);
-  const { rows, rowNumbers } = preprocessed;
-
   const compiledBillSplitRowFilter = billSplitRowFilterRules
     ? compileBillSplitRowFilter(billSplitRowFilterRules, sourceIndexByField)
     : null;
@@ -596,6 +641,267 @@ function buildMappedRows({
     [item.id, extractFeatureValue(row[item.sourceIndex], item.rule)]
   )));
   let currentRowFeatureValues = new Map();
+
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」——在「过滤账单」之前，按配对值从同一工作簿的来源 sheet 回填待回填行的
+  //   空单元格；配不上的行移除（不进入之后的过滤、映射与统计）并记入 issues。查重指纹仍取读到的原始单元格
+  //   （fullSourceRowByNumber）。依赖特征值（账单日期区间提示按映射取日期），故放在特征值初始化之后。
+  const crossSheetBackfillContext = crossSheetBackfillRule ? resolveCrossSheetBackfillMappingContext() : null;
+  // 不能单独填写的区域（合并单元格、数组公式）：按列、按区间查询（见 createUnwritableCellLookup），不随账单追加而平方级
+  //   增长（逐行合并的大账单），也不按区域跨越的行数分配内存
+  const isUnwritableCell = createUnwritableCellLookup(sourceUnwritableRanges);
+  const crossSheetBackfill = applyCrossSheetBackfill({
+    rows: sourceRows,
+    rowNumbers: sourceRowNumbers,
+    sourceIndexByField,
+    rule: crossSheetBackfillRule,
+    readSourceSheet(sheetName) {
+      // 网页（HTML）格式的表格：读取库按显示文本推断类型，单元格原文（编号的前导零、日期写法）在配对前已丢失（00123 与 123
+      //   读成同一个数、09/10/2026 按月在前读成 9 月 10 日），无法按原值配对与回填，明确拒绝（只在确有待回填行时）
+      if (isHtmlWorkbookFile(inputFilePath)) {
+        throw new FileValidationError(
+          'FILE_READ',
+          `${CROSS_SHEET_BACKFILL_LABEL}：原始账单是网页（HTML）格式的表格，读取时会丢失单元格原文（如编号的前导零、日期写法），无法按原值配对和回填，请用 Excel 另存为 xlsx 后重新导入`
+        );
+      }
+      const sheetNames = Array.isArray(workbookSheetNames) ? workbookSheetNames : listSheetNames(inputFilePath);
+      // 内容为 ODS 时读取库的工作表键是表名属性原文（不解码字符引用，Cash & Bank 的键是 Cash &amp; Bank）：规则中的表名是
+      //   工作簿中看到的实际名称，按实际名称找到工作表，再用它的读取键读表（不按键直接比，避免字面名为 Cash &amp; Bank 的另一张表
+      //   被当成来源）。工作表与读取库的键对不上时无法确认，拒绝（第二十九轮）。其他格式的表名读取库已解码，按原名比对
+      const odsSheets = workbookOdsSheetEntries !== undefined ? workbookOdsSheetEntries : odsSheetNameEntries(inputFilePath);
+      let sheetKey = sheetName;
+      if (odsSheets) {
+        const keys = odsSheets.map((entry) => entry.key);
+        if (odsSheets.some((entry) => entry.ambiguous) || keys.length !== sheetNames.length
+          || keys.some((key, index) => key !== sheetNames[index])) {
+          throw new FileValidationError(
+            'FILE_READ',
+            `${CROSS_SHEET_BACKFILL_LABEL}：原始账单（ODS）的工作表名称无法核对，无法确认来源 Sheet，请用 Excel 另存为 xlsx 后重新导入`
+          );
+        }
+        const matched = odsSheets.filter((entry) => entry.name === sheetName);
+        sheetKey = matched.length === 1 ? matched[0].key : null;
+      } else if (!sheetNames.includes(sheetName)) {
+        sheetKey = null;
+      }
+      if (sheetKey === null) {
+        throw new FileValidationError('FILE_READ', `${CROSS_SHEET_BACKFILL_LABEL}：原始账单中没有名为「${sheetName}」的 Sheet`);
+      }
+      // 来源表就是模板读取的主表（如银行调整了 Sheet 顺序）：同表内另一笔同额交易会被当成来源，失去跨表依据，明确报错
+      const mainSheetName = readOptions && readOptions.sheetName ? readOptions.sheetName : sheetNames[0];
+      if (sheetKey === mainSheetName) {
+        throw new FileValidationError(
+          'FILE_READ',
+          `${CROSS_SHEET_BACKFILL_LABEL}：来源 Sheet「${sheetName}」就是模板读取的主表（第一个 Sheet），不能从主表自身回填，请核对 Sheet 顺序或规则设置`
+        );
+      }
+      // 来源 sheet 整张为空时不按「文件为空」报错，交给来源表头校验报出表名与所需字段
+      // 只解析来源 sheet（工作簿其余 sheet 不解析）
+      return readRowsWithMetadata(inputFilePath, [], {
+        sheetName: sheetKey, readGuard: readOptions && readOptions.readGuard, allowEmpty: true, exactIsoDates: true, onlyTargetSheet: true,
+        // 没有缓存结果的公式（含读取库读成 false 的布尔公式）按空值读取，不提供配对键或回填值
+        blankUncachedFormulas: true
+      });
+    },
+    excelDateSystem,
+    sourceFileName: path.basename(String(inputFilePath || '')),
+    // 会话内区分同名文件（不同目录下的 Statement.xlsx），告警展示时只取路径末尾足以区分的几级（见 main.js buildImportWarningDetailLines）
+    sourceFilePath: String(inputFilePath || ''),
+    // 规则引用的列按各分段表头的整行核对重名（模板只取连续的表头段，段外的同名列同样使规则无法确定指哪一列）；
+    //   不按表头定位时整行即全部列
+    mainHeaderRows: Array.isArray(sourceHeaderRows) ? sourceHeaderRows : [sourceHeaders],
+    mainHeaderColumnOffset: Array.isArray(sourceHeaderRows) ? sourceHeaderColumnOffset : sourceColumnOffset,
+    currencyCodes: Array.isArray(crossSheetBackfillCurrencyCodes)
+      ? crossSheetBackfillCurrencyCodes
+      : currencyMappings.map((mapping) => normalizeCell(mapping && mapping.englishCode).toUpperCase()),
+    // 读到的空值不是真正可填的空单元格（按物理单元格坐标判断）：返回 'unreadable'（Excel 错误值或公式，见 readers.js
+    //   collectSpecialCells 的逐格标记）、'unwritable'（合并单元格或数组公式中左上角以外的位置）或 ''
+    isUnreadableCell(rowNumber, columnIndex) {
+      const physicalColumn = sourceColumnOffset + columnIndex;
+      const rowMarks = sourceCellMarks instanceof Map ? sourceCellMarks.get(rowNumber) : null;
+      const mark = rowMarks ? rowMarks.get(physicalColumn) : null;
+      if (mark && typeof mark === 'object'
+        && (mark.excelError !== undefined || mark.unknownFormula !== undefined || mark.unknownValue !== undefined)) {
+        return 'unreadable';
+      }
+      return isUnwritableCell(rowNumber - 1, physicalColumn) ? 'unwritable' : '';
+    },
+    ...(crossSheetBackfillContext || {})
+  });
+  crossSheetBackfill.issues.forEach((issue) => issues.push(issue));
+
+  // v3.2.19：原始账单预处理「过滤账单」——只保留命中过滤规则的源行（原始账单加工表），未命中的行不参与之后的
+  //   主映射、拆分/合并、合计行识别与各项统计；保留行的行号仍是源文件物理行号。规则字段不在源文件表头中时拒绝生成。
+  const preprocessed = applyPreprocessRowFilter(
+    crossSheetBackfill.rows,
+    crossSheetBackfill.rowNumbers,
+    preprocessRowFilterRules,
+    sourceIndexByField
+  );
+  const { rows, rowNumbers } = preprocessed;
+
+  // 跨 Sheet 回填用到的映射口径：日期目标列（BillDate / ValueDate 所用源列，含拆分映射）、每行实际走的映射（主映射或
+  //   拆分映射，与主循环 rowUsesBillSplit 同一判定）对应的 BillDate 源列与币种列，以及不能回填的源列——发生额、余额、
+  //   币种、账户（MerchantId）所用的源列，含按正负号 / 按字段区分发生额、拆分行的收支 / 币种 / 金额列、拆分的正负号与
+  //   按字段区分发生额、费用账单公式用到的字段（金额与币种由银行原值决定，D10）。
+  // 按该行实际走的映射求发生额（含按字段区分发生额的条件、特征值取值、费用公式），与生成明细同一口径（v3.2.21）
+  function rowHasMappedAmount(row) {
+    const usesBillSplit = billSplitEnabled
+      && (!compiledBillSplitRowFilter || matchesBillSplitRowFilter(row, compiledBillSplitRowFilter));
+    if (usesBillSplit) {
+      return billSplitRows.some((splitRow) => {
+        const amounts = resolveBillSplitRowAmounts(row, splitRow);
+        return amounts.feeDivisionByZero
+          || hasEffectiveAmount(amounts.creditValue) || hasEffectiveAmount(amounts.debitValue);
+      });
+    }
+    // 主映射按映射后的收支值、用明细导出的同一零值 / 空值判定（如收入文本 `100.` 无法按数值解析，但明细照常导出这笔）
+    const amounts = resolveMainRowAmounts(row, extractRowFeatureValues(row));
+    return !isZeroOrBlankAmount(amounts.creditAmountValue) || !isZeroOrBlankAmount(amounts.debitAmountValue);
+  }
+
+  function resolveCrossSheetBackfillMappingContext() {
+    const billSplitMappingActive = billSplitEnabled && !billSplitReuseModuleMapping;
+    const collectSourceFields = (mappings, targetFields) => {
+      const fields = new Set();
+      mappings.forEach((mapping) => {
+        targetFields.forEach((targetField) => {
+          normalizeMappingTokens(mapping[targetField]).forEach((token) => {
+            if (token.startsWith(FIXED_FIELD_VALUE_PREFIX) || token === MERCHANT_ID_CURRENCY_ONLY_MARKER) return;
+            const featureFilterId = parseFeatureFilterToken(token);
+            if (featureFilterId !== null) {
+              const rawRule = featureFilters && featureFilters[featureFilterId];
+              const sourceField = rawRule ? normalizeFeatureFilterRule(rawRule, { name: normalizeCell(rawRule.name) }).sourceField : '';
+              if (sourceField) fields.add(sourceField);
+              return;
+            }
+            const logicValueFields = parseLogicValueToken(token);
+            if (logicValueFields !== null) {
+              logicValueFields.forEach((field) => fields.add(normalizeCell(field)));
+              return;
+            }
+            fields.add(token);
+          });
+        });
+      });
+      return fields;
+    };
+    const mainMapping = mappingByField || {};
+    const effectiveMappings = [mainMapping].concat(billSplitMappingActive ? [billSplitMappingByField] : []);
+    const excludedTargetFields = collectSourceFields(
+      effectiveMappings,
+      ['Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId']
+    );
+    const addExcluded = (field) => {
+      const normalized = normalizeCell(field);
+      if (normalized) excludedTargetFields.add(normalized);
+    };
+    addExcluded(signedAmountSourceField);
+    amountSplitRules.forEach((rule) => {
+      addExcluded(rule && rule.conditionField);
+      addExcluded(rule && rule.mappedField);
+    });
+    // 拆分行实际读取的列（与 expandBillSplitForRow、保存时 collectTemplateFieldReferences 同口径）：费用账单行不读 Credit，
+    //   费用公式生效时也不读 Debit（取公式字段）；Amount 列与保存时一样按生效处理。
+    const billSplitRowAmountFields = (splitRow) => {
+      const isFeeBill = Boolean(splitRow.isFeeBill);
+      if (isFeeBill && billSplitFeeFormula) return billSplitFeeFormula.map((item) => item && item.field);
+      return [isFeeBill ? '' : splitRow.creditSourceField, splitRow.debitSourceField];
+    };
+    billSplitRows.forEach((splitRow) => {
+      billSplitRowAmountFields(splitRow).forEach(addExcluded);
+      addExcluded(splitRow.currencySourceField);
+      addExcluded(splitRow.amountSourceField);
+    });
+    addExcluded(billSplitSignedField);
+    billSplitAmountRules.forEach((rule) => {
+      addExcluded(rule && rule.conditionField);
+      addExcluded(rule && rule.mappedField);
+    });
+
+    const currencyTokens = normalizeMappingTokens(mainMapping.Currency);
+    const mainCurrencyField = !selectedCurrency
+        && currencyTokens.length === 1
+        && !currencyTokens[0].startsWith(FIXED_FIELD_VALUE_PREFIX)
+        && parseFeatureFilterToken(currencyTokens[0]) === null
+        && parseLogicValueToken(currencyTokens[0]) === null
+        && sourceIndexByField.has(currencyTokens[0])
+      ? currencyTokens[0]
+      : '';
+    const mainBillDateFields = collectSourceFields([mainMapping], ['BillDate']);
+    const billSplitBillDateFields = billSplitMappingActive
+      ? collectSourceFields([billSplitMappingByField], ['BillDate'])
+      : mainBillDateFields;
+    const rowUsesBillSplitPath = (row) => billSplitEnabled
+      && (!compiledBillSplitRowFilter || matchesBillSplitRowFilter(row, compiledBillSplitRowFilter));
+    return {
+      dateTargetFields: collectSourceFields(effectiveMappings, ['BillDate', 'ValueDate']),
+      excludedTargetFields: Array.from(excludedTargetFields),
+      rowHasAmount: rowHasMappedAmount,
+      // 该行按实际映射求出的各笔收、支与余额（补币种前后比较：币种列同时决定收支方向、金额或余额时——如余额与币种取自
+      //   同一列「余额及币种」——补币种会改变银行原始交易或余额，按冲突跳过）
+      resolveRowAmounts: (row) => {
+        const usesBillSplit = rowUsesBillSplitPath(row);
+        const balanceMapping = usesBillSplit && billSplitMappingActive ? billSplitMappingByField.Balance : mainMapping.Balance;
+        const balance = sanitizeSignedAmountValue(resolveRawValueByMapping(balanceMapping, row));
+        if (usesBillSplit) {
+          return JSON.stringify([balance, billSplitRows.map((splitRow) => {
+            const amounts = resolveBillSplitRowAmounts(row, splitRow);
+            return [amounts.creditValue, amounts.debitValue, Boolean(amounts.feeDivisionByZero)];
+          })]);
+        }
+        const amounts = resolveMainRowAmounts(row, extractRowFeatureValues(row));
+        return JSON.stringify([balance, amounts.creditAmountValue, amounts.debitAmountValue, amounts.hasCreditAmount, amounts.hasDebitAmount]);
+      },
+      // 该行按主映射解析的账户号（回填 / 补币种前后比较）。按币种取大账号的模板由币种决定账号（补币种的目的），
+      //   用户选定账号或固定值时账号不随行变化，都不比较
+      resolveRowAccountKey: (row) => {
+        if (merchantIdUsesCurrencyMapping || selectedMerchantId) return '';
+        return normalizeCell(resolveRawValueByMapping(mainMapping.MerchantId, row, extractRowFeatureValues(row))).replace(/\s+/g, '');
+      },
+      // 账单自带的合计行（与映射循环同口径：按该行实际走的账单日期映射取值，或其特征值的筛选源单元格原文）
+      isSummaryRow: (row) => {
+        const billDateMapping = rowUsesBillSplitPath(row) && billSplitMappingActive
+          ? billSplitMappingByField.BillDate
+          : mainMapping.BillDate;
+        if (isStatementSummaryDateLabel(resolveDateRawValueByMapping(billDateMapping, row, extractRowFeatureValues(row)))) return true;
+        const billDateFeatureFilter = normalizeMappingTokens(billDateMapping)
+          .map((token) => activeFeatureFilterById.get(parseFeatureFilterToken(token)))
+          .find(Boolean);
+        return Boolean(billDateFeatureFilter && isStatementSummaryDateLabel(normalizeCell(row[billDateFeatureFilter.sourceIndex])));
+      },
+      // 该行账户号在账户管理中维护了「无币种时的币种」（computeMappedRow 的 Currency 兜底）时：与本表推断的币种不一致返回
+      //   'conflict'（补上本表币种会让兜底不再执行、静默改变该行的币种与余额分组，按冲突跳过）；一致且兜底会生效时返回
+      //   'account'（不补本表写法，如 usd，由兜底给出与同账户其他空币种行完全相同的值，余额分组不拆开）
+      resolveAccountCurrencyStatus: (row, sheetCurrency) => {
+        const merchantIdText = normalizeCell(resolveRawValueByMapping(mainMapping.MerchantId, row, extractRowFeatureValues(row)));
+        const accountOf = (key) => {
+          const mapping = key && Object.prototype.hasOwnProperty.call(accountMappingByBankId, key) ? accountMappingByBankId[key] : null;
+          return mapping && typeof mapping === 'object' && mapping.noCurrency && mapping.currency ? mapping : null;
+        };
+        // 兜底按只去首尾空白的账户号查找；MerchantId 解析去掉全部空白（如 `12 34` → `1234`），两种键都核对冲突
+        const fallbackAccount = accountOf(merchantIdText);
+        const merchantAccount = fallbackAccount || accountOf(merchantIdText.replace(/\s+/g, ''));
+        if (!merchantAccount) return '';
+        const inferred = resolveCurrencyValue(sheetCurrency, currencyMappings, { allowFuzzy: !merchantIdUsesCurrencyMapping }).value;
+        if (normalizeCell(inferred).toUpperCase() !== normalizeCell(merchantAccount.currency).toUpperCase()) return 'conflict';
+        return fallbackAccount ? 'account' : '';
+      },
+      // 走拆分时币种取自各拆分行，不补主映射币种列；route 标明该行走的映射（补币种后改走另一种映射时按冲突跳过）
+      resolveRowContext: (row) => (rowUsesBillSplitPath(row)
+        ? { route: 'bill-split', currencyField: '', billDateFields: billSplitBillDateFields }
+        : { route: 'main', currencyField: mainCurrencyField, billDateFields: mainBillDateFields }),
+      resolveRowBillDate: (row) => {
+        const mappingValue = rowUsesBillSplitPath(row) && billSplitMappingActive
+          ? billSplitMappingByField.BillDate
+          : mainMapping.BillDate;
+        const result = normalizeDateExportValue(
+          resolveDateRawValueByMapping(mappingValue, row, extractRowFeatureValues(row)),
+          { dateParseOrder, excelDateSystem }
+        );
+        return result.date ? formatIsoDate(result.date) : '';
+      }
+    };
+  }
 
   if (amountSplitEnabled) {
     amountSplitRules.forEach((rule) => {
@@ -737,14 +1043,14 @@ function buildMappedRows({
     });
   }
 
-  function resolveRawValueByMapping(mappingValue, row) {
+  function resolveRawValueByMapping(mappingValue, row, featureValues = currentRowFeatureValues) {
     const mappingTokens = normalizeMappingTokens(mappingValue);
 
     if (!mappingTokens.length) {
       return '';
     }
 
-    return resolveMappedPartsByTokens(mappingTokens, row)
+    return resolveMappedPartsByTokens(mappingTokens, row, featureValues)
       .filter((value) => normalizeCell(value) !== '')
       .join('');
   }
@@ -756,7 +1062,15 @@ function buildMappedRows({
       return '';
     }
 
-    return resolveMappedPartsByTokens(mappingTokens, row, featureValues)
+    const parts = resolveMappedPartsByTokens(mappingTokens, row, featureValues);
+    // v3.2.21：单列映射到带时分的 Excel 日期序号（如 46290.5，含按原文换算的 ISO 日期单元格）时取日期部分（拼成字符串后
+    //   原先只接受整数序号，带时分的日期被当成无效）。只限 normalizeDateExportValue 认作序号的范围（大于 365、小于 200000），
+    //   范围外的小数（如 260925.5、20260925.5）照旧按原值处理，不截成六位 / 八位日期写法
+    if (!textInferredValues && parts.length === 1 && typeof parts[0] === 'number' && Number.isFinite(parts[0])
+      && !Number.isInteger(parts[0]) && parts[0] > 365 && parts[0] < 200000) {
+      return String(Math.floor(parts[0]));
+    }
+    return parts
       .map((value) => normalizeCell(value))
       .filter((value) => value !== '')
       .join(' ');
@@ -794,6 +1108,18 @@ function buildMappedRows({
       }
     }
     return '';
+  }
+
+  // 账单日期无效时报错显示的值：读成无效数值的原生日期单元格换回原文（只用于显示，不参与日期识别）
+  function displayInvalidDateValue(mappingValue, row, sourceRowNumber, rawDateValue) {
+    const texts = sourceInvalidDateTexts && sourceInvalidDateTexts.get(sourceRowNumber);
+    if (!texts || !Array.isArray(row)) return rawDateValue;
+    const displayRow = row.map((value, index) => (
+      typeof value === 'number' && Number.isNaN(value) && texts.has(sourceColumnOffset + index)
+        ? texts.get(sourceColumnOffset + index)
+        : value
+    ));
+    return resolveDateRawValueByMapping(mappingValue, displayRow) || rawDateValue;
   }
 
   function readSourceCell(row, fieldName) {
@@ -876,6 +1202,139 @@ function buildMappedRows({
     return indexes;
   }
 
+  // 主映射路径的收支（无副作用；主循环处理一行期间按 B112 记下读到的长数字，见 noteSourceCell）：按字段区分发生额 / 按正负号 / Credit、Debit 映射（含特征值等条件取值）。
+  //   主循环与跨 Sheet 回填判断跳过行是否带发生额共用（v3.2.21）。
+  function resolveMainRowAmounts(row, featureValues) {
+    // 只读实际生效的发生额取值（按字段区分发生额 > 按正负号拆分 > Credit / Debit 映射；v3.2.21 B112：不记未生效映射的长数字）
+    const signedAmountValue = !amountSplitEnabled && signedAmountSourceField
+      ? splitSignedAmountValue(resolveRawValueByMapping(signedAmountSourceField, row, featureValues))
+      : null;
+    const usesDirectAmountMapping = !amountSplitEnabled && !signedAmountValue;
+    const directCreditAmountRaw = usesDirectAmountMapping
+      ? resolveRawValueByMapping(mappingByField['Credit Amount'], row, featureValues)
+      : '';
+    const directDebitAmountRaw = usesDirectAmountMapping
+      ? resolveRawValueByMapping(mappingByField['Debit Amount'], row, featureValues)
+      : '';
+
+    let creditAmountValue;
+    let debitAmountValue;
+    let hasCreditAmount;
+    let hasDebitAmount;
+
+    if (amountSplitEnabled) {
+      let creditRawFromRule = '';
+      let debitRawFromRule = '';
+      let matchedCreditRule = false;
+      let matchedDebitRule = false;
+
+      amountSplitRules.forEach((rule) => {
+        const conditionField = normalizeCell(rule.conditionField);
+        const mappedField = normalizeCell(rule.mappedField);
+        const targetField = normalizeCell(rule.targetField);
+        const conditionValue = String(rule.conditionValue ?? '');
+        const conditionIndex = sourceIndexByField.get(conditionField);
+        const mappedIndex = sourceIndexByField.get(mappedField);
+
+        if (conditionIndex === undefined || mappedIndex === undefined) {
+          return;
+        }
+
+        const sourceCell = row[conditionIndex];
+
+        if (!matchAmountSplitConditionValue(sourceCell, conditionValue)) {
+          return;
+        }
+
+        // 同一方向只取第一条命中规则的金额（v3.2.21 B112：只记实际取用的列）
+        if (targetField === 'Credit Amount' && !matchedCreditRule) {
+          creditRawFromRule = noteSourceCell(mappedField, row[mappedIndex]);
+          matchedCreditRule = true;
+        } else if (targetField === 'Debit Amount' && !matchedDebitRule) {
+          debitRawFromRule = noteSourceCell(mappedField, row[mappedIndex]);
+          matchedDebitRule = true;
+        }
+      });
+
+      creditAmountValue = matchedCreditRule ? sanitizeAmountValue(creditRawFromRule) : '';
+      debitAmountValue = matchedDebitRule ? sanitizeAmountValue(debitRawFromRule) : '';
+      hasCreditAmount = matchedCreditRule && hasEffectiveAmount(creditRawFromRule);
+      hasDebitAmount = matchedDebitRule && hasEffectiveAmount(debitRawFromRule);
+    } else {
+      creditAmountValue = signedAmountValue
+        ? signedAmountValue.creditAmount
+        : sanitizeAmountValue(directCreditAmountRaw);
+      debitAmountValue = signedAmountValue
+        ? signedAmountValue.debitAmount
+        : sanitizeAmountValue(directDebitAmountRaw);
+      hasCreditAmount = signedAmountValue
+        ? signedAmountValue.hasCreditAmount
+        : hasEffectiveAmount(directCreditAmountRaw);
+      hasDebitAmount = signedAmountValue
+        ? signedAmountValue.hasDebitAmount
+        : hasEffectiveAmount(directDebitAmountRaw);
+    }
+
+    return { creditAmountValue, debitAmountValue, hasCreditAmount, hasDebitAmount };
+  }
+
+  // 拆分行的收支（无副作用，不记提示）：费用公式 / 按正负号 / 按字段区分发生额 / 行级 Credit、Debit 映射，费用账单行只有支出。
+  //   expandBillSplitForRow 与跨 Sheet 回填判断跳过行是否带发生额共用（v3.2.21）。
+  function resolveBillSplitRowAmounts(originalRow, splitRow) {
+    const hasSignedAmount = Boolean(billSplitSignedField);
+    const hasAmountRules = billSplitAmountRules.length > 0;
+    const useAmountSourceField = hasSignedAmount || hasAmountRules;
+    let creditValue = '';
+    let debitValue = '';
+    let feeDivisionByZero = false;
+    // 指定账单实现功能：判断是否有指定、当前行是否被指定
+    const hasSignedTargets = billSplitSignedTargetSeqNos.length > 0;
+    const hasByFieldTargets = billSplitByFieldTargetSeqNos.length > 0;
+    const isTargetedBySigned = hasSignedTargets && billSplitSignedTargetSeqNos.includes(splitRow.seqNo);
+    const isTargetedByField = hasByFieldTargets && billSplitByFieldTargetSeqNos.includes(splitRow.seqNo);
+
+    // v3.2.19：费用账单行只有支出；启用特殊取值时 Debit 取公式结果，优先于副区域规则与行级映射。
+    const isFeeBillRow = Boolean(splitRow.isFeeBill);
+
+    if (isFeeBillRow && billSplitFeeFormula) {
+      const fee = evaluateFeeAmountFormula(billSplitFeeFormula, (field) => readSourceCell(originalRow, field));
+      feeDivisionByZero = Boolean(fee.divisionByZero);
+      debitValue = fee.amount;
+    } else if (isTargetedBySigned && hasSignedAmount) {
+      // 该行被"按正负号拆分的发生额"指定
+      const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
+      creditValue = split.creditAmount;
+      debitValue = split.debitAmount;
+    } else if (isTargetedByField && hasAmountRules) {
+      // 该行被"按字段区分发生额"指定，从规则的 mappedField 读取金额
+      const firstRule = billSplitAmountRules.find((r) => r.mappedField);
+      const result = evaluateBillSplitAmountRulesForRow(originalRow, firstRule ? firstRule.mappedField : '', { debitOnly: isFeeBillRow });
+      creditValue = result.credit;
+      debitValue = result.debit;
+    } else if (useAmountSourceField && !hasSignedTargets && !hasByFieldTargets) {
+      // 副区域有值但没有勾选"指定账单"→ 所有行使用副区域逻辑（旧行为）
+      if (hasSignedAmount) {
+        const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
+        creditValue = split.creditAmount;
+        debitValue = split.debitAmount;
+      } else {
+        const firstRule = billSplitAmountRules.find((r) => r.mappedField);
+        const result = evaluateBillSplitAmountRulesForRow(originalRow, firstRule ? firstRule.mappedField : '', { debitOnly: isFeeBillRow });
+        creditValue = result.credit;
+        debitValue = result.debit;
+      }
+    } else {
+      // 未被指定的行（有指定但该行不在列表），使用行级 Credit/Debit 直接映射
+      // 费用账单行只有支出（下方清空收入），不读收入字段
+      creditValue = isFeeBillRow ? '' : sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
+      debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
+    }
+    if (isFeeBillRow) {
+      creditValue = '';
+    }
+    return { creditValue, debitValue, feeDivisionByZero };
+  }
+
   function expandBillSplitForRow(originalRow, baseMappedRow, sourceRowNumber) {
     // Compute the N expanded rows for one source row.
     // baseMappedRow already contains all non-amount fields from main mappings (reuseModule = true default).
@@ -900,9 +1359,6 @@ function buildMappedRows({
     const draweeCardNoMappingValue = effectiveMapping['Drawee CardNo'];
     const payeeCardNoMappingValue = effectiveMapping['Payee CardNo'] || effectiveMapping['Payee Cardno'];
 
-    const hasSignedAmount = Boolean(billSplitSignedField);
-    const hasAmountRules = billSplitAmountRules.length > 0;
-    const useAmountSourceField = hasSignedAmount || hasAmountRules;
     // v3.2.19：根据字段值过滤账单时同一份账单里拆分行与主映射行并存，拆分行的币种也按币种映射表规范化
     //   （与主映射同一口径），避免同一币种输出成「人民币」与 CNY 两种写法、余额按币种分组时拆成两组。
     //   未开启过滤的拆分模板保持取原值。同一源行内同一字段同一原值只规范化、只记提示一次。
@@ -942,66 +1398,23 @@ function buildMappedRows({
           return value;
         };
         const rawCurrencyValue = normalizeCell(readForTarget(currencyTargetIndex, () => readSourceCell(originalRow, splitRow.currencySourceField)));
-        let creditValue = '';
-        let debitValue = '';
-
-        // 指定账单实现功能：判断是否有指定、当前行是否被指定
-        const hasSignedTargets = billSplitSignedTargetSeqNos.length > 0;
-        const hasByFieldTargets = billSplitByFieldTargetSeqNos.length > 0;
-        const isTargetedBySigned = hasSignedTargets && billSplitSignedTargetSeqNos.includes(splitRow.seqNo);
-        const isTargetedByField = hasByFieldTargets && billSplitByFieldTargetSeqNos.includes(splitRow.seqNo);
-
-        // v3.2.19：费用账单行只有支出；启用特殊取值时 Debit 取公式结果，优先于副区域规则与行级映射。
+        // v3.2.19：费用账单行只有支出（收支由 resolveBillSplitRowAmounts 计算）；费用账单行的字段映射特殊处理见下方
         const isFeeBillRow = Boolean(splitRow.isFeeBill);
 
         // v3.2.21 B112：发生额读到的长数字另记（amountCells），合并行汇总组内各子行的发生额来源
         const amountCells = new Map();
-        captureCells(amountCells, () => {
-          if (isFeeBillRow && billSplitFeeFormula) {
-            const fee = evaluateFeeAmountFormula(billSplitFeeFormula, (field) => readSourceCell(originalRow, field));
-            if (fee.divisionByZero) {
-              currentRowFeeFormulaDivisionByZero = true;
-            }
-            debitValue = fee.amount;
-          } else if (isTargetedBySigned && hasSignedAmount) {
-            // 该行被"按正负号拆分的发生额"指定
-            const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
-            creditValue = split.creditAmount;
-            debitValue = split.debitAmount;
-          } else if (isTargetedByField && hasAmountRules) {
-            // 该行被"按字段区分发生额"指定，从规则的 mappedField 读取金额
-            const firstRule = billSplitAmountRules.find((r) => r.mappedField);
-            const result = evaluateBillSplitAmountRulesForRow(originalRow, firstRule ? firstRule.mappedField : '', { debitOnly: isFeeBillRow });
-            creditValue = result.credit;
-            debitValue = result.debit;
-          } else if (useAmountSourceField && !hasSignedTargets && !hasByFieldTargets) {
-            // 副区域有值但没有勾选"指定账单"→ 所有行使用副区域逻辑（旧行为）
-            if (hasSignedAmount) {
-              const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
-              creditValue = split.creditAmount;
-              debitValue = split.debitAmount;
-            } else {
-              const firstRule = billSplitAmountRules.find((r) => r.mappedField);
-              const result = evaluateBillSplitAmountRulesForRow(originalRow, firstRule ? firstRule.mappedField : '', { debitOnly: isFeeBillRow });
-              creditValue = result.credit;
-              debitValue = result.debit;
-            }
-          } else {
-            // 未被指定的行（有指定但该行不在列表），使用行级 Credit/Debit 直接映射
-            // 费用账单行只有支出（下方清空收入），不读收入字段
-            creditValue = isFeeBillRow ? '' : sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
-            debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
-          }
-        });
+        const splitAmounts = captureCells(amountCells, () => resolveBillSplitRowAmounts(originalRow, splitRow));
         if (currentRowUnverifiedCells) mergeCellMap(amountCells, currentRowUnverifiedCells);
         if (cellsByTarget && amountCells.size) {
           [creditTargetIndex, debitTargetIndex].filter((index) => index >= 0).forEach((index) => {
             cellsByTarget.set(index, mergeCellMap(amountCells, mergeCellMap(cellsByTarget.get(index), new Map())));
           });
         }
-        if (isFeeBillRow) {
-          creditValue = '';
+        if (splitAmounts.feeDivisionByZero) {
+          currentRowFeeFormulaDivisionByZero = true;
         }
+        const creditValue = splitAmounts.creditValue;
+        const debitValue = splitAmounts.debitValue;
 
         // 静默过滤：credit 和 debit 都为 0（或空）的拆分行直接丢弃，不输出也不报错
         const creditNum = parseNumericValue(creditValue);
@@ -1271,71 +1684,12 @@ function buildMappedRows({
       billSplitPathRowCount += 1;
     }
     currentRowFeatureValues = extractRowFeatureValues(row);
-    // 只读实际生效的发生额取值（按字段区分发生额 > 按正负号拆分 > Credit / Debit 映射；v3.2.21 B112：不记未生效映射的长数字）
-    const signedAmountValue = !amountSplitEnabled && signedAmountSourceField
-      ? splitSignedAmountValue(resolveRawValueByMapping(signedAmountSourceField, row))
-      : null;
-    const usesDirectAmountMapping = !amountSplitEnabled && !signedAmountValue;
-    const directCreditAmountRaw = usesDirectAmountMapping ? resolveRawValueByMapping(mappingByField['Credit Amount'], row) : '';
-    const directDebitAmountRaw = usesDirectAmountMapping ? resolveRawValueByMapping(mappingByField['Debit Amount'], row) : '';
-
-    let creditAmountValue;
-    let debitAmountValue;
-    let hasCreditAmount;
-    let hasDebitAmount;
-
-    if (amountSplitEnabled) {
-      let creditRawFromRule = '';
-      let debitRawFromRule = '';
-      let matchedCreditRule = false;
-      let matchedDebitRule = false;
-
-      amountSplitRules.forEach((rule) => {
-        const conditionField = normalizeCell(rule.conditionField);
-        const mappedField = normalizeCell(rule.mappedField);
-        const targetField = normalizeCell(rule.targetField);
-        const conditionValue = String(rule.conditionValue ?? '');
-        const conditionIndex = sourceIndexByField.get(conditionField);
-        const mappedIndex = sourceIndexByField.get(mappedField);
-
-        if (conditionIndex === undefined || mappedIndex === undefined) {
-          return;
-        }
-
-        const sourceCell = row[conditionIndex];
-
-        if (!matchAmountSplitConditionValue(sourceCell, conditionValue)) {
-          return;
-        }
-
-        // 同一方向只取第一条命中规则的金额（v3.2.21 B112：只记实际取用的列）
-        if (targetField === 'Credit Amount' && !matchedCreditRule) {
-          creditRawFromRule = noteSourceCell(mappedField, row[mappedIndex]);
-          matchedCreditRule = true;
-        } else if (targetField === 'Debit Amount' && !matchedDebitRule) {
-          debitRawFromRule = noteSourceCell(mappedField, row[mappedIndex]);
-          matchedDebitRule = true;
-        }
-      });
-
-      creditAmountValue = matchedCreditRule ? sanitizeAmountValue(creditRawFromRule) : '';
-      debitAmountValue = matchedDebitRule ? sanitizeAmountValue(debitRawFromRule) : '';
-      hasCreditAmount = matchedCreditRule && hasEffectiveAmount(creditRawFromRule);
-      hasDebitAmount = matchedDebitRule && hasEffectiveAmount(debitRawFromRule);
-    } else {
-      creditAmountValue = signedAmountValue
-        ? signedAmountValue.creditAmount
-        : sanitizeAmountValue(directCreditAmountRaw);
-      debitAmountValue = signedAmountValue
-        ? signedAmountValue.debitAmount
-        : sanitizeAmountValue(directDebitAmountRaw);
-      hasCreditAmount = signedAmountValue
-        ? signedAmountValue.hasCreditAmount
-        : hasEffectiveAmount(directCreditAmountRaw);
-      hasDebitAmount = signedAmountValue
-        ? signedAmountValue.hasDebitAmount
-        : hasEffectiveAmount(directDebitAmountRaw);
-    }
+    const {
+      creditAmountValue,
+      debitAmountValue,
+      hasCreditAmount,
+      hasDebitAmount
+    } = resolveMainRowAmounts(row, currentRowFeatureValues);
 
     const sourceRowNumber = rowNumbers[rowIndex + 1] || rowIndex + 2;
 
@@ -1427,9 +1781,9 @@ function buildMappedRows({
 
         if (targetField === 'BillDate' || targetField === 'ValueDate') {
           const rawDateValue = resolveDateRawValueByMapping(mappingValue, row);
-          const normalizedDateValue = normalizeDateExportValue(rawDateValue, { dateParseOrder }).value;
+          const normalizedDateValue = normalizeDateExportValue(rawDateValue, { dateParseOrder, excelDateSystem }).value;
           if (targetField === 'BillDate' && !normalizedDateValue && rawDateValue) {
-            invalidBillDateBySourceRow.set(sourceRowNumber, maskRestoredLongIntegers(rawDateValue));
+            invalidBillDateBySourceRow.set(sourceRowNumber, maskRestoredLongIntegers(displayInvalidDateValue(mappingValue, row, sourceRowNumber, rawDateValue)));
           }
           return normalizedDateValue;
         }
@@ -1807,11 +2161,53 @@ function buildMappedRows({
         .filter(({ row }) => {
           const featureValues = extractRowFeatureValues(row);
           return billDateMappings.some((mappingValue) => Boolean(
-            normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row, featureValues), { dateParseOrder }).value
+            normalizeDateExportValue(
+              resolveDateRawValueByMapping(mappingValue, row, featureValues),
+              { dateParseOrder, excelDateSystem }
+            ).value
           ));
         })
         .map(({ rowNumber }) => rowNumber)
     };
+    // v3.2.21：被过滤掉、带发生额的行（按该行实际走的映射求发生额，不看账单日期）。多账户分段的直接匹配窗口以这些行为界：
+    //   被过滤的说明行（如带账期日期和下一段账号、收支为空的行）不截断窗口，仍可作为下一段账号的候选；日期为空但带发生额的
+    //   被过滤行仍属于上一段，其中的账号不当成下一段账号（桥接识别沿用上面按账单日期的界线）
+    mappedRows.preprocessRowFilterStats.droppedAmountRowNumbers = preprocessed.droppedRows
+      .filter(({ row }) => rowHasMappedAmount(row))
+      .map(({ rowNumber }) => rowNumber);
+  }
+
+  if (crossSheetBackfill.enabled) {
+    // v3.2.21：跨 Sheet 回填统计（导入提示）与补丁（导出明细时写出回填后的原始账单，见 cross-sheet-backfill-writer.js）
+    // skippedTransactionRowNumbers：因未能回填而跳过、但带发生额（即本会作为交易行）的源行号。多账户分段文件识别下一段
+    //   表头前的账号时，与「过滤账单」过滤掉的交易行一样仍算作上一段的交易（main.js finalizeBigAccountRecognitionBasis），
+    //   避免其中的账号被当成下一段的账号；不带发生额的行（如分段之间的账号说明行）不计入。
+    const rowHasAmount = crossSheetBackfillContext && typeof crossSheetBackfillContext.rowHasAmount === 'function'
+      ? crossSheetBackfillContext.rowHasAmount
+      : () => false;
+    mappedRows.crossSheetBackfillStats = {
+      ...crossSheetBackfill.stats,
+      sourceSheetName: crossSheetBackfill.sourceSheetName || '',
+      skippedTransactionRowNumbers: crossSheetBackfill.skippedRows
+        .filter(({ row }) => rowHasAmount(row))
+        .map(({ rowNumber }) => rowNumber)
+    };
+    mappedRows.crossSheetBackfillPatches = crossSheetBackfill.patches;
+    if (crossSheetBackfill.patches.length) {
+      // 写出回填后的原始账单所需：主表名、物理列偏移、模板日期顺序，以及源文件指纹（导出前重算，不一致时不写出）。
+      //   指纹在同一读取守卫内计算：导入确认后文件有变化时与读取一样拒绝。
+      const readGuard = readOptions && readOptions.readGuard;
+      const token = readGuard && typeof readGuard.beforeRead === 'function' ? readGuard.beforeRead(inputFilePath) : undefined;
+      const fingerprint = computeFileFingerprint(inputFilePath);
+      if (readGuard && typeof readGuard.afterRead === 'function') readGuard.afterRead(token, inputFilePath);
+      mappedRows.crossSheetBackfillSource = {
+        mainSheetName: (Array.isArray(workbookSheetNames) ? workbookSheetNames : listSheetNames(inputFilePath))[0] || '',
+        columnOffset: sourceColumnOffset,
+        dateParseOrder,
+        size: fingerprint.size,
+        sha256: fingerprint.sha256
+      };
+    }
   }
 
   return mappedRows;
@@ -1819,6 +2215,10 @@ function buildMappedRows({
 
 // v3.2.19：原始账单预处理「过滤账单」。rows[0] 为表头；rowNumbers 与 rows 平行（缺失时按 下标 + 1 回落，同主循环口径）。
 // 没有规则时原样返回。
+function formatIsoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function applyPreprocessRowFilter(sourceRows, sourceRowNumbers, rules, sourceIndexByField) {
   const totalRows = sourceRows.length > 0 ? sourceRows.length - 1 : 0;
   if (!Array.isArray(rules) || rules.length === 0) {
@@ -1923,6 +2323,24 @@ function buildDetailExportRows(rows) {
   return exportRows;
 }
 
+// 是否至少有一行会写入明细：与 buildDetailExportRows 同一判定（收、支两列都在时恰有一个不为空或 0），找到第一行即返回，
+//   不复制行（v3.2.21 跨 Sheet 回填按此决定是否导出回填后的原始账单）。
+//   includeBothAmounts：收、支同时有值的行（生成明细时按「同时有值」报错）也算——判定交易是否全部被回填跳过时用，这类行
+//   留给生成阶段报出原有的校验错误与行号，不当成「没有交易」
+function hasDetailExportRow(rows, { includeBothAmounts = false } = {}) {
+  if (!Array.isArray(rows) || rows.length < 2) return false;
+  const header = Array.isArray(rows[0]) ? rows[0].map((fieldName) => normalizeCell(fieldName)) : [];
+  const creditIndex = header.indexOf('Credit Amount');
+  const debitIndex = header.indexOf('Debit Amount');
+  const columns = { hasCredit: creditIndex >= 0, hasDebit: debitIndex >= 0 };
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = Array.isArray(rows[index]) ? rows[index] : [];
+    if (isDetailExportAmountRow(row[creditIndex], row[debitIndex], columns)) return true;
+    if (includeBothAmounts && !isZeroOrBlankAmount(row[creditIndex]) && !isZeroOrBlankAmount(row[debitIndex])) return true;
+  }
+  return false;
+}
+
 function writeWorkbookRows({ rows, outputFilePath, sheetName = 'COMMON' }) {
   return writeWorkbookRowsInternal(
     { rows, outputFilePath, sheetName },
@@ -1993,6 +2411,7 @@ module.exports = {
   buildExpectedHeaderCandidates,
   buildMappedRows,
   buildDetailExportRows,
+  hasDetailExportRow,
   compileRegexLiteral,
   FEATURE_FILTER_FIELD_TOKEN_PREFIX,
   FileValidationError,
@@ -2023,6 +2442,16 @@ module.exports = {
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   normalizeRowFilterRules,
   validateRowFilterRules,
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」
+  collectCrossSheetBackfillMainFields,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule,
+  allocateCrossSheetBackfillOutputPaths,
+  computeBufferFingerprint,
+  computeFileFingerprint,
+  readFingerprintedFile,
+  writeCrossSheetBackfillWorkbook,
   normalizeDateExportValue,
   describeDuplicateKeeperReplacementConflicts,
   dropDuplicateSourceRows,

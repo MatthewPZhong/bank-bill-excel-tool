@@ -125,8 +125,9 @@ test('预处理：只保留命中规则的源行，行号仍为源文件物理�
   const mapped = mapFile(filePath);
   assert.deepEqual(outputs(mapped), [['USD', '100', '', '甲'], ['USD', '', '30', '丙']]);
   assert.deepEqual(mapped.rowMetas.map((meta) => meta.sourceRowNumber), [2, 4]);
-  // 被过滤掉、账单日期可识别的行记为交易行（多账户分段识别账号时用作上一段的界线）
-  assert.deepEqual(mapped.preprocessRowFilterStats, { enabled: true, totalRows: 4, keptRows: 2, droppedTransactionRowNumbers: [3, 5] });
+  // 被过滤掉、账单日期可识别的行记为交易行（多账户分段识别账号时用作上一段的界线）；其中带发生额的另记
+  //   droppedAmountRowNumbers（v3.2.21：直接匹配窗口只以这些行为界）
+  assert.deepEqual(mapped.preprocessRowFilterStats, { enabled: true, totalRows: 4, keptRows: 2, droppedTransactionRowNumbers: [3, 5], droppedAmountRowNumbers: [3, 5] });
 
   // 未下发规则：全部行照常输出，不带统计
   const unfiltered = mapFile(filePath, { preprocessRowFilterRules: null });
@@ -151,7 +152,7 @@ test('预处理：字段运算过滤；提示中的行号为物理行号；全�
   );
   const none = mapFile(filePath, { preprocessRowFilterRules: [rule(['类型', '等于', '不存在'])] });
   assert.equal(none.length, 1);
-  assert.deepEqual(none.preprocessRowFilterStats, { enabled: true, totalRows: 3, keptRows: 0, droppedTransactionRowNumbers: [2, 3, 4] });
+  assert.deepEqual(none.preprocessRowFilterStats, { enabled: true, totalRows: 3, keptRows: 0, droppedTransactionRowNumbers: [2, 3, 4], droppedAmountRowNumbers: [2, 3, 4] });
   // 账单日期无法识别的被过滤行（如分段之间的「账号：…」说明行）不算交易行
   const preamble = writeXlsx(createTempDir(t), [
     ['2026-11-01', '交易', 'USD', '100', '', '', '甲'],

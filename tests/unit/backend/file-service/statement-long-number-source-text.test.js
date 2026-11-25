@@ -1076,7 +1076,13 @@ test('余额方式为「无」或「通过发生额计算」时，拆分映射�
   assert.deepEqual(issueTargets(generate('余额', { Balance: '参考号' })), [['参考号', ['Balance']]]);
 });
 
-test('XLSX：工作簿关系文件含注释、或同一关系 Id 有多条有效关系时不还原并提示，不把另一张表的流水号写进当前表', async (t) => {
+// 跨 Sheet 回填（spec changes/v3.2.21/feat/cross-sheet-backfill/spec.md D12、第三十四轮审查）起，工作簿结构无法确认读取库读到的是哪张表时
+//   整份拒绝，提示用 Excel 另存后重新导入（原先只不还原长数字、按无法核对提示，其余照常导入）：
+//   注释等标记中藏有 <sheet> / <Relationship>、生效的关系 Id 重复时按结构不明拒绝；定位不到目标表的原文时按无法定位拒绝
+const STRUCTURE_AMBIGUOUS = { code: 'FILE_READ', message: /工作簿结构中有被注释的工作表或关系声明（或关系编号重复）/ };
+const SHEET_NOT_LOCATED = { code: 'FILE_READ', message: /无法定位工作表「Sheet1」的原文/ };
+
+test('XLSX：工作簿关系文件注释里有旧关系、或同一关系 Id 有多条有效关系时整份拒绝，不按读取库读到的表导入', async (t) => {
   const dir = createTempDir(t);
   const WORKSHEET_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
   // 两张表同一位置的流水号舍入为同一数值（9007199254740996），数值核对发现不了串表
@@ -1103,15 +1109,13 @@ test('XLSX：工作簿关系文件含注释、或同一关系 Id 有多条有效
   const staleRelation = `<Relationship Id="rId1" Type="${WORKSHEET_TYPE}" Target="worksheets/sheet2.xml"/>`;
   // 关系文件含注释（B133：读取库不跳过注释，无法证明两边读的是同一张表）：不还原并提示
   const commented = await build('commented-rels.xlsx', (rels) => rels.replace('<Relationship ', `<!-- ${staleRelation} --><Relationship `));
-  const mapped = map(commented);
-  assert.deepEqual(mapped.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['100'], '读取库读的是第一张表');
-  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740996']);
-  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
-
+  assert.throws(() => map(commented), STRUCTURE_AMBIGUOUS, '注释里的旧关系');
   const duplicated = await build('duplicated-rels.xlsx', (rels) => rels.replace('<Relationship ', `${staleRelation}<Relationship `));
-  const unverified = map(duplicated);
-  assert.deepEqual(identifiers(unverified).map(([serial]) => String(serial)), ['9007199254740996']);
-  assert.deepEqual(longNumberIssues(unverified).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+  assert.throws(() => map(duplicated), STRUCTURE_AMBIGUOUS, '关系 Id 重复');
+  // 对照：关系文件没有旧关系时照常还原
+  const plain = map(await build('plain-rels.xlsx', (rels) => rels));
+  assert.deepEqual(identifiers(plain).map(([serial]) => String(serial)), ['9007199254740996']);
+  assert.deepEqual(longNumberIssues(plain), []);
 });
 
 test('XLSX：公式单元格的 <v> 是计算结果的缓存，不当作原文还原，按无法核对提示（含共享公式）', async (t) => {
@@ -1221,9 +1225,10 @@ test('费用账单覆盖的 ValueDate 取自长数字源列、规范化后为空
   assert.deepEqual(longNumberIssues(asAmount).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['备用号']]);
 });
 
-// release 审查：<sheet> 上另带扩展属性（如 custom:id）时，读取库按属性本地名取后一个 id，无法唯一确认读的是哪张表：
-//   不还原并提示（两表同一位置的数值舍入后相等，数值核对发现不了串表）；关系属性换用其他前缀、但绑定到关系命名空间时照常还原
-test('XLSX：<sheet> 的关系属性无法唯一确认（另带扩展 :id 属性）时不还原并提示；其他前缀绑定到关系命名空间时照常还原', async (t) => {
+// release 审查：<sheet> 上另带扩展属性（如 custom:id）时，读取库按属性本地名取后一个 id，无法唯一确认读的是哪张表（两表同一位置的
+//   数值舍入后相等，数值核对发现不了串表）；关系属性的前缀没有绑定到关系命名空间时同样无法确认。跨 Sheet 回填起定位不到工作表原文时
+//   整份拒绝（见上方 SHEET_NOT_LOCATED）；关系属性换用其他前缀、但绑定到关系命名空间时照常还原
+test('XLSX：<sheet> 的关系属性无法唯一确认（另带扩展 :id 属性、前缀未绑定）时整份拒绝；其他前缀绑定到关系命名空间时照常还原', async (t) => {
   const dir = createTempDir(t);
   const build = async (fileName, transformWorkbook) => {
     const workbook = XLSX.utils.book_new();
@@ -1244,28 +1249,27 @@ test('XLSX：<sheet> 的关系属性无法唯一确认（另带扩展 :id 属性
     fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
     return filePath;
   };
-  const extended = map(await build('extension-id.xlsx', (xml) => xml
+  const extended = await build('extension-id.xlsx', (xml) => xml
     .replace('<workbook ', '<workbook xmlns:custom="urn:example:custom" ')
-    .replace('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" custom:id="rId2" r:id="rId1"/>')));
-  assert.deepEqual(extended.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['100'], '读取库读的是第一张表');
-  assert.deepEqual(identifiers(extended).map(([serial]) => String(serial)), ['9007199254740992'], '不写进第二张表的流水号');
-  assert.deepEqual(longNumberIssues(extended).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+    .replace('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" custom:id="rId2" r:id="rId1"/>'));
+  assert.throws(() => map(extended), SHEET_NOT_LOCATED, '另带扩展 :id 属性');
 
   const otherPrefix = map(await build('other-prefix.xlsx', (xml) => xml
     .replace('<workbook ', '<workbook xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ')
     .replace('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" rel:id="rId1"/>')));
   assert.deepEqual(identifiers(otherPrefix).map(([serial]) => String(serial)), ['9007199254740992']);
   assert.deepEqual(longNumberIssues(otherPrefix), []);
-  // 前缀没有绑定到关系命名空间：无法确认，按无法核对提示
-  const unbound = map(await build('unbound-prefix.xlsx', (xml) => xml
+  // 前缀没有绑定到关系命名空间：无法确认，整份拒绝
+  const unbound = await build('unbound-prefix.xlsx', (xml) => xml
     .replace('<workbook ', '<workbook xmlns:x9="urn:example:other" ')
-    .replace('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" x9:id="rId1"/>')));
-  assert.deepEqual(longNumberIssues(unbound).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+    .replace('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" x9:id="rId1"/>'));
+  assert.throws(() => map(unbound), SHEET_NOT_LOCATED, '前缀未绑定');
 });
 
-// release 审查：未开查重时核对长数字只解压 workbook.xml、其关系文件与目标工作表，其他工作表与嵌入文件不再解压；
-//   压缩包结构不支持按需读取（如条目名重复）时退回整包读取，结果不变
-test('XLSX：未开查重时核对长数字只解压用到的条目；不支持按需读取时退回整包读取', async (t) => {
+// release 审查：读取时没有保留压缩包时，核对长数字只解压 workbook.xml、其关系文件与目标工作表，其他工作表与嵌入文件不再解压；
+//   压缩包结构不支持按需读取（如条目名重复）时退回整包读取，结果不变。跨 Sheet 回填（D12）起映射读取为按原文核对日期一律保留
+//   压缩包（bookFiles），不再走按需解压；按需解压只用于大账号识别的读取（readRows 传 exactSourceText）
+test('XLSX：大账号识别核对长数字只解压用到的条目；不支持按需读取时退回整包读取；映射读取结果不变', async (t) => {
   const zlib = require('node:zlib');
   const dir = createTempDir(t);
   const workbook = XLSX.utils.book_new();
@@ -1289,13 +1293,16 @@ test('XLSX：未开查重时核对长数字只解压用到的条目；不支持�
   };
   const lazyPath = path.join(dir, 'lazy.xlsx');
   fs.writeFileSync(lazyPath, deflated);
-  const mapped = map(lazyPath);
+  const exactRows = readRows(lazyPath, { blankrows: true, exactSourceText: true });
   zlib.inflateRawSync = original;
-  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), [SERIAL]);
-  assert.deepEqual(longNumberIssues(mapped), []);
+  assert.deepEqual(Array.from(exactRows.sourceText.get(1)), [[3, SERIAL]]);
   assert.equal(inflated.length, 3, '只解压 workbook.xml、关系文件与目标工作表');
   assert.ok(inflated.some((text) => text.includes(SERIAL)), '解压了目标工作表');
   assert.ok(!inflated.some((text) => text.includes('987654321') || text.includes('MEDIA-MARKER')), '其他工作表与嵌入文件不解压');
+  // 映射读取保留压缩包、不走按需解压，长数字照常还原
+  const mapped = map(lazyPath);
+  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), [SERIAL]);
+  assert.deepEqual(longNumberIssues(mapped), []);
 
   // 条目名重复（不区分大小写）：不支持按需读取，退回整包读取，结果不变
   const duplicated = Buffer.from(deflated);
@@ -1308,6 +1315,7 @@ test('XLSX：未开查重时核对长数字只解压用到的条目；不支持�
   assert.equal(openZipEntriesLazily(duplicated), null);
   const fallbackPath = path.join(dir, 'fallback.xlsx');
   fs.writeFileSync(fallbackPath, duplicated);
+  assert.deepEqual(Array.from(readRows(fallbackPath, { blankrows: true, exactSourceText: true }).sourceText.get(1)), [[3, SERIAL]]);
   const fallback = map(fallbackPath);
   assert.deepEqual(identifiers(fallback).map(([serial]) => String(serial)), [SERIAL]);
   assert.deepEqual(longNumberIssues(fallback), []);
@@ -1320,8 +1328,8 @@ test('XLSX：未开查重时核对长数字只解压用到的条目；不支持�
 
 // release 审查：须确认读取库实际读取的工作表。① 另一张表的关系解析不到时，读取库放弃整份关系表、改按物理序号读表，
 //   不能再按目标表的关系取 XML；② 读取库按「xl/ + 去掉 xl/ 前缀的 Target」定位，与按关系文件目录解析 Target 落到不同条目时
-//   同样无法确认。两种情况都不还原并提示（数值舍入后相等，数值核对发现不了）
-test('XLSX：读取库实际读取的工作表与按关系定位的不一致时不还原并提示', async (t) => {
+//   同样无法确认（数值舍入后相等，数值核对发现不了）。跨 Sheet 回填起这类情况整份拒绝（见上方 STRUCTURE_AMBIGUOUS、SHEET_NOT_LOCATED）
+test('XLSX：读取库实际读取的工作表与按关系定位的不一致时整份拒绝', async (t) => {
   const dir = createTempDir(t);
   const build = async (fileName, transform) => {
     const workbook = XLSX.utils.book_new();
@@ -1345,25 +1353,21 @@ test('XLSX：读取库实际读取的工作表与按关系定位的不一致时�
     assert.ok(text.includes(from), `${entry} 应含 ${from}`);
     zip.file(entry, text.replace(from, to));
   };
-  const assertUnverified = (mapped, label) => {
-    assert.deepEqual(mapped.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['100'], `${label}：读取库读的是第一张表`);
-    assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740992'], `${label}：不写进另一张表的流水号`);
-    assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']], label);
-  };
+  const assertRejected = (filePath, expected, label) => assert.throws(() => map(filePath), expected, label);
   // ① 关系文件中两张表的目标互换，Sheet2 引用不存在的关系：读取库按物理序号读 sheet1.xml
-  assertUnverified(map(await build('fallback-order.xlsx', async (zip) => {
+  assertRejected(await build('fallback-order.xlsx', async (zip) => {
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="worksheets/sheetX.xml"');
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet2.xml"', 'Target="worksheets/sheet1.xml"');
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheetX.xml"', 'Target="worksheets/sheet2.xml"');
     await replaceIn(zip, 'xl/workbook.xml', '<sheet name="Sheet2" sheetId="2" r:id="rId2"/>', '<sheet name="Sheet2" sheetId="2" r:id="rId9"/>');
-  })), '关系表被放弃');
+  }), SHEET_NOT_LOCATED, '关系表被放弃');
   // ② Target 写成 xl/worksheets/sheet1.xml：读取库定位到 xl/worksheets/sheet1.xml，按关系文件目录解析是 xl/xl/worksheets/sheet1.xml
-  assertUnverified(map(await build('reader-path.xlsx', async (zip) => {
+  assertRejected(await build('reader-path.xlsx', async (zip) => {
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="xl/worksheets/sheet1.xml"');
     zip.file('xl/xl/worksheets/sheet1.xml', await zip.file('xl/worksheets/sheet2.xml').async('string'));
-  })), '定位口径不同');
+  }), SHEET_NOT_LOCATED, '定位口径不同');
   // ③ 关系标签带命名空间前缀（<pr:Relationship>）、关系顺序与物理顺序相反：读取库不认带前缀的关系，改按物理序号读表
-  assertUnverified(map(await build('prefixed-rels.xlsx', async (zip) => {
+  assertRejected(await build('prefixed-rels.xlsx', async (zip) => {
     const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
     zip.file('xl/_rels/workbook.xml.rels', rels
       .replace('<Relationships xmlns=', '<pr:Relationships xmlns:pr=')
@@ -1372,45 +1376,39 @@ test('XLSX：读取库实际读取的工作表与按关系定位的不一致时�
       .replace('Target="worksheets/sheet1.xml"', 'Target="worksheets/sheetX.xml"')
       .replace('Target="worksheets/sheet2.xml"', 'Target="worksheets/sheet1.xml"')
       .replace('Target="worksheets/sheetX.xml"', 'Target="worksheets/sheet2.xml"'));
-  })), '关系带前缀');
+  }), SHEET_NOT_LOCATED, '关系带前缀');
   // ④ 注释里的旧关系在有效关系之后：读取库不跳过注释、同一 Id 取后一条，读的是第二张表；按本模块口径是第一张表，不一致
-  const staleAfter = map(await build('stale-after.xlsx', async (zip) => {
+  assertRejected(await build('stale-after.xlsx', async (zip) => {
     const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
     const stale = '<!-- <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/> -->';
     zip.file('xl/_rels/workbook.xml.rels', rels.replace('</Relationships>', `${stale}</Relationships>`));
-  }));
-  assert.deepEqual(staleAfter.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['999'], '读取库按注释里的关系读了第二张表');
-  assert.deepEqual(identifiers(staleAfter).map(([serial]) => String(serial)), ['9007199254740992'], '不写进第一张表的流水号');
-  assert.deepEqual(longNumberIssues(staleAfter).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+  }), STRUCTURE_AMBIGUOUS, '注释里的旧关系在后');
   // ⑤ workbook.xml 的注释里有同名的旧 <sheet>（指向第二张表）：读取库把它也算作工作表，序号错开，无法确认读的是哪张表
-  const commentedSheet = map(await build('commented-sheet.xlsx', async (zip) => {
+  assertRejected(await build('commented-sheet.xlsx', async (zip) => {
     await replaceIn(zip, 'xl/workbook.xml', '<sheets>', '<sheets><!-- <sheet name="Sheet1" sheetId="9" r:id="rId2"/> -->');
-  }));
-  assert.deepEqual(identifiers(commentedSheet).map(([serial]) => String(serial)), ['9007199254740992']);
-  assert.deepEqual(longNumberIssues(commentedSheet).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']],
-    '注释里有 <sheet> 时不还原并提示');
+  }), STRUCTURE_AMBIGUOUS, '注释里有 <sheet>');
   // ⑥ 关系 Id 写成字符引用（读取库按原文查找、找不到时改按物理序号读表）：工作表的 r:id 或关系的 Id 含字符引用都无法确认
   const swapTargets = async (zip) => {
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="worksheets/sheetX.xml"');
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet2.xml"', 'Target="worksheets/sheet1.xml"');
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheetX.xml"', 'Target="worksheets/sheet2.xml"');
   };
-  assertUnverified(map(await build('sheet-id-reference.xlsx', async (zip) => {
+  assertRejected(await build('sheet-id-reference.xlsx', async (zip) => {
     await swapTargets(zip);
     await replaceIn(zip, 'xl/workbook.xml', '<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" r:id="rId&#49;"/>');
-  })), '工作表 r:id 含字符引用');
-  assertUnverified(map(await build('relation-id-reference.xlsx', async (zip) => {
+  }), SHEET_NOT_LOCATED, '工作表 r:id 含字符引用');
+  assertRejected(await build('relation-id-reference.xlsx', async (zip) => {
     await swapTargets(zip);
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Id="rId1"', 'Id="rId&#49;"');
-  })), '关系 Id 含字符引用');
+  }), SHEET_NOT_LOCATED, '关系 Id 含字符引用');
   // ⑦ B133：关系标签用制表符分隔属性（读取库的 parsexmltag 只把空格、回车、换行当作标签名的结束，认不出这些关系，
-  //   改按物理序号读表），且两张表的关系目标互换：按关系定位会取到第二张表的原文，须不还原并提示
-  assertUnverified(map(await build('tab-separated-rels.xlsx', async (zip) => {
+  //   改按物理序号读表），且两张表的关系目标互换：按关系定位会取到第二张表的原文，无法定位原文，整份拒绝
+  assertRejected(await build('tab-separated-rels.xlsx', async (zip) => {
     await swapTargets(zip);
     const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
     assert.match(rels, /<Relationship /);
     zip.file('xl/_rels/workbook.xml.rels', rels.replace(/<Relationship /g, '<Relationship\t'));
-  })), '关系标签用制表符分隔');
+  }), SHEET_NOT_LOCATED, '关系标签用制表符分隔');
   // 对照：Target 写成绝对路径 /xl/worksheets/sheet1.xml 时两种口径一致，照常还原
   const absolute = map(await build('absolute-target.xlsx', async (zip) => {
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="/xl/worksheets/sheet1.xml"');

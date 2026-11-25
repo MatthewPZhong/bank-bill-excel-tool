@@ -4997,9 +4997,11 @@
       const PREPROCESS_ROW_FILTER_FIELD = '过滤账单';
       // v3.2.19：「重复账单过滤」只有勾选框，没有按钮
       const DUPLICATE_ROW_FILTER_FIELD = '重复账单过滤';
+      // v3.2.21：「跨 Sheet 回填」勾选后显示【规则设置】
+      const CROSS_SHEET_BACKFILL_FIELD = '跨 Sheet 回填';
       const preprocessFields = Array.isArray(payload.preprocessFields) && payload.preprocessFields.length
         ? payload.preprocessFields
-        : [PREPROCESS_ROW_FILTER_FIELD, DUPLICATE_ROW_FILTER_FIELD];
+        : [PREPROCESS_ROW_FILTER_FIELD, DUPLICATE_ROW_FILTER_FIELD, CROSS_SHEET_BACKFILL_FIELD];
       const BILL_SPLIT_MERGE_FIELD = '是否拆分/合并明细账单';
       const REUSE_MODULE_FIELD = '复用模块字段的映射关系';
       const BILL_SPLIT_ROW_FILTER_FIELD = '根据字段值过滤账单';
@@ -5049,6 +5051,8 @@
       let currentBillSplitRowFilterRules = cloneRowFilterRules(payload.billSplitMeta && payload.billSplitMeta.rowFilterRules);
       // v3.2.19：原始账单预处理「过滤账单」的过滤规则（【规则设置】带回的草稿，点【保存】时随映射保存）
       let currentPreprocessRowFilterRules = cloneRowFilterRules(payload.template && payload.template.preprocessRowFilterRules);
+      // v3.2.21：原始账单预处理「跨 Sheet 回填」规则（【规则设置】带回的草稿，点【保存】时随映射保存；未设置为 null）
+      let currentCrossSheetBackfillRule = cloneCrossSheetBackfillRule(payload.template && payload.template.crossSheetBackfillRule);
       // v3.2.18：模板的特征值列表（【特征值管理】保存/删除即时落库后回写）；各行在「选择特征值」中选用。
       let currentFeatureFilters = cloneFeatureFilters(payload.template && payload.template.featureFilters);
       // v3.2.22：特征值管理保存或删除失败后库中结果不确定；关闭后从本弹窗重开【管理】时带入，成功后清除
@@ -5681,8 +5685,23 @@
       }
 
       // v3.2.19：原始账单预处理——「过滤账单」勾选后显示【规则设置】；「重复账单过滤」只有勾选框；与拆分/合并无关，始终可用
+      // v3.2.21：「跨 Sheet 回填」勾选后显示【规则设置】
       function renderPreprocessRow(fieldName) {
         const savedValue = String(savedMap.get(fieldName)?.mappedField || '');
+        if (fieldName === CROSS_SHEET_BACKFILL_FIELD) {
+          renderMappingToggleRow(fieldName, {
+            label: fieldName,
+            checked: savedValue === '是',
+            checkedValue: '是',
+            uncheckedValue: '',
+            buttonClass: 'cross-sheet-backfill-btn',
+            buttonLabel: '规则设置',
+            showButtonWhenChecked: true,
+            onToggle: () => {},
+            onButtonClick: () => openCrossSheetBackfillDialog()
+          });
+          return;
+        }
         if (fieldName === DUPLICATE_ROW_FILTER_FIELD) {
           renderMappingToggleRow(fieldName, {
             label: fieldName,
@@ -5857,6 +5876,43 @@
           tooltip: PREPROCESS_ROW_FILTER_TOOLTIP,
           onDone: (nextRules) => {
             currentPreprocessRowFilterRules = cloneRowFilterRules(nextRules);
+            returnToModal(overlay);
+          },
+          onCancel: () => {
+            returnToModal(overlay);
+          }
+        }));
+      }
+
+      // v3.2.21：回填目标不能是发生额 / 余额 / 币种 / 账户所用的源列——这里按当前草稿的主映射先校验一遍；拆分、按字段区分
+      //   发生额等在各自弹窗保存的配置由主进程 collectCrossSheetBackfillExcludedTargets 在保存时一并校验
+      function collectCrossSheetBackfillExcludedTargets() {
+        const headerSet = new Set((payload.template.headers || []).map((header) => String(header ?? '').trim()).filter(Boolean));
+        const amountFields = new Set(['Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId', '按正负号拆分的发生额']);
+        const excluded = new Set();
+        collectMappingDraftFromTable(tbody).forEach((mapping) => {
+          if (!amountFields.has(mapping.templateField)) return;
+          // 字段筛选特征值：草稿中存的是特征值 id，实际读取的是该特征值的筛选字段（与主进程保存、生成时的排除规则一致）
+          const fields = mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD
+            ? [findFeatureFilterById(currentFeatureFilters, getFeatureFilterRef(mapping))?.sourceField]
+            : [mapping.mappedField].concat(mapping.mappedFields || []);
+          fields
+            .map((value) => String(value ?? '').trim())
+            .filter((value) => headerSet.has(value))
+            .forEach((value) => excluded.add(value));
+        });
+        return Array.from(excluded);
+      }
+
+      function openCrossSheetBackfillDialog() {
+        const entryButton = rowByField.get(CROSS_SHEET_BACKFILL_FIELD)?.querySelector('.cross-sheet-backfill-btn');
+        if (entryButton?.disabled || entryButton?.hidden) return;
+        pushModal(overlay, () => createCrossSheetBackfillDialog({
+          headers: payload.template.headers || [],
+          initialRule: currentCrossSheetBackfillRule,
+          getExcludedTargetFields: collectCrossSheetBackfillExcludedTargets,
+          onDone: (nextRule) => {
+            currentCrossSheetBackfillRule = cloneCrossSheetBackfillRule(nextRule);
             returnToModal(overlay);
           },
           onCancel: () => {
@@ -6183,6 +6239,8 @@
             preprocessRowFilterRules: cloneRowFilterRules(currentPreprocessRowFilterRules),
             // v3.2.21：模板日期格式（没有渲染「日期格式」行时不提交，保持原值）
             ...(dateFormatRow ? { dateFormat: currentDateFormat } : {}),
+            // v3.2.21：未设置时传 {}，勾选了却没有设置由主进程拒绝；未勾选时保留草稿
+            crossSheetBackfillRule: cloneCrossSheetBackfillRule(currentCrossSheetBackfillRule) || {},
             preserveOwn: !bigAccountsLoadedWithOwn,
             ...(channelAssignment ? { channel: channelAssignment } : {})
           });
@@ -7137,7 +7195,7 @@
     }
 
     // 返回 { rules, errors }：字段与值都为空的条件忽略，没有条件的规则忽略；值去首尾空白。
-    function normalizeRowFilterDraft(groups) {
+    function normalizeRowFilterDraft(groups, { missingMessage = '请至少设置一条过滤规则' } = {}) {
       const rules = [];
       const errors = [];
       groups.forEach((group) => {
@@ -7151,7 +7209,7 @@
         if (conditions.length) rules.push({ seq: rules.length + 1, conditions });
       });
       if (!rules.length) {
-        errors.push('请至少设置一条过滤规则');
+        errors.push(missingMessage);
       }
       rules.forEach((rule) => {
         rule.conditions.forEach((condition, index) => {
@@ -7166,7 +7224,11 @@
       return { rules, errors };
     }
 
-    function createRowFilterRulesDialog({ headers = [], initialRules = [], tooltip = '', onDone, onCancel }) {
+    // v3.2.21：title / label / addLabel / missingMessage 供「跨 Sheet 回填 → 待回填行条件」复用本编辑器
+    function createRowFilterRulesDialog({
+      headers = [], initialRules = [], tooltip = '', title = '过滤规则设置', label = '过滤规则',
+      addLabel = '+ 新增过滤规则', missingMessage = '请至少设置一条过滤规则', onDone, onCancel
+    }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card scenario-config-card row-filter-rules-card';
@@ -7177,15 +7239,15 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">过滤规则设置</div>
+          <div class="dialog-title">${escapeHtml(title)}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body scenario-config-body">
           <div class="scenario-config-row scenario-config-row-multi">
-            <span class="scenario-config-label">过滤规则 <span class="scenario-config-tooltip" title="${escapeHtml(tooltip)}">ⓘ</span></span>
+            <span class="scenario-config-label">${escapeHtml(label)} <span class="scenario-config-tooltip" title="${escapeHtml(tooltip)}">ⓘ</span></span>
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-multi="rowFilterRules"></div>
-              <button class="text-action small" type="button" data-action="add-rule">+ 新增过滤规则</button>
+              <button class="text-action small" type="button" data-action="add-rule">${escapeHtml(addLabel)}</button>
             </div>
           </div>
         </div>
@@ -7307,7 +7369,7 @@
       });
 
       dialog.querySelector('[data-action="save"]').addEventListener('click', () => {
-        const { rules, errors } = normalizeRowFilterDraft(groups);
+        const { rules, errors } = normalizeRowFilterDraft(groups, { missingMessage });
         if (errors.length) {
           pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));
           return;
@@ -7356,6 +7418,294 @@
       dialog.querySelector('[data-action="save"]').addEventListener('click', () => onDone(select.value));
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => onCancel());
       dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ==================== v3.2.21 原始账单预处理「跨 Sheet 回填」：规则设置 ====================
+    // 主表（模板读取的第一个 Sheet）中满足「待回填行条件」的行，按配对字段与同一原始账单中来源 Sheet 的行一对一配对，
+    // 把配置的来源字段回填到本表空单元格。待回填行条件复用过滤规则编辑器（子弹窗）。
+    // 【保存】只校验并暂存，随映射关系管理【保存】提交；【取消】/ × 不改暂存。
+    // 与主进程 src/backend/file-service/cross-sheet-backfill.js 的 validateCrossSheetBackfillRule 同口径，改规则时两边一起改。
+    const CROSS_SHEET_BACKFILL_LABEL = '跨 Sheet 回填';
+    const CROSS_SHEET_BACKFILL_MATCH_MODES = [
+      { value: 'amount', label: '按金额' },
+      { value: 'exact', label: '按原值' }
+    ];
+    const CROSS_SHEET_BACKFILL_DATE_ORDERS = [
+      { value: 'auto', label: '自动' },
+      { value: 'DMY', label: '日在前（dd/mm/yyyy）' },
+      { value: 'MDY', label: '月在前（mm/dd/yyyy）' }
+    ];
+    const CROSS_SHEET_BACKFILL_TIPS = '主表（模板读取的第一个 Sheet）中满足「待回填行条件」的账单，按配对字段在来源 Sheet 中找第一笔未使用、配对值相同的行'
+      + '（同值多笔按顺序一对一，配上的来源行不再使用），把来源字段的值回填到本表对应字段的空单元格（不覆盖已有值）。'
+      + '按金额配对时，文本中有多个数字取紧跟币种符号的那个。'
+      + '配不上的账单不参与生成，并在错误报告中列出。本表币种列为空时自动取本 Sheet 其他账单的币种。'
+      + '【导出明细】时，回填后的原始账单另存为「原文件名_回填.xlsx」。';
+    const CROSS_SHEET_BACKFILL_CONDITION_TOOLTIP = `同一规则内的条件需全部满足；满足任一规则的账单需要从来源 Sheet 回填。${ROW_FILTER_FIELD_COMPARE_HINT}`;
+    const CROSS_SHEET_BACKFILL_MATCH_HINTS = {
+      amount: '两边识别出金额后比较，如「Trade - $65.45」与 65.45',
+      exact: '两边单元格去掉首尾空格后完全相同'
+    };
+
+    function createBlankCrossSheetBackfillField() {
+      return { targetField: '', sourceField: '' };
+    }
+
+    // 规范化为可编辑的规则对象；未设置返回 null
+    function cloneCrossSheetBackfillRule(rule) {
+      if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return null;
+      const matchMode = String(rule.matchMode || '');
+      const sourceDateOrder = String(rule.sourceDateOrder || '');
+      return {
+        sourceSheetName: String(rule.sourceSheetName || ''),
+        rowRules: cloneRowFilterRules(rule.rowRules),
+        matchMode: CROSS_SHEET_BACKFILL_MATCH_MODES.some((item) => item.value === matchMode) ? matchMode : 'amount',
+        matchField: String(rule.matchField || ''),
+        sourceMatchField: String(rule.sourceMatchField || ''),
+        sourceDateOrder: CROSS_SHEET_BACKFILL_DATE_ORDERS.some((item) => item.value === sourceDateOrder) ? sourceDateOrder : 'auto',
+        backfillFields: (Array.isArray(rule.backfillFields) ? rule.backfillFields : [])
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => ({ targetField: String(item.targetField || ''), sourceField: String(item.sourceField || '') }))
+      };
+    }
+
+    // 待回填行条件摘要：「ValueDate 空值」；多条件「且」，多规则「；或 」
+    function formatRowFilterRulesSummary(rules) {
+      return cloneRowFilterRules(rules).map((group) => group.conditions.map((condition) => (
+        ROW_FILTER_VALUELESS_OPS.has(condition.op)
+          ? `${condition.field} ${condition.op}`
+          : `${condition.field} ${condition.op} ${condition.value}`
+      )).join(' 且 ')).join('；或 ');
+    }
+
+    // 返回 { rule, errors }：去首尾空白（来源 Sheet 名除外）；本表字段与来源字段都为空的回填行忽略
+    function normalizeCrossSheetBackfillDraft(draft, { excludedTargetFields = [] } = {}) {
+      const errors = [];
+      const label = CROSS_SHEET_BACKFILL_LABEL;
+      // Sheet 名按原文保存（工作簿可同时有「USD」与「USD 」两张表，与主进程同口径），只有全为空白时视为未填写
+      const rawSheetName = String(draft.sourceSheetName || '');
+      const rule = {
+        sourceSheetName: rawSheetName.trim() ? rawSheetName : '',
+        rowRules: cloneRowFilterRules(draft.rowRules),
+        matchMode: draft.matchMode,
+        matchField: String(draft.matchField || '').trim(),
+        sourceMatchField: String(draft.sourceMatchField || '').trim(),
+        sourceDateOrder: draft.sourceDateOrder,
+        backfillFields: draft.backfillFields
+          .map((item) => ({ targetField: String(item.targetField || '').trim(), sourceField: String(item.sourceField || '').trim() }))
+          .filter((item) => item.targetField !== '' || item.sourceField !== '')
+      };
+      if (!rule.sourceSheetName) errors.push(`${label}：请填写来源 Sheet 名`);
+      if (!rule.rowRules.length) errors.push(`${label}：请至少设置一条待回填行条件`);
+      if (!rule.matchField) errors.push(`${label}：请选择本表配对字段`);
+      if (!rule.sourceMatchField) errors.push(`${label}：请填写来源配对字段`);
+      if (!rule.backfillFields.length) errors.push(`${label}：请至少设置一个回填字段`);
+      const excludedSet = new Set(excludedTargetFields);
+      const seenTargets = new Set();
+      rule.backfillFields.forEach((item, index) => {
+        const rowLabel = `${label}：回填字段第 ${index + 1} 行`;
+        if (!item.targetField) errors.push(`${rowLabel}请选择本表字段`);
+        if (!item.sourceField) errors.push(`${rowLabel}请填写来源字段`);
+        if (!item.targetField) return;
+        if (seenTargets.has(item.targetField)) errors.push(`${label}：本表字段「${item.targetField}」重复设置`);
+        seenTargets.add(item.targetField);
+        if (excludedSet.has(item.targetField)) {
+          errors.push(`${label}：「${item.targetField}」用于发生额、余额、币种或账户映射，不能作为回填字段`);
+        }
+      });
+      return { rule, errors };
+    }
+
+    function createCrossSheetBackfillDialog({ headers = [], initialRule = null, getExcludedTargetFields = null, onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card cross-sheet-backfill-card';
+      const headerList = (Array.isArray(headers) ? headers : []).map((header) => String(header ?? '')).filter((header) => header !== '');
+      const headerSet = new Set(headerList);
+      const draft = cloneCrossSheetBackfillRule(initialRule) || cloneCrossSheetBackfillRule({});
+      if (!draft.backfillFields.length) draft.backfillFields.push(createBlankCrossSheetBackfillField());
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">${escapeHtml(CROSS_SHEET_BACKFILL_LABEL)}${titleTipsHtml(CROSS_SHEET_BACKFILL_TIPS)}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">来源 Sheet</span>
+            <input class="scenario-config-input" type="text" data-field="sourceSheetName" placeholder="同一原始账单中的 Sheet 名，如 USD">
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">待回填行条件</span>
+            <span class="cross-sheet-backfill-condition-summary" data-role="condition-summary"></span>
+            <button class="secondary-btn small" type="button" data-action="edit-conditions">条件设置</button>
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">配对方式</span>
+            <select class="scenario-config-input scenario-config-input-narrow" data-field="matchMode">
+              ${CROSS_SHEET_BACKFILL_MATCH_MODES.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}
+            </select>
+            <span class="cross-sheet-backfill-hint" data-role="match-hint"></span>
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">本表配对字段</span>
+            <select class="scenario-config-input" data-field="matchField"></select>
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">来源配对字段</span>
+            <input class="scenario-config-input" type="text" data-field="sourceMatchField" placeholder="来源 Sheet 的表头名，如 Credit Amount">
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">来源日期格式</span>
+            <select class="scenario-config-input scenario-config-input-narrow cross-sheet-backfill-date-order" data-field="sourceDateOrder">
+              ${CROSS_SHEET_BACKFILL_DATE_ORDERS.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}
+            </select>
+            <span class="cross-sheet-backfill-hint">只影响来源 Sheet 中文本形式的日期；Excel 日期单元格不受影响</span>
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">回填字段</span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-role="backfill-fields"></div>
+              <button class="text-action small" type="button" data-action="add-field">+ 新增回填字段</button>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+
+      const sourceSheetInput = dialog.querySelector('[data-field="sourceSheetName"]');
+      const matchModeSelect = dialog.querySelector('[data-field="matchMode"]');
+      const matchFieldSelect = dialog.querySelector('[data-field="matchField"]');
+      const sourceMatchInput = dialog.querySelector('[data-field="sourceMatchField"]');
+      const dateOrderSelect = dialog.querySelector('[data-field="sourceDateOrder"]');
+      const summary = dialog.querySelector('[data-role="condition-summary"]');
+      const matchHint = dialog.querySelector('[data-role="match-hint"]');
+      const fieldsContainer = dialog.querySelector('[data-role="backfill-fields"]');
+
+      function renderFieldOptions(selected) {
+        const options = ['<option value="">（请选择）</option>']
+          .concat(headerList.map((header) => (
+            `<option value="${escapeHtml(header)}"${header === selected ? ' selected' : ''}>${escapeHtml(header)}</option>`
+          )));
+        // 模板【更新】后字段已不在表头：保留一个「（已删除）」选项，保存模板时由主进程拒绝。
+        if (selected && !headerSet.has(selected)) {
+          options.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}（已删除）</option>`);
+        }
+        return options.join('');
+      }
+
+      function isStale(field) {
+        return Boolean(field) && !headerSet.has(field);
+      }
+
+      function renderSummary() {
+        const text = formatRowFilterRulesSummary(draft.rowRules);
+        summary.textContent = text || '未设置';
+        summary.title = text;
+        summary.classList.toggle('is-empty', !text);
+      }
+
+      function renderMatchHint() {
+        matchHint.textContent = CROSS_SHEET_BACKFILL_MATCH_HINTS[draft.matchMode] || '';
+      }
+
+      function renderFields() {
+        fieldsContainer.innerHTML = draft.backfillFields.map((item, index) => `
+          <div class="scenario-config-multi-row" data-index="${index}">
+            <select class="scenario-config-input${isStale(item.targetField) ? ' is-stale' : ''}" data-backfill-field="targetField" title="本表字段">${renderFieldOptions(item.targetField)}</select>
+            <span class="cross-sheet-backfill-arrow" aria-hidden="true">←</span>
+            <input class="scenario-config-input" type="text" data-backfill-field="sourceField" value="${escapeHtml(item.sourceField)}" placeholder="来源 Sheet 的表头名" title="来源字段">
+            <button class="icon-close-small" type="button" data-backfill-action="remove" title="删除该回填字段">×</button>
+          </div>
+        `).join('');
+      }
+
+      sourceSheetInput.value = draft.sourceSheetName;
+      matchModeSelect.value = draft.matchMode;
+      matchFieldSelect.innerHTML = renderFieldOptions(draft.matchField);
+      matchFieldSelect.classList.toggle('is-stale', isStale(draft.matchField));
+      sourceMatchInput.value = draft.sourceMatchField;
+      dateOrderSelect.value = draft.sourceDateOrder;
+
+      sourceSheetInput.addEventListener('input', () => { draft.sourceSheetName = sourceSheetInput.value; });
+      sourceMatchInput.addEventListener('input', () => { draft.sourceMatchField = sourceMatchInput.value; });
+      matchModeSelect.addEventListener('change', () => {
+        draft.matchMode = matchModeSelect.value;
+        renderMatchHint();
+      });
+      matchFieldSelect.addEventListener('change', () => {
+        draft.matchField = matchFieldSelect.value;
+        matchFieldSelect.classList.toggle('is-stale', isStale(draft.matchField));
+      });
+      dateOrderSelect.addEventListener('change', () => { draft.sourceDateOrder = dateOrderSelect.value; });
+
+      fieldsContainer.addEventListener('change', (event) => {
+        const control = event.target.closest('select[data-backfill-field]');
+        const row = control && control.closest('[data-index]');
+        const item = row && draft.backfillFields[Number(row.dataset.index)];
+        if (!item) return;
+        item.targetField = control.value;
+        control.classList.toggle('is-stale', isStale(control.value));
+      });
+      fieldsContainer.addEventListener('input', (event) => {
+        const input = event.target.closest('input[data-backfill-field]');
+        const row = input && input.closest('[data-index]');
+        const item = row && draft.backfillFields[Number(row.dataset.index)];
+        if (item) item.sourceField = input.value;
+      });
+      fieldsContainer.addEventListener('click', (event) => {
+        const removeButton = event.target.closest('button[data-backfill-action="remove"]');
+        const row = removeButton && removeButton.closest('[data-index]');
+        if (!row) return;
+        // 删到最后一行时保留一个空白行
+        if (draft.backfillFields.length > 1) draft.backfillFields.splice(Number(row.dataset.index), 1);
+        else draft.backfillFields = [createBlankCrossSheetBackfillField()];
+        renderFields();
+      });
+      dialog.querySelector('[data-action="add-field"]').addEventListener('click', () => {
+        draft.backfillFields.push(createBlankCrossSheetBackfillField());
+        renderFields();
+      });
+
+      dialog.querySelector('[data-action="edit-conditions"]').addEventListener('click', () => {
+        pushModal(overlay, () => createRowFilterRulesDialog({
+          headers: headerList,
+          initialRules: draft.rowRules,
+          tooltip: CROSS_SHEET_BACKFILL_CONDITION_TOOLTIP,
+          title: '待回填行条件',
+          label: '待回填行条件',
+          addLabel: '+ 新增条件规则',
+          missingMessage: `${CROSS_SHEET_BACKFILL_LABEL}：请至少设置一条待回填行条件`,
+          onDone: (nextRules) => {
+            draft.rowRules = cloneRowFilterRules(nextRules);
+            renderSummary();
+            returnToModal(overlay);
+          },
+          onCancel: () => {
+            returnToModal(overlay);
+          }
+        }));
+      });
+
+      dialog.querySelector('[data-action="save"]').addEventListener('click', () => {
+        const excludedTargetFields = typeof getExcludedTargetFields === 'function' ? getExcludedTargetFields() : [];
+        const { rule, errors } = normalizeCrossSheetBackfillDraft(draft, { excludedTargetFields });
+        if (errors.length) {
+          pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));
+          return;
+        }
+        onDone(rule);
+      });
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => onCancel());
+      dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
+
+      renderSummary();
+      renderMatchHint();
+      renderFields();
       overlay.appendChild(dialog);
       return overlay;
     }

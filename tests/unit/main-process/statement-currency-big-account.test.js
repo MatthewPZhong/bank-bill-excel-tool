@@ -34,7 +34,8 @@ const {
   validateFeeFieldMappings,
   isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
-  normalizeRowFilterRules
+  normalizeRowFilterRules,
+  normalizeCrossSheetBackfillRule
 } = require('../../../src/backend/file-service');
 const { normalizeMaintainedBigAccounts } = require('../../../src/main-process/big-account-recognition');
 
@@ -90,7 +91,8 @@ const fns = loadMainFunctions([
   'isMultiBigAccountMapping',
   'classifyCurrencyOnlyEntries',
   'isPreprocessRowFilterEnabled',
-  'isDuplicateRowFilterEnabled'
+  'isDuplicateRowFilterEnabled',
+  'isCrossSheetBackfillEnabled'
 ], {
   ...CONSTANTS,
   // v3.2.19：逻辑取值（校验与映射归一化会引用）
@@ -262,8 +264,9 @@ test('生成配置读取模板的 币种 → 大账号，没有配置时拒绝',
 
 test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版本拒绝', (t) => {
   // v3.2.18：特征值包升为 v7；v3.2.19：用到拆分账单费用账单的包写 v8；v3.2.21：逻辑取值候补含特征值、用到费用账单字段映射
-  //   特殊处理写 v9；只用到本模式的包仍写 v6
-  assert.equal(CONSTANTS.SUPPORTED_BUNDLE_VERSION, 9);
+  //   特殊处理写 v9；用到跨 Sheet 回填的包写 v10；只用到本模式的包仍写 v6
+  assert.equal(CONSTANTS.SUPPORTED_BUNDLE_VERSION, 10);
+  assert.equal(CONSTANTS.CROSS_SHEET_BACKFILL_BUNDLE_VERSION, 10);
   assert.equal(CONSTANTS.LOGIC_VALUE_BUNDLE_VERSION, 8);
   assert.equal(CONSTANTS.FEATURE_FILTER_BUNDLE_VERSION, 7);
   assert.equal(CONSTANTS.CURRENCY_ONLY_BUNDLE_VERSION, 6);
@@ -287,6 +290,7 @@ test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版
     isFeeFieldMappingTemplateFieldExcluded,
     normalizeBillSplitRowFilterRules,
     normalizeRowFilterRules,
+    normalizeCrossSheetBackfillRule,
     getFeatureFilterRef,
     upgradeLegacyFeatureFilter,
     LEGACY_FEATURE_FILTER_ID,

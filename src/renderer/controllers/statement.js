@@ -8,7 +8,7 @@
     const state = { selectedTemplateId: FILENAME_MAPPING_TEMPLATE_ID, mode: STATEMENT_MODES.createStatement,
       monthlyBalanceReady:false,monthlyBalancePreview:null,canExportDetail:false,canExportBalance:false,
       hasEnum:!!initialInfo.hasEnum,enumFileName:initialInfo.enumFileName||'',hasErrorReport:!!initialInfo.hasErrorReport,
-      manualBalancePromptReady:false,manualBalancePrompt:null };
+      manualBalancePromptReady:false,manualBalancePrompt:null,detailAlertText:'' };
     // pendingInteractions：按操作类型（import / balance / …）分别保存待继续的选择 / 确认，导出选择不会覆盖待确认的导入
     let active=false, disposed=false, generation=0, actionSequence=0, busy=false, pending=null, deferSequence=0;
     const pendingInteractions=new Map();
@@ -35,9 +35,12 @@ function setStatus(message, tone = 'info', options = {}) {
   state.manualBalancePrompt = state.manualBalancePromptReady && options.manualBalancePrompt
     ? { ...options.manualBalancePrompt }
     : null;
+  // v3.2.21：没有报错文件的逐行明细（导入预检的「跨 Sheet 回填」跳过原因），点击状态框查看；随反馈保存，离页返回后仍可查看
+  state.detailAlertText = typeof options.detailAlertText === 'string' ? options.detailAlertText : '';
   feedback = { message, tone, options };
   updateStatusBox(elements.statusBox, message, tone, {
     errorReportReady: state.hasErrorReport,
+    detailAlertReady: Boolean(state.detailAlertText),
     manualBalancePromptReady: state.manualBalancePromptReady,
     manualBalancePromptTitle: ({ gap: '点击处理账单日期断档', mismatch: '点击处理余额校验不一致', 'seed-replace': '点击处理人工补录余额替换' })[state.manualBalancePrompt?.reason]
       || (state.manualBalancePrompt?.seedMismatch ? '点击核对上一账单日余额' : ''),
@@ -87,13 +90,21 @@ function applyStatementResult(result, { allowAlerts = true } = {}) {
     : result.manualBalancePromptReady
       ? 'info'
       : 'error';
+  // v3.2.21：交易行全部因「跨 Sheet 回填」未配上而被移除、在导入预检即返回（没有报错文件）时的逐行跳过原因
+  const detailAlertText = result.errorCode === 'NO_TRANSACTION_DATA'
+    && !result.errorReportReady
+    && Array.isArray(result.detailLines)
+    && result.detailLines.length
+    ? [result.message, ...result.detailLines].join('\n')
+    : '';
 
   setStatus(result.message, tone, {
     errorReportReady: Boolean(result.errorReportReady),
     manualBalancePromptReady: Boolean(result.manualBalancePromptReady),
     manualBalancePrompt: result.manualBalancePrompt || null,
     // 结果另给的日志摘要（渠道名可能以账号命名，release 审查）
-    logMessage: result.logMessage
+    logMessage: result.logMessage,
+    ...(detailAlertText ? { detailAlertText } : {})
   });
 
   if (allowAlerts && Array.isArray(result.unmatchedAmountSplitFiles) && result.unmatchedAmountSplitFiles.length) {
@@ -104,6 +115,11 @@ function applyStatementResult(result, { allowAlerts = true } = {}) {
   //   v3.2.21：渠道同一账户命中余额方式不同的子模板时同样弹窗，逐账户列出
   if (allowAlerts && hasAlertableErrorDetails(result)) {
     ui.alertNative([result.message, ...result.detailLines].join('\n'));
+  }
+
+  // 当场弹窗逐行列出；离页期间返回的（allowAlerts 为 false）不弹窗，回到页面后点击状态框查看
+  if (allowAlerts && detailAlertText) {
+    ui.alertNative(detailAlertText);
   }
 
   // v1.4.9 PR #16 review P1 Fix C: ACI-12 — 拆分/合并账单全部未命中聚合告警
@@ -521,7 +537,11 @@ async function handleOpenAccountMappings() {
     bind('accountMappingBtn','click',handleOpenAccountMappings);
     bind('importFileBtn','click',importFile);bind('exportDetailBtn','click',exportDetail);bind('exportBalanceBtn','click',exportBalance);
     bind('templateSelect','change',event=>changeMode(event.target.value));
-    bind('statusBox','click',()=>state.manualBalancePromptReady&&state.manualBalancePrompt?openModal(()=>createManualBalanceSeedDialog(state.manualBalancePrompt)):exportError());
+    bind('statusBox','click',()=>{
+      if(state.manualBalancePromptReady&&state.manualBalancePrompt)return openModal(()=>createManualBalanceSeedDialog(state.manualBalancePrompt));
+      if(!state.hasErrorReport&&state.detailAlertText){ui.alertNative(state.detailAlertText);return undefined;}
+      return exportError();
+    });
     removers.push(config.subscribe(()=>{if(live())updateTemplateSelect();}));
     return Object.freeze({
       async enter(){if(disposed)return{status:'stale'};active=true;++generation;updateTemplateSelect();

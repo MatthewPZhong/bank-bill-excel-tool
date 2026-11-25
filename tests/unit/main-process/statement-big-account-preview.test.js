@@ -8,6 +8,7 @@ const test = require('node:test');
 const acorn = require('acorn');
 const {
   buildExpectedHeaderCandidates,
+  hasDetailExportRow,
   buildMappedRows,
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
@@ -1143,7 +1144,8 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
       'removeStatementSessionEntriesByFilePath',
       'generateStatementFiles',
       'assertStatementBatchWritable',
-      'FileValidationError'
+      'FileValidationError',
+      'isAllTransactionsSkippedByBackfill'
     ],
     [
       groupStatementEntriesForGeneration,
@@ -1170,7 +1172,8 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
       () => { sessionMutationCount += 1; },
       () => { outputCount += 1; return {}; },
       () => {},
-      require('../../../src/backend/file-service').FileValidationError
+      require('../../../src/backend/file-service').FileValidationError,
+      loadFunction('isAllTransactionsSkippedByBackfill', ['hasDetailExportRow'], [hasDetailExportRow])
     ]
   );
   assert.throws(() => generateGroups({
@@ -2101,6 +2104,7 @@ function loadDesignatedImportExecute({ templateConfig, mode, order, logs }) {
   Object.entries({
     ...recognition,
     normalizeCell,
+    hasDetailExportRow,
     path,
     isFilenameMappingMode: () => false,
     fileImportInProgress: false,
@@ -2120,6 +2124,9 @@ function loadDesignatedImportExecute({ templateConfig, mode, order, logs }) {
     // v3.2.19：重复账单过滤——本测试的模板未勾选（条目没有源行指纹）
     hasDuplicateRowKeys: require('../../../src/main-process/statement-duplicate-review').hasSourceRowKeys,
     isDuplicateRowFilterEnabled: () => false,
+    // v3.2.21：跨 Sheet 回填全部跳过时按没有交易数据返回（逐行原因按「行号:原因」简写）
+    archiveOperationContext: { getStore: () => null },
+    buildImportWarningDetailLines: (warnings) => warnings.map((warning) => `${warning.rowNumber}:${warning.reason}`),
     MERCHANT_ID_SELF_INPUT_OPTION: constValue('MERCHANT_ID_SELF_INPUT_OPTION'),
     STATEMENT_IMPORT_PREVIEW_READY: constValue('STATEMENT_IMPORT_PREVIEW_READY'),
     SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS: constValue('SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS')
@@ -2130,7 +2137,8 @@ function loadDesignatedImportExecute({ templateConfig, mode, order, logs }) {
     'bigAccountBlockHasTransactions', 'buildBigAccountOrderEvidence', 'bigAccountOrderEvidenceRowLists', 'identifiedAccountsFromRowLists',
     'resolvePreparedFixedBigAccountAutoMatchDecision', 'createPendingBigAccountSelectionContext',
     'stagePendingBigAccountSelection', 'buildBigAccountSelectionRequiredResult', 'resolveSavedBigAccountOrderDecision',
-    'logSavedBigAccountOrderDowngrade', 'applySavedBigAccountOrderGuard', 'statementImportPreviewReady'
+    'logSavedBigAccountOrderDowngrade', 'applySavedBigAccountOrderGuard', 'statementImportPreviewReady',
+    'isAllTransactionsSkippedByBackfill', 'collectCrossSheetBackfillWarnings', 'createNoTransactionDataErrorResult'
   ].forEach((name) => scope.set(name, evaluate(functionSource(name))));
   let handlerNode = null;
   (function visit(node) {
@@ -2469,4 +2477,553 @@ test('v3.2.19 原始账单预处理 + 特征值日期：真实生成后，被过
   assert.deepEqual(mapped.rowMetas.map((meta) => meta.sourceRowNumber), [3, 7]);
   assert.deepEqual(mapped.preprocessRowFilterStats.droppedTransactionRowNumbers, [4]);
   assert.deepEqual(finalizeBasis(provisionalBasis, mapped).bridgeClearingIdsByBlock, ['M001', 'M002']);
+});
+
+test('v3.2.21 跨 Sheet 回填：因未能回填而跳过的交易行仍算作上一段，其中的账号不被当成下一段的账号', (t) => {
+  const { buildMappedRows } = require('../../../src/backend/file-service');
+  const XLSX = require('xlsx');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const match = (cell, merchantId) => normalize(cell) === normalize(merchantId) ? 'exact' : 'none';
+  const findHeaders = loadFunction(
+    'findHeaderRowNumbersInRawRows',
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
+  );
+  const buildBasis = loadFunction(
+    'buildBigAccountRecognitionBasis',
+    ['findHeaderRowNumbersInRawRows', 'normalizeCell', 'matchMerchantIds'],
+    [findHeaders, normalize, match]
+  );
+  const identifyBlocks = loadFunction('identifyAccountBlocks', ['normalizeCell'], [normalize]);
+  const finalizeBasis = loadFunction(
+    'finalizeBigAccountRecognitionBasis',
+    ['identifyAccountBlocks', 'normalizeCell'],
+    [identifyBlocks, normalize]
+  );
+  const headers = ['Date', 'Type', 'Desc', 'Amount', 'Account'];
+  // 第 4 行（第一段最后一笔，本方账号 BANK1）是待回填行、来源 Sheet 没有 9 → 跳过；第 5 行是第二段的账号说明（被预处理过滤）
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cross-sheet-bridge-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, 'two-blocks.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['银行账号', 'BANK1'],
+    headers,
+    ['2026-08-01', '交易', 'x', '1', 'BANK1'],
+    ['', '交易', 'Trade - $9', '9', 'BANK1'],
+    ['银行账号', 'BANK2'],
+    headers,
+    ['2026-08-02', '交易', 'y', '2', 'BANK2']
+  ]), 'Sheet1');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['Date', 'Credit'], ['2026-08-01', 5]]), 'USD');
+  XLSX.writeFile(workbook, filePath);
+  let provisionalBasis = null;
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Credit Amount'],
+    mappingByField: { BillDate: 'Date', 'Credit Amount': 'Amount' },
+    expectedSourceHeaders: headers,
+    preprocessRowFilterRules: [{ conditions: [{ field: 'Type', op: '等于', value: '交易' }] }],
+    crossSheetBackfillRule: {
+      sourceSheetName: 'USD',
+      rowRules: [{ conditions: [{ field: 'Date', op: '空值', value: '' }] }],
+      matchMode: 'amount',
+      matchField: 'Desc',
+      sourceMatchField: 'Credit',
+      sourceDateOrder: 'auto',
+      backfillFields: [{ targetField: 'Date', sourceField: 'Date' }]
+    },
+    readOptions: {
+      onWorkbookRows(rawRows) {
+        provisionalBasis = buildBasis({
+          rawRows,
+          expectedSourceHeaders: headers,
+          accountMappingByBankId: { BANK1: { clearingAccountId: 'M001' }, BANK2: { clearingAccountId: 'M002' } }
+        });
+      }
+    }
+  });
+  assert.deepEqual(mapped.rowMetas.map((meta) => meta.sourceRowNumber), [3, 7]);
+  assert.deepEqual(mapped.crossSheetBackfillStats.skippedTransactionRowNumbers, [4]);
+  const finalized = finalizeBasis(provisionalBasis, mapped);
+  assert.deepEqual(finalized.bridgeClearingIdsByBlock, ['M001', 'M002']);
+  // 直接匹配同一界线：第二段窗口不含第 4 行（跳过的交易行，含上一段账号 BANK1）及其之前的行
+  assert.deepEqual(finalized.headerWindows.map((window) => window.candidateRows), [
+    [['银行账号', 'BANK1']],
+    [['银行账号', 'BANK2']]
+  ]);
+  assert.deepEqual(provisionalBasis.headerWindows[1].candidateRows.length, 3, '定稿前第二段窗口含上一段的行');
+});
+
+test('v3.2.21 跨 Sheet 回填：第二段表头前没有账号时，直接匹配不把上一段跳过的交易行中的账号当成第二段账号', (t) => {
+  const { buildMappedRows } = require('../../../src/backend/file-service');
+  const XLSX = require('xlsx');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const match = (cell, merchantId) => normalize(cell) === normalize(merchantId) ? 'exact' : 'none';
+  const findHeaders = loadFunction(
+    'findHeaderRowNumbersInRawRows',
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
+  );
+  const buildBasis = loadFunction(
+    'buildBigAccountRecognitionBasis',
+    ['findHeaderRowNumbersInRawRows', 'normalizeCell', 'matchMerchantIds'],
+    [findHeaders, normalize, match]
+  );
+  const identifyBlocks = loadFunction('identifyAccountBlocks', ['normalizeCell'], [normalize]);
+  const finalizeBasis = loadFunction(
+    'finalizeBigAccountRecognitionBasis',
+    ['identifyAccountBlocks', 'normalizeCell'],
+    [identifyBlocks, normalize]
+  );
+  const findMatch = loadFunction('findBigAccountMatchInRows', ['normalizeCell', 'matchMerchantIds'], [normalize, match]);
+  const identify = loadFunction('identifyAccountsFromRecognitionBasis', ['findBigAccountMatchInRows'], [findMatch]);
+  const headers = ['Date', 'Desc', 'Amount', 'Account'];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cross-sheet-direct-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, 'two-blocks.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['账号', 'M001'],
+    headers,
+    ['2026-08-01', 'x', '1', 'M001'],
+    ['', 'Trade - $9', '9', 'M001'],
+    headers,
+    ['2026-08-02', 'y', '2', '']
+  ]), 'Sheet1');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['Date', 'Credit'], ['2026-08-01', 5]]), 'USD');
+  XLSX.writeFile(workbook, filePath);
+  let provisionalBasis = null;
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Credit Amount'],
+    mappingByField: { BillDate: 'Date', 'Credit Amount': 'Amount' },
+    expectedSourceHeaders: headers,
+    crossSheetBackfillRule: {
+      sourceSheetName: 'USD',
+      rowRules: [{ conditions: [{ field: 'Date', op: '空值', value: '' }] }],
+      matchMode: 'amount',
+      matchField: 'Desc',
+      sourceMatchField: 'Credit',
+      sourceDateOrder: 'auto',
+      backfillFields: [{ targetField: 'Date', sourceField: 'Date' }]
+    },
+    readOptions: {
+      onWorkbookRows(rawRows) {
+        provisionalBasis = buildBasis({ rawRows, expectedSourceHeaders: headers });
+      }
+    }
+  });
+  assert.deepEqual(mapped.crossSheetBackfillStats.skippedTransactionRowNumbers, [4]);
+  const allMerchantIds = ['M001', 'M002'];
+  assert.deepEqual(identify({ basis: provisionalBasis, allMerchantIds }).matches.map((item) => (item ? item.merchantId : null)),
+    ['M001', 'M001'], '定稿前：第二段窗口扫到上一段跳过行中的 M001');
+  assert.deepEqual(identify({ basis: finalizeBasis(provisionalBasis, mapped), allMerchantIds }).matches.map((item) => (item ? item.merchantId : null)),
+    ['M001', null], '定稿后：第二段没有可识别的账号，不误认上一段账号');
+});
+
+test('v3.2.21 跨 Sheet 回填：直接匹配窗口只以带发生额的交易行为界，被「过滤账单」过滤的说明行（有账期日期和下一段账号、收支为空）仍是下一段账号的候选', (t) => {
+  const { buildMappedRows } = require('../../../src/backend/file-service');
+  const XLSX = require('xlsx');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const match = (cell, merchantId) => normalize(cell) === normalize(merchantId) ? 'exact' : 'none';
+  const findHeaders = loadFunction(
+    'findHeaderRowNumbersInRawRows',
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
+  );
+  const buildBasis = loadFunction(
+    'buildBigAccountRecognitionBasis',
+    ['findHeaderRowNumbersInRawRows', 'normalizeCell', 'matchMerchantIds'],
+    [findHeaders, normalize, match]
+  );
+  const identifyBlocks = loadFunction('identifyAccountBlocks', ['normalizeCell'], [normalize]);
+  const finalizeBasis = loadFunction(
+    'finalizeBigAccountRecognitionBasis',
+    ['identifyAccountBlocks', 'normalizeCell'],
+    [identifyBlocks, normalize]
+  );
+  const findMatch = loadFunction('findBigAccountMatchInRows', ['normalizeCell', 'matchMerchantIds'], [normalize, match]);
+  const identify = loadFunction('identifyAccountsFromRecognitionBasis', ['findBigAccountMatchInRows'], [findMatch]);
+  const headers = ['Date', 'Type', 'Desc', 'Amount', 'Account'];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preprocess-direct-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, 'two-blocks.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['账号', 'M001'],
+    headers,
+    ['2026-08-01', '交易', 'x', '1', ''],
+    ['2026-08-31', '说明', '账期', '', 'M002'],
+    headers,
+    ['2026-09-01', '交易', 'y', '2', '']
+  ]), 'Sheet1');
+  XLSX.writeFile(workbook, filePath);
+  let provisionalBasis = null;
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Credit Amount'],
+    mappingByField: { BillDate: 'Date', 'Credit Amount': 'Amount' },
+    expectedSourceHeaders: headers,
+    preprocessRowFilterRules: [{ conditions: [{ field: 'Type', op: '等于', value: '交易' }] }],
+    readOptions: {
+      onWorkbookRows(rawRows) {
+        provisionalBasis = buildBasis({ rawRows, expectedSourceHeaders: headers });
+      }
+    }
+  });
+  assert.deepEqual(mapped.preprocessRowFilterStats.droppedTransactionRowNumbers, [4]);
+  assert.deepEqual(mapped.preprocessRowFilterStats.droppedAmountRowNumbers, []);
+  assert.deepEqual(identify({ basis: finalizeBasis(provisionalBasis, mapped), allMerchantIds: ['M001', 'M002'] }).matches
+    .map((item) => (item ? item.merchantId : null)), ['M001', 'M002']);
+});
+
+test('v3.2.21 跨 Sheet 回填：被「过滤账单」排除、账单日期为空但带发生额的行同样是直接匹配窗口的界线，其中的上一段账号不当成下一段账号', (t) => {
+  const { buildMappedRows } = require('../../../src/backend/file-service');
+  const XLSX = require('xlsx');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const match = (cell, merchantId) => normalize(cell) === normalize(merchantId) ? 'exact' : 'none';
+  const findHeaders = loadFunction('findHeaderRowNumbersInRawRows', ['normalizeCell', 'buildExpectedHeaderCandidates'], [normalize, buildExpectedHeaderCandidates]);
+  const buildBasis = loadFunction('buildBigAccountRecognitionBasis', ['findHeaderRowNumbersInRawRows', 'normalizeCell', 'matchMerchantIds'], [findHeaders, normalize, match]);
+  const identifyBlocks = loadFunction('identifyAccountBlocks', ['normalizeCell'], [normalize]);
+  const finalizeBasis = loadFunction('finalizeBigAccountRecognitionBasis', ['identifyAccountBlocks', 'normalizeCell'], [identifyBlocks, normalize]);
+  const findMatch = loadFunction('findBigAccountMatchInRows', ['normalizeCell', 'matchMerchantIds'], [normalize, match]);
+  const identify = loadFunction('identifyAccountsFromRecognitionBasis', ['findBigAccountMatchInRows'], [findMatch]);
+  const headers = ['Date', 'Type', 'Desc', 'Amount', 'Account'];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preprocess-amount-boundary-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, 'two-blocks.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['账号', 'M001'],
+    headers,
+    ['2026-08-01', '交易', 'x', '1', ''],
+    ['', '冲正', 'y', '5', 'M001'],
+    headers,
+    ['2026-09-01', '交易', 'z', '2', '']
+  ]), 'Sheet1');
+  XLSX.writeFile(workbook, filePath);
+  let provisionalBasis = null;
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Credit Amount'],
+    mappingByField: { BillDate: 'Date', 'Credit Amount': 'Amount' },
+    expectedSourceHeaders: headers,
+    preprocessRowFilterRules: [{ conditions: [{ field: 'Type', op: '等于', value: '交易' }] }],
+    readOptions: {
+      onWorkbookRows(rawRows) {
+        provisionalBasis = buildBasis({ rawRows, expectedSourceHeaders: headers });
+      }
+    }
+  });
+  assert.deepEqual(mapped.preprocessRowFilterStats.droppedTransactionRowNumbers, [], '没有账单日期，不算桥接界线');
+  assert.deepEqual(mapped.preprocessRowFilterStats.droppedAmountRowNumbers, [4]);
+  assert.deepEqual(identify({ basis: finalizeBasis(provisionalBasis, mapped), allMerchantIds: ['M001', 'M002'] }).matches
+    .map((item) => (item ? item.merchantId : null)), ['M001', null]);
+});
+
+test('v3.2.21 跨 Sheet 回填：单个表头的账单全部交易都被回填跳过时，多大账号的完整预检入口按没有交易数据返回逐行原因，不要求为空分段选择账户', async () => {
+  const execute = loadDesignatedImportExecute({
+    templateConfig: designatedTemplateConfig([
+      { merchantId: 'M001', currencies: ['USD'], isMultiCurrency: false },
+      { merchantId: 'M002', currencies: ['USD'], isMultiCurrency: false }
+    ]),
+    mode: 'unfixed',
+    order: null,
+    logs: []
+  });
+  const detailRows = [['Credit Amount', 'Debit Amount']];
+  detailRows.rowMetas = [];
+  detailRows.headerBreaks = [];
+  detailRows.issues = [{ type: 'cross-sheet-backfill-skipped', rowNumber: 3, reason: 'no-source-row' }];
+  Object.defineProperty(detailRows, 'bigAccountRecognitionBasis', { enumerable: false, value: {
+    version: 1, headerWindows: [{ headerRowNumber: 2, candidateRows: [] }], bridgeClearingIdsByBlock: ['']
+  } });
+  const result = await execute(designatedPrepared([{ filePath: path.resolve('/private/all-skipped.xlsx'), detailRows }]));
+  assert.equal(result.status, 'error');
+  assert.equal(result.errorCode, 'NO_TRANSACTION_DATA');
+  assert.match(result.message, /「跨 Sheet 回填」跳过了1行/);
+  assert.deepEqual(result.detailLines, ['3:no-source-row']);
+});
+
+test('v3.2.21 跨 Sheet 回填：大账号预检因没有交易数据提前返回时，失败报告带回填逐行跳过原因，活动日志用脱敏明细', () => {
+  const buildLines = loadFunction(
+    'buildImportWarningDetailLines',
+    ['formatBalanceGapLine', 'formatBalanceMismatchLine', 'formatBalanceSeedReplaceLine'],
+    [String, String, String]
+  );
+  const calls = [];
+  const collect = loadFunction('collectCrossSheetBackfillWarnings');
+  const create = loadFunction(
+    'createNoTransactionDataErrorResult',
+    ['createErrorResult', 'buildImportWarningDetailLines', 'archiveOperationContext', 'collectCrossSheetBackfillWarnings'],
+    [(options) => { calls.push(options); return { status: 'error' }; }, buildLines, { getStore: () => phase }, collect]
+  );
+  let phase = null;
+  const entries = [{
+    detailRows: Object.assign([['BillDate']], {
+      issues: [
+        { type: 'currency-unmapped', rowNumber: 2 },
+        { type: 'cross-sheet-backfill-skipped', rowNumber: 4, reason: 'no-source-row', matchField: 'Desc', matchValue: 'ACC-SECRET', sourceFileName: 'a.xlsx' }
+      ]
+    })
+  }];
+  create(entries, '模板A');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].errorCode, 'NO_TRANSACTION_DATA');
+  assert.match(calls[0].message, /「跨 Sheet 回填」跳过了1行/);
+  assert.ok(calls[0].detailLines.some((line) => line.includes('ACC-SECRET')), '报错文件保留配对值');
+  assert.ok(calls[0].logDetailLines.length > 0 && calls[0].logDetailLines.every((line) => !line.includes('ACC-SECRET')), '活动日志不含配对值');
+
+  assert.match(calls[0].message, /请点击状态框导出报错文件核对/);
+  // 导入预检阶段不生成报错文件：提示改为看弹窗（界面按 detailLines 逐行列出）
+  phase = { phase: 'prepare' };
+  create(entries, '模板A');
+  assert.match(calls[1].message, /请点击状态框查看逐行原因/);
+  phase = null;
+
+  create([{ detailRows: [['BillDate']] }], '模板A');
+  assert.deepEqual([calls[2].message, calls[2].detailLines, calls[2].logDetailLines], ['导入文件中没有账号存在交易数据', [], null]);
+});
+
+test('v3.2.21 统一错误出口：未显式传 logDetailLines 时，活动日志取 originalError 的脱敏明细，报错文件仍用完整明细', () => {
+  const reports = [];
+  const logs = [];
+  const createErrorResult = loadFunction(
+    'createErrorResult',
+    ['archiveOperationContext', 'createPreflightErrorResult', 'createErrorReport', 'lastErrorReport', 'appendActivityLogEntry'],
+    [{ getStore: () => null }, () => null, (options) => { reports.push(options); return { fileName: 'r.txt' }; }, null, (entry) => logs.push(entry)]
+  );
+  const originalError = { detailLines: ['第 4 行，Desc="ACC-SECRET"'], logDetailLines: ['第 4 行'] };
+  createErrorResult({ step: '导入网银明细文件', message: 'x', detailLines: originalError.detailLines, originalError });
+  assert.deepEqual(reports[0].detailLines, ['第 4 行，Desc="ACC-SECRET"']);
+  assert.deepEqual(logs[0].details.slice(3), ['第 4 行']);
+
+  createErrorResult({ step: '导入网银明细文件', message: 'x', detailLines: ['a'], originalError: new Error('plain') });
+  assert.deepEqual(logs[1].details.slice(3), ['a'], '没有脱敏明细时同 detailLines');
+  createErrorResult({ step: '导入网银明细文件', message: 'x', detailLines: ['a'], logDetailLines: ['b'], originalError });
+  assert.deepEqual(logs[2].details.slice(3), ['b'], '显式传入时优先');
+});
+
+test('v3.2.21 跨 Sheet 回填：按文件名映射导出全部时，模板已删除、未纳入明细的组不导出回填文件；有缓存或其他范围时含全部条目', () => {
+  const entries = [
+    { filePath: '/in/a.xlsx', matchedTemplateId: 1, detailRows: Object.assign([['BillDate'], ['2026-09-25']], { crossSheetBackfillPatches: [{}], crossSheetBackfillSource: { sha256: 'a' } }) },
+    { filePath: '/in/b.xlsx', matchedTemplateId: 2, detailRows: Object.assign([['BillDate'], ['2026-09-25']], { crossSheetBackfillPatches: [{}], crossSheetBackfillSource: { sha256: 'b' } }) }
+  ];
+  let cachedAllDetail = null;
+  const collect = loadFunction(
+    'collectCrossSheetBackfillExportItems',
+    ['getStatementSessionEntries', 'isFilenameMappingMode', 'getGeneratedStatementExport', 'groupStatementEntriesForGeneration', 'hasDetailExportRow'],
+    [
+      () => entries,
+      (templateId) => templateId === -1,
+      () => cachedAllDetail,
+      (list) => list.map((entry) => ({ entries: [entry], templateConfig: entry.matchedTemplateId === 1 ? {} : null })),
+      hasDetailExportRow
+    ]
+  );
+  const paths = (session, scope) => collect(session, scope).map((item) => item.sourceFilePath);
+  assert.deepEqual(paths({ templateId: -1 }, 'all'), ['/in/a.xlsx'], '模板 2 已删除：明细跳过该组，回填文件同样不导出');
+  assert.deepEqual(paths({ templateId: -1 }, 'current'), ['/in/a.xlsx', '/in/b.xlsx']);
+  assert.deepEqual(paths({ templateId: 5 }, 'all'), ['/in/a.xlsx', '/in/b.xlsx']);
+  cachedAllDetail = { filePath: '/out/all.xlsx' };
+  assert.deepEqual(paths({ templateId: -1 }, 'all'), ['/in/a.xlsx', '/in/b.xlsx'], '命中缓存的明细含全部条目');
+});
+
+test('v3.2.21 跨 Sheet 回填：没有一行写入明细的源文件（回填行被过滤账单排除、只剩零金额行）不导出回填文件；分段条目任一有明细行即导出', () => {
+  const detail = (amounts, file) => Object.assign(
+    [['BillDate', 'Credit Amount', 'Debit Amount']].concat(amounts.map(([credit, debit]) => ['2026-09-25', credit, debit])),
+    { crossSheetBackfillPatches: [{ rowNumber: 3 }], crossSheetBackfillSource: { sha256: file } }
+  );
+  const entries = [
+    { filePath: '/in/a.xlsx', matchedTemplateId: 1, detailRows: detail([], 'a') },
+    { filePath: '/in/b.xlsx', matchedTemplateId: 1, detailRows: detail([['10', ''], ['', '5']], 'b') },
+    { filePath: '/in/c.xlsx', matchedTemplateId: 1, detailRows: detail([], 'c') },
+    { filePath: '/in/c.xlsx', matchedTemplateId: 1, detailRows: detail([['1', '0']], 'c') },
+    { filePath: '/in/d.xlsx', matchedTemplateId: 1, detailRows: detail([['0', ''], ['', '0.00']], 'd') }
+  ];
+  const collect = loadFunction(
+    'collectCrossSheetBackfillExportItems',
+    ['getStatementSessionEntries', 'isFilenameMappingMode', 'getGeneratedStatementExport', 'groupStatementEntriesForGeneration', 'hasDetailExportRow'],
+    [() => entries, () => false, () => null, () => [], hasDetailExportRow]
+  );
+  assert.deepEqual(collect({ templateId: 5 }, 'all').map((item) => item.sourceFilePath), ['/in/b.xlsx', '/in/c.xlsx']);
+});
+
+test('v3.2.21 跨 Sheet 回填：按文件名映射多模板组中任一组的交易全部被回填跳过时整批失败（用户决定），在替换会话旧条目与写出之前失败，失败报告带这些组的逐行回填跳过；两种组顺序都如此', () => {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  const groupStatementEntriesForGeneration = loadFunction(
+    'groupStatementEntriesForGeneration',
+    ['database', 'resolveGenerationGroupKey', 'getTemplateMappingConfig'],
+    [{ getTemplate: (id) => ({ id, channelId: null }) }, resolveGenerationGroupKey, (id) => ({ template: { id }, exportMappings: [], exportTargetFields: [] })]
+  );
+  const isAllSkipped = loadFunction('isAllTransactionsSkippedByBackfill', ['hasDetailExportRow'], [hasDetailExportRow]);
+  const skippedIssue = { type: 'cross-sheet-backfill-skipped', rowNumber: 3, reason: 'no-source-row' };
+  // 回填跳过了全部交易：只剩表头，或只剩带日期、收支为空的期初余额行（不写入明细，第十五轮审查）
+  const emptiedEntry = (templateId = 1, issue = skippedIssue, { openingRow = false } = {}) => {
+    const detailRows = [['BillDate', 'Credit Amount', 'Debit Amount'], ...(openingRow ? [['2026-09-01', '', '']] : [])];
+    detailRows.issues = [issue];
+    return { matchedTemplateId: templateId, filePath: `/private/T${templateId}.xlsx`, detailRows };
+  };
+  const validEntry = () => {
+    const detailRows = [['BillDate', 'Credit Amount', 'Debit Amount'], ['2026-09-01', '10', '']];
+    detailRows.issues = [];
+    return { matchedTemplateId: 2, filePath: '/private/B.xlsx', detailRows };
+  };
+  const buildLines = loadFunction(
+    'buildImportWarningDetailLines',
+    ['formatBalanceGapLine', 'formatBalanceMismatchLine', 'formatBalanceSeedReplaceLine'],
+    [String, String, String]
+  );
+  const archiveOperationContext = { getStore: () => null };
+  const buildMessage = loadFunction('buildBackfillEmptiedGroupsMessage', ['path', 'archiveOperationContext'], [path, archiveOperationContext]);
+  const run = (fileEntries, { removed = [] } = {}) => {
+    const generated = [];
+    const sessionEntries = [];
+    const imported = [];
+    const deps = {
+      groupStatementEntriesForGeneration,
+      FileValidationError: require('../../../src/backend/file-service').FileValidationError,
+      path,
+      FIXED_FIELD_VALUE_PREFIX: '__FIXED__:',
+      MERCHANT_ID_MULTI_ACCOUNT_MARKER: '__MULTI__',
+      normalizeCell: (value) => String(value == null ? '' : value).trim(),
+      getEntryTemplateConfig: ({ entry }) => ({ template: { id: entry.matchedTemplateId }, exportMappings: [], exportTargetFields: [] }),
+      buildStatementGenerationConfig: ({ template }) => ({ template }),
+      rebuildMatchedTemplateFileEntries: ({ fileEntries: entries }) => entries,
+      buildPreparedStatementBatchFromEntries: ({ fileEntries: entries }) => {
+        const detailRows = [entries[0].detailRows[0], ...entries.flatMap((entry) => entry.detailRows.slice(1))];
+        return { detailRows, warnings: entries.flatMap((entry) => entry.detailRows.issues) };
+      },
+      isAllTransactionsSkippedByBackfill: isAllSkipped,
+      // v3.2.21：写出前的整批检查（本用例的组都可写出）
+      assertStatementBatchWritable: () => {},
+      assertGenerationOutputNameUnique: () => {},
+      findGenerationGroupOutputPathConflicts: () => null,
+      buildStatementOutputPathConflictError: () => new Error('conflict'),
+      removeStatementSessionEntriesByFilePath: (_session, filePath) => { removed.push(filePath); },
+      buildImportWarningDetailLines: buildLines,
+      buildBackfillEmptiedGroupsMessage: buildMessage,
+      generateStatementFiles: ({ config, preparedBatch }) => {
+        generated.push(config.template.id);
+        return { detail: { filePath: `/tmp/group-${config.template.id}.xlsx` }, balance: null, warnings: preparedBatch.warnings };
+      },
+      parseRequiredBillDates: (rows) => rows.slice(1).map((row) => row[0]),
+      buildDateRangeLabel: () => '20260901',
+      getToday: () => '20260901',
+      buildOutputFilePath: ({ outputFileName }) => ({ outputFilePath: `/tmp/${outputFileName}` }),
+      mergeGeneratedXlsxFiles: () => {},
+      buildStatementFileEntry: (entry) => entry,
+      buildStatementFileEntryId: () => 'entry',
+      appendStatementSessionImport: ({ fileEntries: entries }) => { sessionEntries.push(...entries); return 'batch-1'; },
+      buildStatementBatchId: () => 'batch-1',
+      lastGeneratedExports: {},
+      updateStatementSessionCache: () => {},
+      buildImportResultFromGeneratedFiles: ({ generatedFiles }) => { imported.push(generatedFiles); return { status: 'captured' }; },
+      FILENAME_MAPPING_TEMPLATE_ID: -1
+    };
+    const generate = loadFunction('generateMultiTemplateGroupFiles', Object.keys(deps), Object.values(deps));
+    generate({
+      fileEntries,
+      fallbackTemplateConfig: {},
+      selectedBigAccount: null,
+      session: {},
+      replacePaths: ['/private/old.xlsx'],
+      inputFilePaths: fileEntries.map((entry) => entry.filePath)
+    });
+    return { generated, sessionEntries, imported };
+  };
+  for (const order of [[emptiedEntry(), validEntry()], [validEntry(), emptiedEntry()]]) {
+    const label = order.map((entry) => path.basename(entry.filePath)).join(',');
+    const removedPaths = [];
+    assert.throws(() => run(order, { removed: removedPaths }), (error) => {
+      assert.equal(error.name, 'FileValidationError', label);
+      assert.match(error.message, /交易全部被「跨 Sheet 回填」跳过（共1行），已取消本次导入.*T1\.xlsx$/, label);
+      assert.equal(error.detailLines.length, 2, `${label}：标题行 + 空组的一行`);
+      assert.match(error.detailLines[1], /第3行/, label);
+      return true;
+    }, label);
+    assert.deepEqual(removedPaths, [], `${label}：会话未被改动`);
+  }
+  // 空组留有带日期、收支为空的期初余额行：同样按交易全部被跳过整批失败，不靠生成时取不到日期
+  const generatedIds = [];
+  assert.throws(() => {
+    const { generated } = run([validEntry(), emptiedEntry(1, skippedIssue, { openingRow: true })]);
+    generatedIds.push(...generated);
+  }, /已取消本次导入/);
+  assert.deepEqual(generatedIds, []);
+  // 整批都是这种组：同样在替换会话旧条目之前失败，失败报告带全部组的逐行回填跳过
+  const removed = [];
+  const otherIssue = { ...skippedIssue, rowNumber: 9 };
+  assert.throws(() => run([emptiedEntry(1), emptiedEntry(3, otherIssue)], { removed }), (error) => {
+    assert.match(error.message, /共2行.*T1\.xlsx、T3\.xlsx$/);
+    assert.equal(error.detailLines.length, 3, '标题行 + 两组各一行');
+    assert.ok(Array.isArray(error.logDetailLines));
+    return true;
+  });
+  assert.deepEqual(removed, [], '会话未被改动');
+});
+
+// ---- v3.2.21 审查回归（第十四轮）----
+
+test('v3.2.21 跨 Sheet 回填：按文件名映射多组时任一组的交易全部被回填跳过，在大账号聚合、选择与写入会话之前整批取消（用户决定），失败报告逐行列出这些组的跳过原因', () => {
+  const buildLines = loadFunction(
+    'buildImportWarningDetailLines',
+    ['formatBalanceGapLine', 'formatBalanceMismatchLine', 'formatBalanceSeedReplaceLine'],
+    [String, String, String]
+  );
+  const calls = [];
+  const archiveOperationContext = { getStore: () => ({ phase: 'prepare' }) };
+  const create = loadFunction(
+    'createBackfillEmptiedGroupsErrorResult',
+    ['createErrorResult', 'buildImportWarningDetailLines', 'collectCrossSheetBackfillWarnings', 'buildBackfillEmptiedGroupsMessage'],
+    [(options) => { calls.push(options); return { status: 'error' }; }, buildLines, loadFunction('collectCrossSheetBackfillWarnings'),
+      loadFunction('buildBackfillEmptiedGroupsMessage', ['path', 'archiveOperationContext'], [path, archiveOperationContext])]
+  );
+  const skipped = (rowNumber) => ({ type: 'cross-sheet-backfill-skipped', rowNumber, reason: 'no-source-row', matchField: 'Desc', matchValue: 'ACC-SECRET', sourceFileName: 'a.xlsx' });
+  const entry = (filePath, issues) => ({ filePath, detailRows: Object.assign([['BillDate']], { issues }) });
+  create([
+    { entries: [entry('/private/A.xlsx', [skipped(3), { type: 'currency-unmapped', rowNumber: 2 }])] },
+    { entries: [entry('/private/C.xlsx', [skipped(5), skipped(6)])] }
+  ], '按文件名映射模板');
+  assert.equal(calls[0].errorCode, 'NO_TRANSACTION_DATA', '界面按该码在弹窗中逐行列出（预检阶段没有报错文件）');
+  assert.match(calls[0].message, /共3行.*已取消本次导入.*请点击状态框查看逐行原因.*A\.xlsx、C\.xlsx$/);
+  assert.equal(calls[0].detailLines.filter((line) => line.includes('ACC-SECRET')).length, 3, '两组共 3 行逐行列出');
+  assert.ok(calls[0].logDetailLines.every((line) => !line.includes('ACC-SECRET')), '活动日志不含配对值');
+
+  // 导入入口：只在多组时拦下，且位于大账号聚合（及选择）之前
+  const source = functionSource('handleFilenameMappingImport');
+  const precheck = source.indexOf('createBackfillEmptiedGroupsErrorResult(');
+  assert.ok(precheck > source.indexOf('const importGenerationGroups = groupStatementEntriesForGeneration('));
+  assert.ok(precheck < source.indexOf('const aggregatedBigAccounts = [];'));
+  assert.match(source, /importGenerationGroups\.length > 1\s*\?\s*importGenerationGroups\.filter\(\(group\) => isAllTransactionsSkippedByBackfill\(group\.entries\)\)/);
+});
+
+// ---- v3.2.21 审查回归（第十五轮）----
+
+test('v3.2.21 跨 Sheet 回填：指定模板已记住固定大账号顺序时，交易全部被回填跳过同样在套用记住的顺序之前按没有交易数据返回逐行原因', async () => {
+  const execute = loadDesignatedImportExecute({
+    templateConfig: designatedTemplateConfig([
+      { merchantId: 'M001', currencies: ['USD'], isMultiCurrency: false },
+      { merchantId: 'M002', currencies: ['USD'], isMultiCurrency: false }
+    ]),
+    mode: 'fixed',
+    order: {
+      assignments: [{ rowIndex: 0, merchantId: 'M001', currency: 'USD' }],
+      fileCount: 1,
+      files: [{ fileIndex: 0, accountCount: 1, accounts: ['M001'], rowAccounts: ['M001'], rowEmpty: [false] }]
+    },
+    logs: []
+  });
+  const detailRows = [['BillDate', 'Credit Amount', 'Debit Amount'], ['2026-09-01', '', '']];
+  detailRows.rowMetas = [{ sourceRowNumber: 2 }];
+  detailRows.headerBreaks = [];
+  detailRows.issues = [{ type: 'cross-sheet-backfill-skipped', rowNumber: 3, reason: 'no-source-row' }];
+  Object.defineProperty(detailRows, 'bigAccountRecognitionBasis', { enumerable: false, value: {
+    version: 1, headerWindows: [{ headerRowNumber: 1, candidateRows: [] }], bridgeClearingIdsByBlock: ['']
+  } });
+  const result = await execute(designatedPrepared([{ filePath: path.resolve('/private/all-skipped.xlsx'), detailRows }]));
+  assert.equal(result.status, 'error');
+  assert.equal(result.errorCode, 'NO_TRANSACTION_DATA');
+  assert.deepEqual(result.detailLines, ['3:no-source-row']);
 });

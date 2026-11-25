@@ -170,6 +170,25 @@ function createStatementGenerationHelpers(deps) {
     return seenManualBalanceSeedsByFile.get(fileIdentity);
   }
 
+  // v3.2.21：跨 Sheet 回填跳过了全部交易时，生成在找不到有效账单日期时失败，告警分支走不到——失败报告仍逐行列出
+  //   回填跳过与日期提示（报错文件带配对值；活动日志只记行号与原因）。
+  function withCrossSheetBackfillDetailLines(error, warnings) {
+    const backfillWarnings = (Array.isArray(warnings) ? warnings : []).filter((warning) => (
+      warning && String(warning.type || '').startsWith('cross-sheet-backfill-')
+    ));
+    if (!backfillWarnings.length || !(error instanceof FileValidationError)) return error;
+    const skippedCount = backfillWarnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped').length;
+    const message = skippedCount
+      ? `${error.message}（「跨 Sheet 回填」跳过了${skippedCount}行，请导出报错文件核对）`
+      : error.message;
+    return new FileValidationError(error.code, message, {
+      detailLines: error.detailLines.concat(buildImportWarningDetailLines(backfillWarnings)),
+      logDetailLines: (Array.isArray(error.logDetailLines) ? error.logDetailLines : error.detailLines)
+        .concat(buildImportWarningDetailLines(backfillWarnings, { forLog: true })),
+      context: error.context
+    });
+  }
+
   // E09-P0 现状取证接缝：production Main 委托到此同一函数；依赖注入不改变
   // 现有 storage、writer 与 balance 的所有权。
   function buildSimultaneousAmountError(simultaneousAmountRows, { config, inputFilePaths = [] }) {
@@ -344,6 +363,17 @@ function createStatementGenerationHelpers(deps) {
       throw buildSimultaneousAmountError(simultaneousAmountRows, { config, inputFilePaths: preparedBatch.inputFilePaths });
     }
 
+    // v3.2.21：明细没有可导出的交易、且有行被跨 Sheet 回填跳过（交易全部被跳过，如只剩带日期、收支为空的期初余额行）时，
+    //   在写出文件、替换会话之前报错并逐行列出跳过原因（不靠取不到账单日期；没有回填跳过时沿用原行为）
+    if (detailExportRows.length <= 1 && warnings.some((warning) => warning && warning.type === 'cross-sheet-backfill-skipped')) {
+      throw withCrossSheetBackfillDetailLines(new FileValidationError('FILE_READ', '导入文件中没有账号存在交易数据', {
+        context: {
+          inputFilePath: (Array.isArray(preparedBatch.inputFilePaths) ? preparedBatch.inputFilePaths : []).join(';'),
+          templateName: statementOutputName(config)
+        }
+      }), warnings);
+    }
+
     skippedDetailRows.forEach((row) => {
       warnings.push({
         type: 'detail-row-skipped',
@@ -353,9 +383,14 @@ function createStatementGenerationHelpers(deps) {
       });
     });
 
-    const billDates = detailExportRows.length > 1
-      ? parseRequiredBillDates(detailExportRows)
-      : parseRequiredBillDates(detailRows);
+    let billDates;
+    try {
+      billDates = detailExportRows.length > 1
+        ? parseRequiredBillDates(detailExportRows)
+        : parseRequiredBillDates(detailRows);
+    } catch (error) {
+      throw withCrossSheetBackfillDetailLines(error, warnings);
+    }
     const dateRangeLabel = buildDateRangeLabel(billDates);
     const internalSuffix = scope === 'all' ? 'all' : '';
     const outputMerchantId = scope === 'all' ? '' : preparedBatch.selectedMerchantId;
@@ -857,6 +892,25 @@ function createStatementGenerationHelpers(deps) {
     return result;
   }
 
+  // v3.2.21：等待余额处理的结果（补录、断档、余额差异、替换确认；含按文件名映射逐组处理余额时的后续提示，见 main.js
+  //   regenerateVirtualTemplateBalanceFromSession 的调用方）不经 createWarningResult，但明细已可导出：提示中带上
+  //   「跨 Sheet 回填」跳过的笔数（用户导出明细前即可知道有交易未写入），并另记活动日志（只记行号与原因，不含配对值）。
+  //   余额处理完成后重新生成的结果带完整的逐行报错文件。
+  function attachCrossSheetBackfillSkipped(result, warnings) {
+    const skipped = (Array.isArray(warnings) ? warnings : []).filter((warning) => (
+      warning && warning.type === 'cross-sheet-backfill-skipped'
+    ));
+    if (!skipped.length || !result || typeof result !== 'object') return result;
+    result.crossSheetBackfillSkippedRowCount = skipped.length;
+    result.message = `${result.message}；「跨 Sheet 回填」${skipped.length}行未配上，已跳过、未写入明细，处理余额后可导出报错文件逐行核对`;
+    if (typeof appendActivityLogEntry === 'function') appendActivityLogEntry({
+      level: 'warning',
+      message: '跨 Sheet 回填：部分行未配上，已跳过',
+      details: buildImportWarningDetailLines(skipped, { forLog: true })
+    });
+    return result;
+  }
+
   function buildImportResultFromGeneratedFiles({
     generatedFiles,
     templateId,
@@ -896,7 +950,10 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         manualResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return attachDuplicateDropped(manualResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
+      return attachCrossSheetBackfillSkipped(
+        attachDuplicateDropped(manualResult, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+        generatedFiles.warnings
+      );
     }
 
     const balanceGaps = extractBalanceGapConfirmGaps(generatedFiles.warnings);
@@ -911,7 +968,10 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         gapResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return attachDuplicateDropped(gapResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
+      return attachCrossSheetBackfillSkipped(
+        attachDuplicateDropped(gapResult, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+        generatedFiles.warnings
+      );
     }
 
     const balanceMismatches = extractBalanceMismatchConfirmItems(generatedFiles.warnings);
@@ -926,7 +986,10 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         mismatchResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return attachDuplicateDropped(mismatchResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
+      return attachCrossSheetBackfillSkipped(
+        attachDuplicateDropped(mismatchResult, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+        generatedFiles.warnings
+      );
     }
 
     const balanceSeedReplacements = extractBalanceSeedReplaceConfirmItems(generatedFiles.warnings);
@@ -941,7 +1004,10 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         replaceResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return attachDuplicateDropped(replaceResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
+      return attachCrossSheetBackfillSkipped(
+        attachDuplicateDropped(replaceResult, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+        generatedFiles.warnings
+      );
     }
 
     if (generatedFiles.warnings.length) {
@@ -959,6 +1025,7 @@ function createStatementGenerationHelpers(deps) {
         detailReady,
         balanceReady,
         detailLines: buildImportWarningDetailLines(generatedFiles.warnings),
+        logDetailLines: buildImportWarningDetailLines(generatedFiles.warnings, { forLog: true }),
         context: {
           templateId,
           inputFilePath,
@@ -1173,6 +1240,7 @@ function createStatementGenerationHelpers(deps) {
     assertStatementBatchWritable,
     assertStatementEntriesWritable,
     assertNoUnwritableRowText,
+    attachCrossSheetBackfillSkipped,
     attachDuplicateDropped,
     buildImportResultFromGeneratedFiles,
     buildPreparedBatchFromStatementSession,

@@ -213,6 +213,8 @@
           // v3.2.19：原始账单预处理
           '过滤账单',
           '重复账单过滤',
+          // v3.2.21：原始账单预处理「跨 Sheet 回填」
+          '跨 Sheet 回填',
           // v3.2.22：含「按字段区分发生额」，预览可见其下方的「特征值设置」【管理】
           ...ADVANCED_MAPPING_FIELDS
         ],
@@ -246,7 +248,7 @@
             isMultiBigAccount: true
           }
         ],
-        preprocessFields: ['过滤账单', '重复账单过滤'],
+        preprocessFields: ['过滤账单', '重复账单过滤', '跨 Sheet 回填'],
         advancedMappingFields: ADVANCED_MAPPING_FIELDS.slice()
       };
     }

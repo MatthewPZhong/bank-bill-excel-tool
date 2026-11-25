@@ -13,6 +13,10 @@ const { normalizeFeeAmountFormula } = require('../file-service/bill-split-fee-fo
 const { normalizeFeeFieldMappings } = require('../file-service/bill-split-fee-field-mappings');
 const { normalizeBillSplitRowFilterRules } = require('../file-service/bill-split-row-filter');
 const { normalizeRowFilterRules } = require('../file-service/row-filter-rules');
+const {
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule
+} = require('../file-service/cross-sheet-backfill');
 
 function listTemplates(db) {
   // v1.5.3 R2 §3.1：bigAccountCount / singleBigAccountMerchantId 不含自有账号
@@ -32,6 +36,7 @@ function listTemplates(db) {
       t.filename_fixed_field AS filenameFixedField,
       t.feature_filter_json AS featureFilterJson,
       t.preprocess_row_filter_rules_json AS preprocessRowFilterRulesJson,
+      t.cross_sheet_backfill_rule_json AS crossSheetBackfillRuleJson,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
@@ -73,6 +78,7 @@ function getTemplate(db, templateId) {
         t.filename_fixed_field AS filenameFixedField,
         t.feature_filter_json AS featureFilterJson,
         t.preprocess_row_filter_rules_json AS preprocessRowFilterRulesJson,
+        t.cross_sheet_backfill_rule_json AS crossSheetBackfillRuleJson,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -176,6 +182,8 @@ function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers })
       db.prepare("UPDATE templates SET feature_filter_json = '' WHERE id = ?").run(existing.id);
       // v3.2.19：原始账单预处理的过滤规则同样引用旧表头，一并清空
       db.prepare("UPDATE templates SET preprocess_row_filter_rules_json = '' WHERE id = ?").run(existing.id);
+      // v3.2.21：跨 Sheet 回填规则同样引用旧表头，一并清空
+      db.prepare("UPDATE templates SET cross_sheet_backfill_rule_json = '' WHERE id = ?").run(existing.id);
       db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(existing.id);
@@ -441,6 +449,17 @@ function writeTemplatePreprocessRowFilterRules(db, templateId, rules) {
     .run(normalized.length ? JSON.stringify(normalized) : '', templateId);
 }
 
+// v3.2.21：写入「原始账单预处理 → 跨 Sheet 回填」规则；调用方须在事务内调用。对象时整体替换（没有任何设置时清空），
+//   null / undefined 不动。
+function writeTemplateCrossSheetBackfillRule(db, templateId, rule) {
+  if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+    return;
+  }
+  const normalized = normalizeCrossSheetBackfillRule(rule);
+  db.prepare('UPDATE templates SET cross_sheet_backfill_rule_json = ? WHERE id = ?')
+    .run(hasCrossSheetBackfillSettings(normalized) ? JSON.stringify(normalized) : '', templateId);
+}
+
 // v3.2.18：已保存的主映射与拆分映射中选「字段筛选特征值」的行及其所选特征值 id（ref 未选为 ''）。
 // v3.2.21：传入 logicValueMappingValue 与 parseCandidateRef 时，「逻辑取值」候补里的特征值也返回（role: 'logic-value'）；
 //   parseCandidateRef(候补) 返回特征值 id，不是特征值候补时返回 null。
@@ -504,7 +523,8 @@ function saveMappings(
     featureFilters = undefined,
     currencyBigAccounts = null,
     billSplitRowFilterRules = null,
-    preprocessRowFilterRules = null
+    preprocessRowFilterRules = null,
+    crossSheetBackfillRule = null
   } = {}
 ) {
   const now = new Date().toISOString();
@@ -657,6 +677,8 @@ function saveMappings(
     }
     // v3.2.19：「原始账单预处理 → 过滤账单」的过滤规则同样随映射【保存】落库；未传（null）时保持原值。
     writeTemplatePreprocessRowFilterRules(db, templateId, preprocessRowFilterRules);
+    // v3.2.21：「原始账单预处理 → 跨 Sheet 回填」规则同样随映射【保存】落库；未传（null）时保持原值。
+    writeTemplateCrossSheetBackfillRule(db, templateId, crossSheetBackfillRule);
 
     if (dateFormat) {
       db.prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?').run(now, dateFormat, templateId);
@@ -1254,6 +1276,10 @@ function listTemplateBundleEntries(db) {
         : [],
       // v3.2.19（bundle v8）：原始账单预处理的过滤规则；「过滤账单」开关是映射行，已在 mappings 中
       preprocessRowFilterRules: normalizeRowFilterRules(template.preprocessRowFilterRules),
+      // 跨 Sheet 回填（bundle v10）：原始账单预处理「跨 Sheet 回填」规则；开关是映射行，已在 mappings 中
+      crossSheetBackfillRule: hasCrossSheetBackfillSettings(template.crossSheetBackfillRule)
+        ? normalizeCrossSheetBackfillRule(template.crossSheetBackfillRule)
+        : null,
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };

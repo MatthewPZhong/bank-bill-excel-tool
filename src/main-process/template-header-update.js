@@ -10,6 +10,7 @@ const {
 } = require('../backend/file-service/common');
 const { isFieldCompareOperator } = require('../backend/file-service/row-filter-rules');
 const { parseLogicValueFeatureFilterRef } = require('../backend/file-service/logic-value');
+const { normalizeCrossSheetBackfillRule } = require('../backend/file-service/cross-sheet-backfill');
 
 function normalizeHeaderList(headers) {
   return Array.isArray(headers) ? headers.map((header) => normalizeCell(header)) : [];
@@ -53,6 +54,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     PREPROCESS_ROW_FILTER_MAPPING_FIELD,
     PREPROCESS_ROW_FILTER_ENABLED_OPTION,
     DUPLICATE_ROW_FILTER_MAPPING_FIELD,
+    CROSS_SHEET_BACKFILL_MAPPING_FIELD,
+    CROSS_SHEET_BACKFILL_ENABLED_OPTION,
     SIGNED_AMOUNT_MAPPING_FIELD,
     AMOUNT_BASED_NAME_MAPPING_FIELD,
     AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -70,7 +73,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     REUSE_MODULE_MAPPING_FIELD,
     BILL_SPLIT_ROW_FILTER_MAPPING_FIELD,
     PREPROCESS_ROW_FILTER_MAPPING_FIELD,
-    DUPLICATE_ROW_FILTER_MAPPING_FIELD
+    DUPLICATE_ROW_FILTER_MAPPING_FIELD,
+    CROSS_SHEET_BACKFILL_MAPPING_FIELD
   ].filter(Boolean));
   // 规则类引用（判断字段、取值字段、拆分行字段、筛选字段）：非空且不是固定值即为源字段。
   function isRuleSourceValue(value) {
@@ -297,6 +301,25 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     pushRowFilterRules(input.billSplitRowFilterRules, 'bill-split-row-filter', rowFilterActive);
     pushRowFilterRules(input.preprocessRowFilterRules, 'preprocess-row-filter', preprocessRowFilterActive);
 
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」——只收集本表字段（待回填行条件、本表配对字段、回填目标字段）；
+    //   来源 sheet 的字段不在模板表头中，只在生成时按原始账单校验。
+    const crossSheetBackfillRule = normalizeCrossSheetBackfillRule(input.crossSheetBackfillRule);
+    if (crossSheetBackfillRule) {
+      const crossSheetBackfillActive = Boolean(CROSS_SHEET_BACKFILL_MAPPING_FIELD)
+        && findSwitchValue(mappings, CROSS_SHEET_BACKFILL_MAPPING_FIELD) === CROSS_SHEET_BACKFILL_ENABLED_OPTION;
+      pushRowFilterRules(crossSheetBackfillRule.rowRules, 'cross-sheet-backfill-row-rule', crossSheetBackfillActive);
+      push({ area: 'cross-sheet-backfill', target: '', role: 'match', field: crossSheetBackfillRule.matchField, active: crossSheetBackfillActive });
+      crossSheetBackfillRule.backfillFields.forEach((item, index) => {
+        push({
+          area: 'cross-sheet-backfill',
+          target: String(index + 1),
+          role: 'target',
+          field: item.targetField,
+          active: crossSheetBackfillActive
+        });
+      });
+    }
+
     // 不复用时生效的是拆分映射；根据字段值过滤账单时未命中的行走主映射，两套都生效。
     const usedIds = usedFeatureFilterIds(billSplitMappingActive
       ? (rowFilterActive ? billSplitMappings.concat(mappings) : billSplitMappings)
@@ -361,6 +384,12 @@ function formatFieldReferenceLine(reference) {
       return `根据字段值过滤账单 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件${reference.compare ? '（比较字段）' : ''} ← ${field}${suffix}`;
     case 'preprocess-row-filter':
       return `原始账单预处理 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件${reference.compare ? '（比较字段）' : ''} ← ${field}${suffix}`;
+    case 'cross-sheet-backfill-row-rule':
+      return `原始账单预处理 · 跨 Sheet 回填 · 待回填行条件 #${reference.target} 第 ${reference.role} 个条件${reference.compare ? '（比较字段）' : ''} ← ${field}${suffix}`;
+    case 'cross-sheet-backfill':
+      return reference.role === 'match'
+        ? `原始账单预处理 · 跨 Sheet 回填 · 本表配对字段 ← ${field}${suffix}`
+        : `原始账单预处理 · 跨 Sheet 回填 · 回填字段第 ${reference.target} 行 ← ${field}${suffix}`;
     case 'feature-filter':
       return reference.target
         ? `特征值「${reference.target}」 · 筛选字段 ← ${field}${suffix}`

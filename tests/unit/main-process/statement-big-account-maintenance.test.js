@@ -439,3 +439,96 @@ test('手动分配大账号：被分配的行中只写进大账号 / 币种列�
   const [unassigned] = assign([entry], []);
   assert.deepEqual(unassigned.detailRows.issues, issues);
 });
+
+// ---- v3.2.21 审查回归（第三十一轮）----
+
+test('大账号识别：表头含原生日期（1904 工作簿，正式映射按原文换算后的值定位）时，按正式映射命中的各分段表头取识别窗口', async (t) => {
+  const JSZip = require('jszip');
+  const { readRowsWithMetadata } = require('../../../src/backend/file-service/readers');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-recognition-iso-header-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, '日期表头.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['BANK1001'], ['', 'Credit Amount', 'Debit Amount', 'ISO'], ['', 10, '', 'a'],
+    ['BANK2001'], ['', 'Credit Amount', 'Debit Amount', 'ISO'], ['', 20, '', 'b']
+  ]), '账单');
+  XLSX.writeFile(workbook, filePath);
+  const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+  const workbookXml = await zip.file('xl/workbook.xml').async('string');
+  zip.file('xl/workbook.xml', /<workbookPr\b/.test(workbookXml)
+    ? workbookXml.replace(/<workbookPr\b/, '<workbookPr date1904="1"')
+    : workbookXml.replace(/(<workbook\b[^>]*>)/, '$1<workbookPr date1904="1"/>'));
+  const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+  zip.file('xl/worksheets/sheet1.xml', sheetXml
+    .replace(/<c r="D2"[^>]*>[\s\S]*?<\/c>/, '<c r="D2" t="d"><v>2026-09-25T00:00:00</v></c>')
+    .replace(/<c r="D5"[^>]*>[\s\S]*?<\/c>/, '<c r="D5" t="d"><v>2026-09-25T00:00:00</v></c>'));
+  fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+  // 新建模板的表头（与正式导入同一读取结果，见 extractStatementTemplateHeaders）
+  const headers = readRowsWithMetadata(filePath, [], { exactIsoDates: true, onlyTargetSheet: true }).rows[1].slice(1).map((cell) => String(cell));
+  assert.deepEqual(deps.findHeaderRowNumbersInRawRows(XLSX.utils.sheet_to_json(XLSX.readFile(filePath).Sheets['账单'], { header: 1 }), headers), [],
+    '前置：按读取库原值找不到新建模板的表头');
+  const accountMappingByBankId = { BANK1001: { clearingAccountId: 'CLEAR1001' }, BANK2001: { clearingAccountId: 'CLEAR2002' } };
+  let recognitionBasis;
+  const detailRows = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['Credit Amount', 'Debit Amount'],
+    mappingByField: { 'Credit Amount': 'Credit Amount', 'Debit Amount': 'Debit Amount' },
+    expectedSourceHeaders: headers,
+    readOptions: {
+      onWorkbookRows: (rawRows, { headerRowNumbers = [] } = {}) => {
+        recognitionBasis = deps.buildBigAccountRecognitionBasis({
+          rawRows, expectedSourceHeaders: headers, accountMappingByBankId, matchedHeaderRowNumbers: headerRowNumbers
+        });
+      }
+    }
+  });
+  assert.deepEqual(recognitionBasis.headerWindows.map((window) => window.headerRowNumber), [2, 5]);
+  const finalized = deps.finalizeBigAccountRecognitionBasis(recognitionBasis, detailRows);
+  assert.deepEqual(finalized.bridgeClearingIdsByBlock, ['CLEAR1001', 'CLEAR2002']);
+});
+
+test('大账号识别：首段表头含原生日期、第二段同一列直接存了等价的数值序号（按读取库原值只能找到第二段）时，识别窗口按正式映射命中的两段，不错位', async (t) => {
+  const JSZip = require('jszip');
+  const { readRowsWithMetadata } = require('../../../src/backend/file-service/readers');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-recognition-mixed-header-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, '混合表头.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['BANK1001'], ['', 'Credit Amount', 'Debit Amount', 'ISO'], ['', 10, '', 'a'],
+    ['BANK2001'], ['', 'Credit Amount', 'Debit Amount', 'LATER'], ['', 20, '', 'b']
+  ]), '账单');
+  XLSX.writeFile(workbook, filePath);
+  const rewrite = async (entry, mutate) => {
+    const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+    zip.file(entry, mutate(await zip.file(entry).async('string')));
+    fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+  };
+  await rewrite('xl/workbook.xml', (xml) => (/<workbookPr\b/.test(xml)
+    ? xml.replace(/<workbookPr\b/, '<workbookPr date1904="1"')
+    : xml.replace(/(<workbook\b[^>]*>)/, '$1<workbookPr date1904="1"/>')));
+  await rewrite('xl/worksheets/sheet1.xml', (xml) => xml.replace(/<c r="D2"[^>]*>[\s\S]*?<\/c>/, '<c r="D2" t="d"><v>2026-09-25T00:00:00</v></c>'));
+  const headers = readRowsWithMetadata(filePath, [], { exactIsoDates: true, onlyTargetSheet: true }).rows[1].slice(1).map((cell) => String(cell));
+  await rewrite('xl/worksheets/sheet1.xml', (xml) => xml.replace(/<c r="D5"[^>]*>[\s\S]*?<\/c>/, `<c r="D5"><v>${headers[2]}</v></c>`));
+  const rawRows = XLSX.utils.sheet_to_json(XLSX.readFile(filePath).Sheets['账单'], { header: 1, blankrows: true, defval: '' });
+  assert.deepEqual(deps.findHeaderRowNumbersInRawRows(rawRows, headers), [5], '前置：按读取库原值只能找到第二段');
+  const accountMappingByBankId = { BANK1001: { clearingAccountId: 'CLEAR1001' }, BANK2001: { clearingAccountId: 'CLEAR2002' } };
+  let recognitionBasis;
+  const detailRows = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['Credit Amount', 'Debit Amount'],
+    mappingByField: { 'Credit Amount': 'Credit Amount', 'Debit Amount': 'Debit Amount' },
+    expectedSourceHeaders: headers,
+    readOptions: {
+      onWorkbookRows: (workbookRows, { headerRowNumbers = [] } = {}) => {
+        recognitionBasis = deps.buildBigAccountRecognitionBasis({
+          rawRows: workbookRows, expectedSourceHeaders: headers, accountMappingByBankId, matchedHeaderRowNumbers: headerRowNumbers
+        });
+      }
+    }
+  });
+  assert.deepEqual(detailRows.headerBreaks, [5]);
+  assert.deepEqual(recognitionBasis.headerWindows.map((window) => window.headerRowNumber), [2, 5]);
+  assert.deepEqual(deps.finalizeBigAccountRecognitionBasis(recognitionBasis, detailRows).bridgeClearingIdsByBlock, ['CLEAR1001', 'CLEAR2002']);
+});
