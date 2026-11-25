@@ -1869,8 +1869,9 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
   test('异常报告日期往返在上海时区同样成立（读取器在该时区有 43 秒的历史偏差）', () => {
     // 默认时区下上面的断言可能恒成立：固定时区在子进程里把同一条用例完整再跑一遍。
     if (process.env.POSITION_REPORT_DATE_TZ_CHILD === '1') return;
+    // 显式指定报告格式：Node 22 在非终端下默认 TAP（`# pass 1`），Node 24 默认 spec（`ℹ pass 1`）。
     const child = spawnSync(process.execPath, [
-      '--test', `--test-name-pattern=${REPORT_DATE_ROUND_TRIP}`, __filename
+      '--test', '--test-reporter=spec', `--test-name-pattern=${REPORT_DATE_ROUND_TRIP}`, __filename
     ], {
       // 去掉测试运行器传给子进程的上下文标记，让它作为独立的一次测试运行并正常输出结果。
       env: {
@@ -1881,8 +1882,8 @@ test.describe('平盘导入：读取器、调度器与单遍导入', () => {
       encoding: 'utf8'
     });
     assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
-    assert.match(child.stdout, /ℹ pass 1\b/);
-    assert.match(child.stdout, /ℹ fail 0\b/);
+    assert.match(child.stdout, /^(?:ℹ|#) pass 1\b/m);
+    assert.match(child.stdout, /^(?:ℹ|#) fail 0\b/m);
   });
 
   test('单遍导入的磁盘门禁按暂存文件大小估算行数据与 WAL 增长，空间不足时在写库前拒绝', async (t) => {
