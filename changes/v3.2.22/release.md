@@ -97,6 +97,11 @@
 
 ## 验证（清单 C4）
 
+- **本地门禁**：`npm run release-check` 在候选 `35deef49` 上 PASS（2026-11-24 23:07–23:15 PST，运行前后 HEAD 一致）：lint；架构检查 668/668 文件；smoke（含 `render-status-box` 23/23）；单测 9783 项（9779 通过、4 跳过、0 失败）；集成 93 个脚本、3901 个用例全部通过，回写 `rules/integration-test-policy.md` 第七节（`18369169` 单独提交）。之后的提交只改 `rules/integration-test-policy.md`（检查生成）与本记录，不含代码。
+- **失败与处置**：在 `7c7c3a71` 首次运行时集成 `fund-transfer-recon-account-mapping.js`、`statement-long-number-precision.js` 失败，即上文链接表 `_xHHHH_` 口径冲突与 AST 注入依赖，修复后两脚本 118/118、32/32。在 `f49b26c6` 运行时 smoke `render-status-box` B5-4 失败：检查用正则要求 `writeStatusBox(element, text, tone)` 精确形式，本轮状态框另透传脱敏日志 `options`；放宽为可选 `options`（`35deef49`）后 23/23 通过，检查意图（经注入的 `ui.status` 保持全局格式化）不变。
+- **人工复核与授权**：资金红线人工复核由用户 2026-11-24 确认通过，并授权 production-release 审批；B147 改为发布后进行。
+- **远端 CI**：见 PR 状态检查（Windows），以 PR 最终 head 与合并提交为准。
+
 ## 合并、标签与发布（清单 E–F）
 
 ## 结论
