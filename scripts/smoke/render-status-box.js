@@ -201,10 +201,11 @@ function caseB5_wiringAudit() {
     const projection = target.name === 'render' ? body : findFunction(controller, 'updateStatusBox');
     const writer = target.name === 'render' ? body : findFunction(controller, 'writeStatusBox');
     // RR02 将临时读取错误与业务反馈分开保存，二者最终仍透传同一格式化入口。
+    //   v3.2.22：可另带 options（脱敏日志摘要 logMessage）一并透传。
     const reachesFormatter = target.name === 'render'
       ? /ui\.status\(/.test(projection || '')
-      : /writeStatusBox\(element, text, tone\)/.test(projection || '')
-        && /ui\.status\(element, text, tone\)/.test(writer || '');
+      : /writeStatusBox\(element, text, tone(?:, options)?\)/.test(projection || '')
+        && /ui\.status\(element, text, tone(?:, options)?\)/.test(writer || '');
     assertTrue(body && target.call.test(body) && reachesFormatter,
       `B5-4 ${target.label} 经注入的 ui.status 保持全局格式化`);
   }
