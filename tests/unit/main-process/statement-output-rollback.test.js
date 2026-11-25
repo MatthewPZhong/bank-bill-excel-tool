@@ -27,7 +27,12 @@ function setup(t) {
 
 const writeText = (filePath, text) => () => fs.writeFileSync(filePath, text);
 // 临时目录所在的卷不支持硬链接（exFAT 等）时跳过依赖硬链接的用例，其余用例照常执行（Codex 第十五轮）
+// 经硬链接别名写入的用例还要求卷提供文件编号：不提供时按设计拒绝写入另有硬链接的文件（spec D5），前提不成立
 function linkOrSkip(t, target, linkPath) {
+  if (fs.statSync(path.dirname(linkPath), { bigint: true }).ino === 0n) {
+    t.skip('前提不满足：临时卷不提供文件编号');
+    return false;
+  }
   try {
     fs.linkSync(target, linkPath);
     return true;
@@ -36,15 +41,33 @@ function linkOrSkip(t, target, linkPath) {
     return false;
   }
 }
-// 未启用开发者模式、也没有建链权限的 Windows 上创建符号链接报 EPERM：返回 false，由用例改用文件夹等其他非普通文件
+// 未启用开发者模式、也没有建链权限的 Windows 上创建符号链接报 EPERM，不支持符号链接的卷（如 exFAT）报 ENOTSUP 等：
+//   返回 false，由用例改用文件夹等其他非普通文件；其余意外错误照常抛出（Codex 第十九轮）
+const SYMLINK_UNSUPPORTED_CODES = new Set(['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
 function trySymlink(target, linkPath) {
   try {
     fs.symlinkSync(target, linkPath);
     return true;
   } catch (error) {
-    if (process.platform === 'win32' && error && error.code === 'EPERM') return false;
+    if (error && (SYMLINK_UNSUPPORTED_CODES.has(error.code) || (process.platform === 'win32' && error.code === 'EPERM'))) return false;
     throw error;
   }
+}
+
+// 依赖文件编号识别同路径替换的用例：临时卷不提供文件编号（ino 为 0）时按真实路径区分（spec D5），替换前后的键相同，
+//   前提不成立，跳过（Codex 第十九轮）
+function requireInodes(t, root) {
+  if (fs.statSync(root, { bigint: true }).ino !== 0n) return true;
+  t.skip('前提不满足：临时卷不提供文件编号');
+  return false;
+}
+
+// 模拟其他程序另存替换：先把原文件移到同卷的其他路径，再移入替换文件。Windows 不能改名覆盖仍有句柄打开的目标
+//   （回滚写回时持有 r+ 句柄），与 archive-storage-root-migration.test.js 的 replaceFixtureFile 同样处理（Codex 第十九轮）
+function replaceWithNewFile(target, content) {
+  fs.writeFileSync(`${target}.tmp`, content);
+  fs.renameSync(target, `${target}.displaced`);
+  fs.renameSync(`${target}.tmp`, target);
 }
 
 test('回滚：原有文件按首次写入前的内容原地还原，新建文件删除，备份目录清理', (t) => {
@@ -168,6 +191,7 @@ test('同一文件再次写入前核对身份：两次写之间被其他程序�
 
 test('写出回调抛错：路径上换成其他程序的文件不覆盖；新建路径上出现的文件无法确认归属不删除；本批写成过的照常处理', (t) => {
   const { root, staging } = setup(t);
+  if (!requireInodes(t, root)) return;
   const existing = path.join(root, 'merged.xlsx');
   const created = path.join(root, 'new.xlsx');
   const ownedNew = path.join(root, 'owned.xlsx');
@@ -277,6 +301,7 @@ test('failBatch：全部还原时原错误打上标记；还原不完整时改�
 
 test('写出期间已知文件被其他程序替换：写后文件编号与写前不同即停止，不认作本批文件，回滚不覆盖', (t) => {
   const { root, staging } = setup(t);
+  if (!requireInodes(t, root)) return;
   const target = path.join(root, 'detail.xlsx');
   fs.writeFileSync(target, 'before');
   const journal = createStatementOutputJournal({ stagingRoot: staging });
@@ -433,6 +458,7 @@ test('写回时重新打开备份失败：不截断待还原的文件', (t) => {
 
 test('写回期间路径被另存替换：不报已还原，保留备份', (t) => {
   const { root, staging } = setup(t);
+  if (!requireInodes(t, root)) return;
   const target = path.join(root, 'balance.xlsx');
   fs.writeFileSync(target, 'before');
   let swap = false;
@@ -440,8 +466,7 @@ test('写回期间路径被另存替换：不报已还原，保留备份', (t) =
     fs.ftruncateSync(fd, length);
     if (swap) {
       swap = false;
-      fs.writeFileSync(`${target}.tmp`, 'sync-client');
-      fs.renameSync(`${target}.tmp`, target);
+      replaceWithNewFile(target, 'sync-client');
     }
   } };
   const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
