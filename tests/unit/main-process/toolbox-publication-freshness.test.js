@@ -502,6 +502,43 @@ test('merge：输入经指向输出目录的目录链接读取、规范化期间
   assert.equal(calls.publication, 0);
 });
 
+// 同上，但 native 真实路径与冻结时的写法不同：Windows 上 fs.realpathSync 保留 8.3 短名（如 RUNNER~1），native 版展开成长名。
+//   用桩把 native 结果换成同一目录的另一种写法，模拟该差异；仍须认出输出目录、报目标变化（v3.2.22 Windows CI）
+test('merge：经目录链接读取、输出目录被移走又移回，native 真实路径写法与冻结时不同（Windows 短名）：仍报目标变化（B57）', async (t) => {
+  const base = setup(t);
+  const alias = path.join(base.root, 'input-alias');
+  try {
+    fs.symlinkSync(base.output, alias, 'dir');
+  } catch (error) {
+    if (process.platform === 'win32' && error.code === 'EPERM') {
+      t.skip('前提不满足：无建链权限');
+      return;
+    }
+    throw error;
+  }
+  const nativeRealpath = fs.realpathSync.native;
+  const longFormRoot = path.join(path.dirname(base.root), `LONGFORM-${path.basename(base.root)}`);
+  fs.realpathSync.native = function longFormRealpath(value, ...rest) {
+    const resolved = nativeRealpath.call(fs, value, ...rest);
+    return resolved.startsWith(base.root + path.sep) ? longFormRoot + resolved.slice(base.root.length) : resolved;
+  };
+  t.after(() => { fs.realpathSync.native = nativeRealpath; });
+  fs.copyFileSync(base.source, path.join(base.output, 'source.csv'));
+  const env = { ...base, source: path.join(alias, 'source.csv') };
+  const parked = path.join(base.root, 'out-parked');
+  const sampling = duringFullPlanSampling(() => {
+    fs.renameSync(base.output, parked);
+    return () => fs.renameSync(parked, base.output);
+  });
+  const { calls, run } = loadHandlers(env, caseOverrides(env, 'merge', { normalizeFilePlanV1: sampling.normalizeFilePlanV1 }));
+  const { prepared, result } = await run(CASES.merge.channel, casePayload(env, 'merge'));
+  assert.equal(sampling.state.calls, 1);
+  assert.equal(prepared.proceed, false);
+  assert.equal(result.code, 'ARCHIVE_TARGET_CHANGED', JSON.stringify(result));
+  assert.match(result.message, /输出目标在任务确认后已变化/);
+  assert.equal(calls.publication, 0);
+});
+
 // 合表选两份源文件、只在生成后替换第二份：发布前核对覆盖全部输入（Codex 第六轮）
 test('merge：两份源文件只有第二份在生成后、发布前被替换时不发布（B58-T3）', async (t) => {
   const env = setup(t);

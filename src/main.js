@@ -23099,14 +23099,19 @@ function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
     const prefix = resolved.endsWith(path.sep) ? resolved : resolved + path.sep;
     return comparableTargets.some((targetPath) => targetPath === resolved || targetPath.startsWith(prefix));
   };
-  // 字面路径未命中时按解析后的真实路径再比（错误经指向输出目录的目录链接报出，目录随后已移回，Codex 第八轮）
+  // 字面路径未命中时按解析后的真实路径再比（错误经指向输出目录的目录链接报出，目录随后已移回，Codex 第八轮）。
+  //   冻结时的真实路径由 fs.realpathSync 解析，Windows 上保留 8.3 短名（如 RUNNER~1），native 版会展开成长名：两种都比，
+  //   否则短名路径下认不出输出目录、透传英文系统错误
   const isTargetOrAncestor = (errorPath) => {
     if (matchesTargetOrAncestor(errorPath)) return true;
-    try {
-      return matchesTargetOrAncestor(fs.realpathSync.native(errorPath));
-    } catch (_error) {
-      return false;
+    for (const resolveRealPath of [(value) => fs.realpathSync(value), (value) => fs.realpathSync.native(value)]) {
+      try {
+        if (matchesTargetOrAncestor(resolveRealPath(errorPath))) return true;
+      } catch (_error) {
+        // 解析不了按未命中处理，换另一种解析方式
+      }
     }
+    return false;
   };
   let plan;
   try {
