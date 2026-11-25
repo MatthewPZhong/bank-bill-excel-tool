@@ -6,10 +6,12 @@ const path = require('node:path');
 const { EXCLUDED_TEMPLATE_FILES, TEMPLATE_RESOURCES } = require('./catalog');
 const {
   MAX_IMPORT_BYTES,
+  VCC_HEADER_CONTROL_CHARACTER_MESSAGE,
   collectScenarioReferences,
   diffValues,
   hasContract,
   usageChecks,
+  vccHeaderControlColumns,
   verdictOf
 } = require('./contracts');
 const { DEFAULT_INSPECTION_LIMITS, runTemplateInspection } = require('./inspection-runner');
@@ -173,7 +175,7 @@ function createTemplateResourceService({
         try {
           await rm(path.join(directory, name), { force: true });
         } catch (error) {
-          log({ level: 'warn', message: '模板文件：清理孤儿版本文件失败', details: [path.join(directory, name), errorText(error)] });
+          log({ level: 'warning', message: '模板文件：清理孤儿版本文件失败', details: [path.join(directory, name), errorText(error)] });
         }
       }
     }
@@ -632,6 +634,13 @@ function createTemplateResourceService({
     return headers.every((item) => item && item.length) ? headers : null;
   }
 
+  // v3.2.22 B60：已存 VCC 版本表头中含控制字符的列（v3.2.22 之前导入的版本可能有）。按运行期（currentInputStructure）
+  //   相同的取值顺序：描述的表头，没有时用 comparableValues（VCC 原表都是单表）
+  function storedVersionControlColumns(resource, version) {
+    const described = (inputStructureHeadersOf(resource, version) || [null])[0];
+    return vccHeaderControlColumns(resource.id, described || (version && version.structure && version.structure.comparableValues) || null);
+  }
+
   // 同组输入原表（如平盘 5 张链接原始表）各自当前版本的表头：导入时按表头区分来源，结构不能相同。
   async function peerStructuresOf(resource, snapshot) {
     const peers = [];
@@ -792,7 +801,9 @@ function createTemplateResourceService({
       currentValues: baseline.values || [...referencedValuesOf(resource, references)],
       peerStructures: inputStructureOf(resource.id) ? await peerStructuresOf(resource, snapshot) : [],
       references: Object.fromEntries(Object.entries(references).map(([key, values]) => [key, [...values]])),
-      describe: true
+      describe: true,
+      // v3.2.22 B60：只对导入的新版本执行的检查（已存版本的兼容复核不执行，见 contracts.js）
+      importingNewVersion: true
     });
     const contract = inspected.contract;
     checks.push(...contract.checks);
@@ -805,9 +816,13 @@ function createTemplateResourceService({
       ? { id: sameUser.versionId, label: labelOf(sameUser.versionId) }
       : (builtin.sha256 === digest ? { id: BUILTIN_VERSION_ID, label: 'V1' } : null);
     if (same) {
-      add('与已有版本', 'fail', same.id === currentVersionId
-        ? '与当前版本内容相同'
-        : `与 ${same.label} 内容相同，可在“版本”中直接启用`);
+      // v3.2.22 B60：相同的已存版本表头含控制字符时不能启用（setCurrentVersion 拒绝），不引导用户去启用
+      let sameDetail = `与 ${same.label} 内容相同，可在“版本”中直接启用`;
+      if (same.id === currentVersionId) sameDetail = '与当前版本内容相同';
+      else if (sameUser && storedVersionControlColumns(resource, sameUser).length) {
+        sameDetail = `与 ${same.label} 内容相同；该版本${VCC_HEADER_CONTROL_CHARACTER_MESSAGE}后重新导入`;
+      }
+      add('与已有版本', 'fail', sameDetail);
     } else if (contract.ok) {
       const enumLike = resource.type === 'enum' || resource.id === 'gateway-recon';
       const changed = contract.diff.added.length || contract.diff.removed.length;
@@ -973,8 +988,13 @@ function createTemplateResourceService({
           return { status: 'failed', message: `${toLabel} 不能启用：缺少已被场景使用的取值 ${names}` };
         }
         if (inputStructureOf(resource.id)) {
-          const conflict = await peerConflictOf(resource, (inputStructureHeadersOf(resource, target) || [null])[0], snapshot);
+          const targetHeaders = (inputStructureHeadersOf(resource, target) || [null])[0];
+          const conflict = await peerConflictOf(resource, targetHeaders, snapshot);
           if (conflict) return { status: 'failed', message: `${toLabel} 不能启用：与「${conflict.name}」当前结构相同，导入时无法区分` };
+          // v3.2.22 B60：v3.2.22 之前导入的 VCC 版本表头可能含控制字符，启用后导入必然失败，与导入预检同一规则拒绝
+          if (storedVersionControlColumns(resource, target).length) {
+            return { status: 'failed', message: `${toLabel} 不能启用：${VCC_HEADER_CONTROL_CHARACTER_MESSAGE}` };
+          }
         }
       } else if (currentVersionId !== BUILTIN_VERSION_ID && inputStructureOf(resource.id)) {
         // 恢复默认同样核对同组冲突（v3.2.15 B42）：同组其他表可能已启用与本表内置结构相同的版本，
@@ -1040,7 +1060,7 @@ function createTemplateResourceService({
         await rm(versionPath(resource.id, versionId), { force: true });
       } catch (removeError) {
         // 记录已删除；残留文件由下次启动的孤儿清扫处理。
-        log({ level: 'warn', message: '模板文件：删除版本文件失败', details: [versionPath(resource.id, versionId), errorText(removeError)] });
+        log({ level: 'warning', message: '模板文件：删除版本文件失败', details: [versionPath(resource.id, versionId), errorText(removeError)] });
       }
       log({ level: 'info', message: `模板文件：${resource.id} 删除版本 ${label}` });
       notify(resource.id);

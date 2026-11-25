@@ -132,6 +132,14 @@ test('缺少必用列、空列或重复列名时预检不通过', async (t) => {
   }
 });
 
+// v3.2.22 B60：表头控制字符只对 VCC 原表拒绝；其他输入原表（网关表头含换行很常见）照常通过表头检查
+test('非 VCC 输入原表的表头含换行时表头检查照常通过', async (t) => {
+  const env = setup(t);
+  const headers = [...INBOUND, '备注\n说明'];
+  const prepared = await prepare(env.service, 'position-gateway-raw-in', env.write('换行表头.xlsx', [{ name: 'S', headers }]));
+  assert.deepEqual(prepared.checks.find((item) => item.label === '表头'), { group: 'file', label: '表头', status: 'pass', detail: `${headers.length} 列` });
+});
+
 test('多工作表与表头下的数据行给出提示；只读取第 1 个工作表', async (t) => {
   const env = setup(t);
   const file = env.write('带数据.xlsx', [

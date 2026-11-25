@@ -1426,9 +1426,13 @@ function readWorkbookRows(filePath, options = {}) {
 
 // 判定是否为内存/容量类错误（大文件全量读触顶）：RangeError（含 Array buffer / string length / array length）
 //   或 message 命中 V8 OOM 关键字。命中 → 回"文件过大"真实文案而非"文件为空或不可读"。
+// v3.2.22 B19：不再把任意 RangeError 判为容量类——小型损坏文件解析时也会抛 RangeError（如 DataView 越界、递归过深），
+//   误报「文件过大」会误导用户拆分文件。只认容量类的错误码与内存 / 长度上限的关键字。
+const MEMORY_LIMIT_ERROR_CODES = new Set(['ERR_FS_FILE_TOO_LARGE', 'ERR_STRING_TOO_LONG', 'ERR_BUFFER_TOO_LARGE']);
+
 function isMemoryLimitError(error) {
   if (!error) return false;
-  if (error instanceof RangeError) return true;
+  if (MEMORY_LIMIT_ERROR_CODES.has(error.code)) return true;
   const message = String(error.message || '');
   return /array buffer allocation failed|invalid (string|array) length|out of memory|heap (out of memory|limit)|cannot allocate|allocation failed/i.test(message);
 }

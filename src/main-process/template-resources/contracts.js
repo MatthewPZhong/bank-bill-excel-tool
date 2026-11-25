@@ -33,6 +33,7 @@ const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells'
 const { TEMPLATE_RESOURCES } = require('./catalog');
 const { INPUT_STRUCTURES, inputStructureOf, isSingleSheetStructure, structureLabel } = require('./input-structures');
 const { inputStructureValuesFromHeaders, sheetHeaders } = require('./workbook-structure');
+const { hasHandoffControlCharacter } = require('../../backend/vcc-financial-op/import-handoff');
 const { MAX_EXCEL_ROW_HEIGHT } = require('../vcc-financial-op-writer');
 const { probePendingTemplate } = require('../vcc-financial-op-result-workbook-writer');
 
@@ -438,6 +439,15 @@ async function readRuntimeHeaders(spec, bytes) {
   }
 }
 
+// v3.2.22 B60：VCC 原表表头（去除首尾空白后，即导入交接收到的列名）含控制字符的列号（从 1 起）；其他输入原表返回空。
+//   specOrResourceId：输入结构规格或模板 ID
+const VCC_HEADER_CONTROL_CHARACTER_MESSAGE = '表头含换行、制表符等控制字符，请改为单行文本';
+function vccHeaderControlColumns(specOrResourceId, headers) {
+  const spec = typeof specOrResourceId === 'string' ? inputStructureOf(specOrResourceId) : specOrResourceId;
+  if (!spec || spec.group !== 'vcc-sources' || !Array.isArray(headers)) return [];
+  return headers.map((header, column) => (header && hasHandoffControlCharacter(header) ? column + 1 : 0)).filter(Boolean);
+}
+
 // 输入原表：模板中对应工作表的表头行即导入识别结构，启用后对应模块导入时只认这一结构。
 //   必用列与被场景引用的列须保留且同名；同组的表结构不能相同（导入时无法区分）；与当前版本的列变化写入 diff，
 //   由“取值变化”展示。单表原表读第 1 个工作表，检查项不带工作表名；多表原表逐表检查，检查项带工作表名。
@@ -492,8 +502,15 @@ function inputStructureContract(resourceId) {
         }
         const blankColumns = spec.allowBlank ? [] : headers.map((header, column) => (header ? 0 : column + 1)).filter(Boolean);
         const duplicates = [...new Set(headers.filter((header, column) => header && headers.indexOf(header) !== column))];
+        // v3.2.22 B60：VCC 导入交接不接受含控制字符（换行、制表符等）的表头，导入新版本时按同一规则拒绝，避免启用后导入必然失败。
+        //   只在导入新版本时检查：已存版本的兼容复核（升级后选文件时逐张核对 VCC 来源）不因此判为不可用，否则一张旧模板会让
+        //   其他来源也无法导入；这类旧版本另在「启用」时拦下（service.js setCurrentVersion）
+        const controlColumns = context.importingNewVersion ? vccHeaderControlColumns(spec, headers) : [];
         if (blankColumns.length) list.add(label('表头', sheet), 'fail', `第 ${listText(blankColumns.map(String), 5)} 列表头为空`);
         else if (duplicates.length) list.add(label('表头', sheet), 'fail', `列名重复：${listText(duplicates, 5)}`);
+        else if (controlColumns.length) {
+          list.add(label('表头', sheet), 'fail', `第 ${listText(controlColumns.map(String), 5)} 列${VCC_HEADER_CONTROL_CHARACTER_MESSAGE}`);
+        }
         else list.add(label('表头', sheet), 'pass', `${headers.length} 列`);
       });
 
@@ -705,6 +722,7 @@ async function inspectContract(resourceId, bytes, context = {}) {
     builtinSheetNames: context.builtinSheetNames,
     currentValues: context.currentValues || [],
     peerStructures: context.peerStructures || [],
+    importingNewVersion: context.importingNewVersion === true,
     references: {
       fundTypeValues: new Set(),
       gatewayFields: new Set(),
@@ -776,10 +794,12 @@ function verdictOf(checks) {
 
 module.exports = {
   MAX_IMPORT_BYTES,
+  VCC_HEADER_CONTROL_CHARACTER_MESSAGE,
   collectScenarioReferences,
   diffValues,
   hasContract,
   inspectContract,
   usageChecks,
+  vccHeaderControlColumns,
   verdictOf
 };

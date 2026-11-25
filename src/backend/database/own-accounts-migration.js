@@ -181,7 +181,7 @@ function runOwnAccountsMigration(storageRoot, db, { appendActivityLogEntry } = {
     if (typeof appendActivityLogEntry === 'function') {
       try {
         appendActivityLogEntry({
-          level: stats.orphans > 0 ? 'warn' : 'info',
+          level: stats.orphans > 0 ? 'warning' : 'info',
           message: '自有账号迁移（v1.5.3）完成',
           details: [
             `扫描 json 文件：${stats.scannedJsonFiles}`,

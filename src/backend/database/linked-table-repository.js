@@ -405,14 +405,20 @@ function buildLinkedUpsertContext(
       source_contract_version = excluded.source_contract_version,
       source_write_nonce = excluded.source_write_nonce`
     : '';
+  // v3.2.22 B17：幂等键列与展示键列相同（fx：都是 transaction_no）时只写一次，取归一后的幂等键；
+  //   不再拼出重复列名、依赖 node:sqlite 未文档化的「重复列取第 1 个值」。
+  const sameKeyColumn = idKeyColumn === def.keyColumn;
+  const keyColumns = sameKeyColumn ? idKeyColumn : `${idKeyColumn}, ${def.keyColumn}`;
+  const keyPlaceholders = sameKeyColumn ? '?' : '?, ?';
+  const keyUpdate = sameKeyColumn ? '' : `${def.keyColumn} = excluded.${def.keyColumn},
+      `;
   const upsertSql = `
     INSERT INTO ${def.table} (
-      ${idKeyColumn}, ${def.keyColumn}, ${def.dateColumn}, raw_json, imported_at${sourceColumns}
+      ${keyColumns}, ${def.dateColumn}, raw_json, imported_at${sourceColumns}
     )
-    VALUES (?, ?, ?, ?, ?${sourceValues})
+    VALUES (${keyPlaceholders}, ?, ?, ?${sourceValues})
     ON CONFLICT(${idKeyColumn}) DO UPDATE SET
-      ${def.keyColumn} = excluded.${def.keyColumn},
-      ${def.dateColumn} = excluded.${def.dateColumn},
+      ${keyUpdate}${def.dateColumn} = excluded.${def.dateColumn},
       raw_json = excluded.raw_json,
       imported_at = excluded.imported_at${sourceUpdates}
   `;
@@ -431,7 +437,9 @@ function buildLinkedUpsertContext(
     const dateIso = normalizeDateForRange(obj[def.dateHeader]); // 日期列 → YYYY-MM-DD / null
     const rawJson = JSON.stringify(obj);
     const existed = existsStmt.get(idKey) !== undefined; // upsert 前先判（区分 INSERT/UPDATE）
-    const params = [idKey, keyValue, dateIso, rawJson, importedAt];
+    const params = sameKeyColumn
+      ? [idKey, dateIso, rawJson, importedAt]
+      : [idKey, keyValue, dateIso, rawJson, importedAt];
     if (sourceIdentity) {
       params.push(
         sourceIdentity.datasetId,

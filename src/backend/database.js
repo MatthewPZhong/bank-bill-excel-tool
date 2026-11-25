@@ -697,7 +697,7 @@ class AppDatabase {
       }
     } catch (error) {
       appendModuleLog({
-        level: 'warn',
+        level: 'warning',
         source: 'main',
         domain: 'migration',
         message: '[migration v3.2.15] 核对旧账户映射迁移标记失败，下次启动重试',

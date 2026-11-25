@@ -11,8 +11,13 @@ function handoffError(message) {
   error.code = 'vcc-import-handoff-mismatch';
   return error;
 }
+// 交接身份里的文本（含导入时表头）不能含控制字符（U+0000–U+001F、U+007F）；模板文件预检按同一规则拒绝 VCC 表头（v3.2.22 B60）
+const HANDOFF_CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+function hasHandoffControlCharacter(value) {
+  return HANDOFF_CONTROL_CHARACTER.test(String(value));
+}
 function nonempty(value, name) {
-  if (typeof value !== 'string' || !value.trim() || /[\u0000-\u001f\u007f]/.test(value)) throw handoffError(name);
+  if (typeof value !== 'string' || !value.trim() || hasHandoffControlCharacter(value)) throw handoffError(name);
   return value;
 }
 function integer(value, minimum, name) {
@@ -139,5 +144,5 @@ function assertArtifactMember(artifact, source, batch) {
   return member;
 }
 
-module.exports = { handoffError, canonicalMembers, membersDigest, buildMemberFiles,
+module.exports = { handoffError, hasHandoffControlCharacter, canonicalMembers, membersDigest, buildMemberFiles,
   handoffMetadata, readHandoffMetadata, freezeHandoffV2, assertArtifactMember };
