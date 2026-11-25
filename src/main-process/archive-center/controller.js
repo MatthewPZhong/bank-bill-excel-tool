@@ -556,7 +556,12 @@ class ArchiveCenterController {
         const existingTaskRun = this.service.repository.getTaskRun(batchContext.taskRunId);
         const alreadyTerminal = existingTaskRun
           && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(existingTaskRun.status);
-        if (terminalOutcome.taskStatus === 'succeeded' && !alreadyTerminal) {
+        // v3.2.22：失败终态带业务「未产出」声明（produced: false）时同样先重放结算，不让未结算的输出以普通失败收口、
+        //   变成可按原路径重试（见 task-lifecycle declaresOutputNotProduced）。
+        const replaysSettlement = terminalOutcome.taskStatus === 'succeeded'
+          || (Array.isArray(payload.settleFiles)
+            && payload.settleFiles.some((file) => file && file.produced === false));
+        if (replaysSettlement && !alreadyTerminal) {
           const artifacts = this.service.repository.listArtifacts(batchContext.batchId);
           if (artifacts.some((artifact) => artifact.status === 'pending')) {
             const settlement = await this.service.settleManifestArtifacts({

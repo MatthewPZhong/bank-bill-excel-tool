@@ -7723,9 +7723,21 @@ function registerAppHandlers() {
       };
     },
     async execute(_event, prepared, taskContext) {
+    // v3.2.22：只有 writer 成功返回的输出才按路径结算；其余计划输出（写失败、写盘前被拒、因前序失败未执行）一律声明为
+    //   未产出、不按路径读取——用户选择覆盖的旧主文件、同一分钟同目录的上一批同名附属报表仍在原路径时，不能归档成本批产物。
+    const producedOutputKinds = new Set();
+    const settlePlannedOutputs = () => taskContext.settleArtifacts({
+      files: taskContext.fileEvidence.filePlan.outputs
+        .map((item, index) => (producedOutputKinds.has(prepared.outputKinds[index])
+          ? { artifactKey: item.artifactKey }
+          : { artifactKey: item.artifactKey, produced: false }))
+    });
     // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁（与 import/run 共享一把）。争用即返回失败。
     const opLock = tryAcquireBankStatementOpLock('export');
     if (!opLock.acquired) {
+      // v3.2.22：没抢到锁时一个文件都没写，计划输出全部声明未产出（不留待重试存档时按路径读到旧文件）；
+      //   锁由他人持有，不释放。
+      await settlePlannedOutputs();
       return { status: 'failed', message: opLock.message };
     }
     try {
@@ -7773,6 +7785,7 @@ function registerAppHandlers() {
           // v3.2.22：登记临时文件归属，进程中断后由下次启动按登记回收。
           writerOptions: { temporaryFileMarkerDir: getErrorReportTemporaryMarkerDir() }
         });
+        if (errorReport) producedOutputKinds.add('error-report');
       }
 
       // 主输出 savePath 已在 BOR/reserve 前取得；取消时不会落错误报告或业务文件。
@@ -7806,6 +7819,7 @@ function registerAppHandlers() {
         // v3.0.12 功能1：异常-人工判断命中银行行 → 主文件追加「异常-人工判断」sheet（空/null 时不加 sheet）
         manyToManyRows: processingResult.manyToManyReviewRows
       });
+      if (main) producedOutputKinds.add('main');
 
       // v2.1.9 N5 T26（spec §5.1-5.4 🔴 对外契约破坏性变更）：场景命中行独立报表
       //   v2.1.8 主输出 Sheet 3「命中场景行」撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
@@ -7817,6 +7831,18 @@ function registerAppHandlers() {
       //     writer 用 row._hitChannelId 反查 channels.label 渲染「匹配渠道」列
       //     通用 label='通用' / 非通用 label='name-ownerLocation'（与场景管理 UI 一致）
       let hitRowsReport = null;
+      // v3.2.22：附属报表写失败仍不阻塞主文件，但把未生成的报表与原因带回界面（如单元格超过 Excel 上限时报出工作表与
+      //   单元格），不只记日志——否则界面显示「已导出」，与本来就不需要该报表的情况无法区分。
+      const sideReportFailures = [];
+      //   活动日志只记固定文案与错误码，不记原始错误文本（可能带路径、单元格内容等业务数据）；原因随导出结果显示在界面。
+      const recordSideReportFailure = (label, logMessage, error) => {
+        appendActivityLogEntry({
+          level: 'warning',
+          message: logMessage,
+          details: [`错误码：${error && error.code ? error.code : '无'}；原因见导出界面状态框`]
+        });
+        sideReportFailures.push({ label, message: error && error.message ? error.message : String(error) });
+      };
       // v2.1.16-beta.2 self-review A：N5「命中场景行」报表只放 R2 命中行（带 _hitScenarioId）。
       //   编排器的 modifiedRows 含 R4/R5-only 改写行（无 _hitScenarioId）——它们进主输出 sheet1 标黄即可，
       //   不应进 N5 报表（否则「匹配渠道/匹配状态/命中场景」三列全空白，污染审计报表）。
@@ -7832,13 +7858,10 @@ function registerAppHandlers() {
             originalFilePath,
             { outputPath: outputByKind.get('hit-scenarios'), channels }
           );
+          if (hitRowsReport) producedOutputKinds.add('hit-scenarios');
         } catch (e) {
           // graceful — log 警告但不阻塞主流程返回
-          appendActivityLogEntry({
-            level: 'warning',
-            message: '[banking-statement-process] 命中场景行独立报表生成失败',
-            details: [e && e.message ? e.message : String(e)]
-          });
+          recordSideReportFailure('命中场景行报表', '[banking-statement-process] 命中场景行独立报表生成失败', e);
           hitRowsReport = null;
         }
       }
@@ -7853,12 +7876,9 @@ function registerAppHandlers() {
             processingResult.platformCleanupRows,
             outputByKind.get('platform-cleanup')
           );
+          if (platformCleanupReport) producedOutputKinds.add('platform-cleanup');
         } catch (e) {
-          appendActivityLogEntry({
-            level: 'warning',
-            message: '[banking-statement-process] 中台加款单剔除文件生成失败',
-            details: [e && e.message ? e.message : String(e)]
-          });
+          recordSideReportFailure('加款单剔除文件', '[banking-statement-process] 中台加款单剔除文件生成失败', e);
           platformCleanupReport = null;
         }
       }
@@ -7921,12 +7941,9 @@ function registerAppHandlers() {
             refundUnmatchedRowsForExport,
             outputByKind.get('refund-backfill')
           );
+          if (refundBackfillReport) producedOutputKinds.add('refund-backfill');
         } catch (e) {
-          appendActivityLogEntry({
-            level: 'warning',
-            message: '[banking-statement-process] 中台退款订单回填文件生成失败',
-            details: [e && e.message ? e.message : String(e)]
-          });
+          recordSideReportFailure('中台回填文件', '[banking-statement-process] 中台退款订单回填文件生成失败', e);
           refundBackfillReport = null;
         }
       }
@@ -7966,17 +7983,19 @@ function registerAppHandlers() {
         platformCleanupName: platformCleanupReport ? platformCleanupReport.fileName : null,
         // v2.1.16-beta.4 R5 场景4：renderer 用于状态框提示「中台退款订单回填文件已生成：{path}」（未生成时为 null）
         refundBackfillPath: refundBackfillReport ? refundBackfillReport.filePath : null,
-        refundBackfillName: refundBackfillReport ? refundBackfillReport.fileName : null
+        refundBackfillName: refundBackfillReport ? refundBackfillReport.fileName : null,
+        // v3.2.22：未生成的附属报表 [{ label, message }]（主文件已生成；界面逐条提示，需人工复核）
+        sideReportFailures
       };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     } finally {
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      // v3.0.11 需求3（批1）：导出结束统一释放互斥锁（含 cancelled / empty / ok 各早返回路径）。
-      releaseBankStatementOpLock();
+      try {
+        await settlePlannedOutputs();
+      } finally {
+        // v3.0.11 需求3（批1）：导出结束统一释放互斥锁（含 cancelled / empty / ok 各早返回路径；结算抛错也释放）。
+        releaseBankStatementOpLock();
+      }
     }
     }
   });
@@ -24144,6 +24163,35 @@ async function settleVccOutputPublication(prepared, taskContext, publication, ev
 
 function reportArchiveFailure(warning) {
   const message = warning && warning.message ? warning.message : '存档副本写入失败';
+  // v3.2.22：含未产出输出（ARCHIVE_OUTPUT_NOT_PRODUCED）的批次，存档中心只给「重新执行业务」，不能提示「已正常生成、
+  //   请重试存档」。按 task-lifecycle settlementWarning 的计数区分：业务声明本次未生成（导出被拒、附属报表写失败，原路径
+  //   上的同名文件不是本次结果）、存档时已找不到文件（只能说找不到，不能断言没生成）、其他存档失败。
+  if (warning && warning.code === 'ARCHIVE_OUTPUT_NOT_PRODUCED') {
+    const declared = Number(warning.declaredNotProducedCount) || 0;
+    const missing = Number(warning.missingAtArchiveCount) || 0;
+    const other = Number(warning.otherArchiveFailureCount) || 0;
+    const parts = [];
+    if (declared > 0) parts.push('有输出文件本次未生成，原路径上的同名文件不是本次结果');
+    if (missing > 0) parts.push('有输出文件存档时已找不到（可能已被移动或删除）');
+    if (other > 0) parts.push('另有文件存档失败');
+    if (parts.length === 0) parts.push('有输出文件未形成可归档内容');
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'archive-center',
+      message: '部分输出文件未归档，存档中心只能重新执行业务',
+      details: [message]
+    });
+    try {
+      if (Notification && typeof Notification.isSupported === 'function' && Notification.isSupported()) {
+        new Notification({
+          title: '存档中心',
+          body: `${parts.join('；')}。该批次不能重试存档，请按界面提示处理后重新执行。`
+        }).show();
+      }
+    } catch (_error) { /* 存档告警展示失败不得影响业务 */ }
+    return;
+  }
   appendActivityLogEntry({
     level: 'warning',
     source: 'main',

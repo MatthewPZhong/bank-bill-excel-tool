@@ -157,21 +157,22 @@ test('pairs 为空或未传时不追加 Payment 核对 sheet', async () => {
   }
 });
 
-test('v3.2.22（🔴）核对页银行字段按来源编码：银行原值读回原值，Payment 写入前被回填过的对账ID 按原文', async () => {
+test('v3.2.22（🔴）核对页银行字段按已解码文本编码：银行原值与 Payment 写入前被回填过的对账ID 都读回原值', async () => {
   const XLSX = require('xlsx');
-  const pair = makePair({ bank: { _rowId: 'row_7', MerchantId: 'A_x0000_B' }, oldReconciliationId: 'RID_x005F_x0041_' });
-  pair.bankRowOriginal.ReconciliationId = 'RID_x005F_x0041_';
+  // 前序场景回填的对账ID 来自链接表（release/v3.2.22 合入 B113 D4b 后链接表各导入路径都落库已解码文本）：源表字面 `RID_x0041_`。
+  const pair = makePair({ bank: { _rowId: 'row_7', MerchantId: 'A_x0000_B' }, oldReconciliationId: 'RID_x0041_' });
+  pair.bankRowOriginal.ReconciliationId = 'RID_x0041_';
   pair.modifiedColumnsBeforePayment = ['ReconciliationId'];
   const modifications = [
-    { rowId: 'row_7', column: 'ReconciliationId', oldValue: '', newValue: 'RID_x005F_x0041_' },
-    { rowId: 'row_7', column: 'ReconciliationId', oldValue: 'RID_x005F_x0041_', newValue: 'NEW-RECON' }
+    { rowId: 'row_7', column: 'ReconciliationId', oldValue: '', newValue: 'RID_x0041_' },
+    { rowId: 'row_7', column: 'ReconciliationId', oldValue: 'RID_x0041_', newValue: 'NEW-RECON' }
   ];
   const out = tmpFile('source-aware.xlsx');
   await writeBankStatementOutput([], HEADERS, out, [], modifications, [pair]);
   const book = XLSX.readFile(out);
   const matchRows = XLSX.utils.sheet_to_json(book.Sheets[MATCH_SHEET], { header: 1, raw: true });
   assert.equal(matchRows[1][5], 'A_x0000_B', '银行原值 MerchantId 读回原值（不被解码成 A\\0B）');
-  assert.equal(matchRows[1][7], 'RID_x0041_', 'Payment 写入前已被前序场景回填的对账ID 按原文');
+  assert.equal(matchRows[1][7], 'RID_x0041_', 'Payment 写入前已被前序场景回填的对账ID 读回源表字面值');
   const rawRows = XLSX.utils.sheet_to_json(book.Sheets[BANK_RAW_SHEET], { header: 1, raw: true });
   assert.equal(rawRows[1][1 + BANK_STATEMENT_FIELDS.indexOf('MerchantId')], 'A_x0000_B');
   assert.equal(rawRows[1][1 + BANK_STATEMENT_FIELDS.indexOf('ReconciliationId')], 'RID_x0041_');
@@ -193,17 +194,17 @@ test('v3.2.22（🔴）核对页银行字段按来源编码：银行原值读回
   }
 });
 
-test('v3.2.22（🔴）核对页银行字段按值的来源：已解码文本的改写（C1 / C2 / C3 自定义值）读回字面值', async () => {
+test('v3.2.22（🔴）核对页银行字段：C1 / C2 / C3 自定义值与链接表的值写入后都读回字面值', async () => {
   const XLSX = require('xlsx');
-  // Payment 之前：C1 把对账ID 提取为 `C1_x0041_`（已解码文本），C3 按网关字段把 MerchantId 写成流式原文 `M_x005F_x0041_`。
-  const pair = makePair({ bank: { _rowId: 'row_9', MerchantId: 'M_x005F_x0041_' }, oldReconciliationId: 'C1_x0041_' });
+  // Payment 之前：C1 把对账ID 提取为 `C1_x0041_`，C3 按网关字段把 MerchantId 写成链接表的字面值 `M_x0041_`。
+  const pair = makePair({ bank: { _rowId: 'row_9', MerchantId: 'M_x0041_' }, oldReconciliationId: 'C1_x0041_' });
   pair.bankRowOriginal.ReconciliationId = 'C1_x0041_';
-  pair.bankRowOriginal.MerchantId = 'M_x005F_x0041_';
+  pair.bankRowOriginal.MerchantId = 'M_x0041_';
   pair.modifiedColumnsBeforePayment = ['ReconciliationId', 'MerchantId'];
   pair.decodedColumnsBeforePayment = ['ReconciliationId'];
   const modifications = [
     { rowId: 'row_9', column: 'ReconciliationId', oldValue: '', newValue: 'C1_x0041_', _valueDecoded: true },
-    { rowId: 'row_9', column: 'MerchantId', oldValue: '202782001', newValue: 'M_x005F_x0041_' },
+    { rowId: 'row_9', column: 'MerchantId', oldValue: '202782001', newValue: 'M_x0041_' },
     { rowId: 'row_9', column: 'ReconciliationId', oldValue: 'C1_x0041_', newValue: 'NEW-RECON' }
   ];
   const out = tmpFile('source-aware-decoded.xlsx');
@@ -211,22 +212,22 @@ test('v3.2.22（🔴）核对页银行字段按值的来源：已解码文本的
   const book = XLSX.readFile(out);
   const matchRows = XLSX.utils.sheet_to_json(book.Sheets[MATCH_SHEET], { header: 1, raw: true });
   assert.equal(matchRows[1][7], 'C1_x0041_', '🔴 C1 写入的已解码对账ID 读回字面值');
-  assert.equal(matchRows[1][5], 'M_x0041_', '链接表原文改写的 MerchantId 仍按原文');
+  assert.equal(matchRows[1][5], 'M_x0041_', '🔴 链接表的值改写的 MerchantId 读回字面值');
   const rawRows = XLSX.utils.sheet_to_json(book.Sheets[BANK_RAW_SHEET], { header: 1, raw: true });
   assert.equal(rawRows[1][1 + BANK_STATEMENT_FIELDS.indexOf('ReconciliationId')], 'C1_x0041_');
   assert.equal(rawRows[1][1 + BANK_STATEMENT_FIELDS.indexOf('MerchantId')], 'M_x0041_');
 
-  // 当前值按该列最后一次改写的来源：最后一次是已解码文本 → 读回字面值。
+  // 同一列多次改写：当前值读回字面值。
   const last = makePair({ bank: { _rowId: 'row_10', MerchantId: 'X_x0041_' }, oldReconciliationId: '' });
   const lastOut = tmpFile('source-aware-last.xlsx');
   await writeBankStatementOutput([], HEADERS, lastOut, [], [
-    { rowId: 'row_10', column: 'MerchantId', oldValue: '202782001', newValue: 'GW_x005F_x0041_' },
-    { rowId: 'row_10', column: 'MerchantId', oldValue: 'GW_x005F_x0041_', newValue: 'X_x0041_', _valueDecoded: true }
+    { rowId: 'row_10', column: 'MerchantId', oldValue: '202782001', newValue: 'GW_x0041_' },
+    { rowId: 'row_10', column: 'MerchantId', oldValue: 'GW_x0041_', newValue: 'X_x0041_', _valueDecoded: true }
   ], [last]);
   assert.equal(XLSX.utils.sheet_to_json(XLSX.readFile(lastOut).Sheets[MATCH_SHEET], { header: 1, raw: true })[1][5], 'X_x0041_');
 });
 
-test('v3.2.22（🔴）big_account 按来源编码：来自账户映射的账号与配对银行 MerchantId 读回相等，未映射的与原始账号一致', async () => {
+test('v3.2.22（🔴）big_account 按已解码文本编码：来自账户映射的账号与配对银行 MerchantId 读回相等，未映射的与原始账号一致', async () => {
   const XLSX = require('xlsx');
   const reconHeaders = Object.values(FT_RECON_FIELD_MAP.recon);
   const bigIdx = 1 + reconHeaders.indexOf('big_account');
@@ -234,9 +235,9 @@ test('v3.2.22（🔴）big_account 按来源编码：来自账户映射的账号
   // 映射命中：收款账号 GW-001 → 用户录入的清结算账号字面 `A_x0041_B`，银行 MerchantId 是同一个字面账号（银行原值）。
   const mapped = makePair({ bank: { _rowId: 'row_m', MerchantId: 'A_x0041_B' }, recon: { big_account: 'A_x0041_B' } });
   mapped.reconRow.收款账号 = 'GW-001';
-  // 未命中映射：big_account 就是流式导入落库的收款账号原文，按原文写出，与收款账号列读回一致。
-  const unmapped = makePair({ bank: { _rowId: 'row_u', MerchantId: 'RAW_x0041_' }, recon: { big_account: 'RAW_x005F_x0041_' } });
-  unmapped.reconRow.收款账号 = 'RAW_x005F_x0041_';
+  // 未命中映射：big_account 就是链接表落库的收款账号（release/v3.2.22 合入 B113 D4b 后链接表各导入路径都落库已解码文本），与收款账号列读回一致。
+  const unmapped = makePair({ bank: { _rowId: 'row_u', MerchantId: 'RAW_x0041_' }, recon: { big_account: 'RAW_x0041_' } });
+  unmapped.reconRow.收款账号 = 'RAW_x0041_';
   const out = tmpFile('big-account-encoding.xlsx');
   await writeBankStatementOutput([], HEADERS, out, [], [], [mapped, unmapped]);
   const book = XLSX.readFile(out);
@@ -249,5 +250,6 @@ test('v3.2.22（🔴）big_account 按来源编码：来自账户映射的账号
   assert.equal(reconRows[1][bigIdx], 'A_x0041_B', '🔴 调拨对账单行-原始：映射来的 big_account 读回字面值');
   assert.equal(matchRows[2][15], 'RAW_x0041_');
   assert.equal(matchRows[2][15], matchRows[2][5], '未映射：与银行 MerchantId 读回一致');
-  assert.equal(reconRows[2][bigIdx], reconRows[2][payeeIdx], '未映射：与收款账号同样按原文读回');
+  assert.equal(reconRows[2][bigIdx], 'RAW_x0041_', '🔴 调拨对账单行-原始：未映射的 big_account 读回字面值');
+  assert.equal(reconRows[2][payeeIdx], 'RAW_x0041_', '🔴 调拨对账单行-原始：收款账号同样读回字面值');
 });

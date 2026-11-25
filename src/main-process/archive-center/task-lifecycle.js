@@ -64,6 +64,43 @@ function businessResultFailureMessage(businessResult) {
     : businessResult.message;
 }
 
+// 结算未全部成功时的告警。任一失败项为 ARCHIVE_OUTPUT_NOT_PRODUCED 时按未产出告警：存档中心对这类批次只给「重新执行
+//   业务」（见 controller._retryCapability），不能提示「重试存档」。区分业务声明未生成（declaredNotProduced，如导出被拒、
+//   附属报表写失败）与存档时已找不到文件（按路径归档遇 ENOENT，不能断言业务没生成），混有其他存档失败时一并说明。
+function settlementWarning(settled) {
+  const results = settled && Array.isArray(settled.results) ? settled.results : [];
+  const failed = results.filter((result) => !result || result.ok === false);
+  const notProduced = failed.filter((result) => result && result.code === 'ARCHIVE_OUTPUT_NOT_PRODUCED');
+  if ((settled && settled.code === 'ARCHIVE_OUTPUT_NOT_PRODUCED') || notProduced.length > 0) {
+    const declaredNotProducedCount = notProduced.filter((result) => result.declaredNotProduced === true).length;
+    const missingAtArchiveCount = notProduced.length - declaredNotProducedCount;
+    const otherArchiveFailureCount = failed.length - notProduced.length;
+    const parts = [];
+    if (declaredNotProducedCount > 0) parts.push(`${declaredNotProducedCount} 个计划输出本次未生成`);
+    if (missingAtArchiveCount > 0) parts.push(`${missingAtArchiveCount} 个输出存档时已找不到文件`);
+    if (otherArchiveFailureCount > 0) parts.push(`另有 ${otherArchiveFailureCount} 个文件存档失败`);
+    if (parts.length === 0) parts.push('部分计划输出未形成可归档内容');
+    return {
+      code: 'ARCHIVE_OUTPUT_NOT_PRODUCED',
+      message: `${parts.join('；')}，未归档；存档中心只能重新执行业务`,
+      declaredNotProducedCount,
+      missingAtArchiveCount,
+      otherArchiveFailureCount
+    };
+  }
+  return {
+    code: settled && settled.code || 'ARCHIVE_TASK_SETTLE_FAILED',
+    message: settled && settled.message || 'manifest artifact 未全部完成归档'
+  };
+}
+
+// 业务声明了未产出的输出（produced: false）。这类声明只在内存中时，若结算未耐久就直接按失败终态收口，未结算的输出会
+//   以普通业务失败结束、可在存档中心按原路径重试——可能把原路径上用户原有的同名文件归档成本批产物。故失败终态也要
+//   把结算证据随终态意图落盘，由恢复重放（controller.flushOutbox）先结算再收口。
+function declaresOutputNotProduced(files) {
+  return Array.isArray(files) && files.some((file) => file && file.produced === false);
+}
+
 function lifecycleFailure(result, fallbackCode, fallbackMessage) {
   return {
     status: 'failed',
@@ -558,11 +595,7 @@ class TaskLifecycle {
           message: error && error.message || 'manifest artifact 未全部完成归档' };
       }
       if (!settled || settled.ok === false) {
-        this._warn({
-          channel: policy.channel,
-          code: settled && settled.code || 'ARCHIVE_TASK_SETTLE_FAILED',
-          message: settled && settled.message || 'manifest artifact 未全部完成归档'
-        });
+        this._warn({ channel: policy.channel, ...settlementWarning(settled) });
       }
 
       if (!businessError && terminalStatus === 'succeeded'
@@ -623,7 +656,8 @@ class TaskLifecycle {
         terminalOutcome.afterTerminal = payload.afterTerminalIntent;
       }
       let terminalSettled = false;
-      if (terminalStatus === 'succeeded' && (!settled || settled.durable !== true)) {
+      if ((terminalStatus === 'succeeded' || declaresOutputNotProduced(settlementFiles))
+          && (!settled || settled.durable !== true)) {
         if (!this.persistTerminalIntent) {
           const error = new Error('File Task artifact 未 durable 且持久恢复接口不可用');
           error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
@@ -1526,11 +1560,7 @@ class TaskLifecycle {
           files: promotedManifest.inputs.map((item) => ({ artifactKey: item.artifactKey }))
         });
         if (!settled || settled.ok === false) {
-          this._warn({
-            channel: policy.channel,
-            code: settled && settled.code || 'ARCHIVE_TASK_SETTLE_FAILED',
-            message: settled && settled.message || 'manifest artifact 未全部完成归档'
-          });
+          this._warn({ channel: policy.channel, ...settlementWarning(settled) });
         }
       }
 
@@ -1623,7 +1653,8 @@ class TaskLifecycle {
         terminalIntent.afterTerminal = payload.afterTerminalIntent;
       }
       let finished;
-      if (batchContext && terminalStatus === 'succeeded' && settled.durable !== true) {
+      if (batchContext && (terminalStatus === 'succeeded' || declaresOutputNotProduced(settlementFiles))
+          && settled.durable !== true) {
         if (!this.persistTerminalIntent) {
           const error = new Error('Deferred File Task artifact 未 durable 且持久恢复接口不可用');
           error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';

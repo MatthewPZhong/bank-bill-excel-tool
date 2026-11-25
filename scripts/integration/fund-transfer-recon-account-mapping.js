@@ -24,26 +24,27 @@
 //   Case I：本批有空渠道银行行时，银行侧未出现的渠道（CITI）的映射网关行在池外；与空渠道银行行相符时告警银行渠道为空、不回填。
 //   Case J：在 Electron 自带运行时（node:sqlite 读 TEXT 遇 NUL 会截断）保存含 NUL 的映射目标账号，读回无损，网关对账ID
 //           只回填到完整账号的银行行，不串到截断前缀账号；经生产导出入口写出主文件后回读，含 NUL 的账号与 `AB` 仍可区分。
-//   Case K：按 Excel 写法编码的网关工作簿（含 NUL 的账号 `A\0B` 与字面 `A_x0000_B`）经生产流式导入入口
-//           streamLinkedRowsToInsert 落库（单工作表流式读取不解 `_xHHHH_`，分别存成转义原文 `A_x0000_B` 与
-//           `A_x005F_x0000_B`）；映射非空时含 `_xHHHH_` 写法的账号无法确定真实账户号，转义护栏让两条网关行都不参与回填，
-//           并逐条告警人工核对（告警里的转义片段按 ⟨U+HHHH⟩ 显示）。
-//   Case L：富文本账号（片段 `MID_x00` + `41__x0042_`，逐段解码为 `MID_x0041_B`）经流式导入各片段直接拼接为
-//           `MID_x0041__x0042_`；映射这个落库串时原样映射与整串解码碰巧一致，也不回填，告警人工核对。
-//   Case M：源表字面对账ID `RID_x0041_` 经流式导入落库为转义原文 `RID_x005F_x0041_`，空映射下 R5s2 回填后经生产导出
-//           入口 writeBankStatementMainOutput 写出，ExcelJS 与 SheetJS 读回仍是源表字面值（导出不二次转义）。
-//   Case N：网关渠道 `BANK\rUS` 经流式导入落库为 `BANK_x000D_US`，银行同时有回车版与字面 `BANK_x000D_US` 两行；映射命中的
-//           网关行无法确认真实渠道，经真实读池与 runReconciliation 后两行都不回填，告警人工核对（不任选一行）。
-//   Case N2：银行批次只有 `CITI\rHK`，网关渠道落库为 `CITI_x000D_HK`、按渠道读池时在池外；账号、币种、金额相符时经真实
+//   release/v3.2.22 合入 fix/statement-xlsx-io-boundary（B113 D4b）后，单工作表流式导入按 SheetJS 同一口径还原 `_xHHHH_`，
+//   空字符与无法确认原值的转义整批拒绝；K–O 按这一口径验证，「旧记录」指 v3.2.22 之前按转义原文落库的数据（直接写库模拟）。
+//   Case K：含 NUL 的账号（Excel 写法 `A_x0000_B`）经生产流式导入入口整批拒绝、不落库；字面 `A_x0000_B`（Excel 写法
+//           `A_x005F_x0000_B`）按字面落库，映射非空时含 `_xHHHH_` 写法的账号无法确定真实账户号（可能是旧记录的转义原文），
+//           转义护栏不回填，逐条告警人工核对（告警里的转义片段按 ⟨U+HHHH⟩ 显示）。
+//   Case L：富文本账号的转义由相邻片段拼成（`MID_x00` + `41__x0042_`）→ 流式导入整批拒绝；旧记录的拼接串
+//           `MID_x0041__x0042_` 映射时原样映射与整串解码碰巧一致，也不回填，告警人工核对。
+//   Case M：源表字面对账ID `RID_x0041_` 经流式导入按字面落库，空映射下 R5s2 回填后经生产导出入口
+//           writeBankStatementMainOutput 写出，ExcelJS 与 SheetJS 读回源表字面值；旧记录的转义原文读回显示为转义写法。
+//   Case N：网关渠道 `BANK\rUS` 经流式导入还原为回车，映射命中的网关行只回填渠道相同的银行行（字面 `BANK_x000D_US` 是另一渠道）；
+//           旧记录渠道为 `BANK_x000D_US` 时无法确认真实渠道，回车版与字面版银行行都不回填，告警人工核对（不任选一行）。
+//   Case N2：银行批次只有 `CITI\rHK`，旧记录网关渠道为 `CITI_x000D_HK`、按渠道读池时在池外；账号、币种、金额相符时经真实
 //           读池暂存与按 id 回读的池外诊断告警渠道转义（不回填）。
-//   Case O：同一格既有 XML 字符引用（`&#13;`）又有转义原文（`_x005F_x0041_`）的网关对账ID，流式导入落库为
-//           `RID\rX_x005F_x0041_`；回填后经生产导出入口写出，ExcelJS 与 SheetJS 读回源对账ID `RID\rX_x0041_`。
+//   Case O：同一格既有 XML 字符引用（`&#13;`）又有 Excel 写法的字面 `_x0041_`（`_x005F_x0041_`）的网关对账ID，流式导入
+//           落库为 `RID\rX_x0041_`；回填后经生产导出入口写出，ExcelJS 与 SheetJS 读回源对账ID。
 //   Case P：网关账号按数值存放（`<v>9007199254740993</v>`）经流式导入落库为舍入值，按数值对得上映射键时不回填、告警。
 //   Case Q：银行对账单 MerchantId 按数值存放（`<v>9007199254740993</v>`）经生产读取入口读成舍入后的数值，按数值与映射
 //     目标账号相同时该银行行不参与网关调拨回填、告警；同批文本单元格的同形账号照常回填。
 //   Case R：银行对账单里的字面 `ID_x0041_`（Excel 存为 `ID_x005F_x0041_`）经生产读取入口读成字面值，C1 复制进对账ID、
-//     C3 自定义值写入字面 `NOTE_x0041_`、C3 按网关字段写入链接表原文 `RAW_x005F_x0041_`；经生产导出后前两者读回字面值，
-//     第三者读回源表值 `RAW_x0041_`（按值的来源编码，spec D21）。
+//     C3 自定义值写入字面 `NOTE_x0041_`、C3 按网关字段写入链接表落库值 `RAW_x0041_`（v3.2.22 起各导入路径落库已解码文本）；
+//     经生产导出后三者都读回字面值（一律按已解码文本编码）。
 //
 // 用法：node scripts/integration/fund-transfer-recon-account-mapping.js
 
@@ -475,54 +476,61 @@ async function run() {
       assertEq(electronResult.exportedUnmatched.slice().sort(), ['A', 'AB'], '🔴 J: 导出文件回读，未命中账号 A、AB 不被混同');
     }
 
-    // ===== Case K：真实工作簿经流式导入，含 NUL 的账号与字面 `A_x0000_B` 落库后无法区分 → 转义歧义护栏不回填、告警 =====
+    // ===== Case K：含 NUL 的账号经流式导入整批拒绝；字面 `A_x0000_B` 按字面落库，映射非空时转义护栏不回填、告警 =====
     {
       const signature = LINKED_IMPORT_SIGNATURES.find((sig) => sig.tableKey === 'gateway-recon');
       const headers = signature.expectedHeaders;
-      const gatewayFile = path.join(tmpDir, 'gateway-ooxml-escape.xlsx');
-      const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet('Sheet1');
-      sheet.addRow(headers);
-      const gatewayRow = (merchantid, reconId, bizId) => headers.map((header) => encodeExcelStXstring(({
-        Billdate: '2026-05-04', Channel: 'JPM', TradeType: 'FundTransfer-out', merchantid, currency: 'USD',
-        amount: '-777', reconciliationid: reconId, ReconBillBizId: bizId, orderid: `O-${bizId}`
-      })[header] ?? ''));
-      sheet.addRow(gatewayRow('A\u0000B', 'GW-K-NUL', 'GB-K-NUL'));
-      sheet.addRow(gatewayRow('A_x0000_B', 'GW-K-LIT', 'GB-K-LIT'));
-      await workbook.xlsx.writeFile(gatewayFile);
-      await appDb.upsertLinkedGatewayBillStreaming(async (writeOne) => {
-        const { matched } = await streamLinkedRowsToInsert(gatewayFile, signature, writeOne, (row) => row);
-        assertTrue(matched, 'K: 流内定位到网关表头');
-      }, { sourceFileName: path.basename(gatewayFile), legacySource: true });
-      appDb.saveFundTransferAccountMappings([
-        { midAccountId: 'A\u0000B', clearingAccountId: 'CLR-K-NUL' },
-        { midAccountId: 'A_x0000_B', clearingAccountId: 'CLR-K-LIT' }
+      const writeGatewayWorkbook = async (fileName, specs) => {
+        const file = path.join(tmpDir, fileName);
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('Sheet1');
+        sheet.addRow(headers);
+        for (const [merchantid, reconId, bizId] of specs) {
+          sheet.addRow(headers.map((header) => encodeExcelStXstring(({
+            Billdate: '2026-05-04', Channel: 'JPM', TradeType: 'FundTransfer-out', merchantid, currency: 'USD',
+            amount: '-777', reconciliationid: reconId, ReconBillBizId: bizId, orderid: `O-${bizId}`
+          })[header] ?? '')));
+        }
+        await workbook.xlsx.writeFile(file);
+        return file;
+      };
+      const importFile = (file) => appDb.upsertLinkedGatewayBillStreaming(async (writeOne) => {
+        const { matched } = await streamLinkedRowsToInsert(file, signature, writeOne, (row) => row, { keyField: 'ReconBillBizId' });
+        assertTrue(matched, `K: ${path.basename(file)} 流内定位到网关表头`);
+      }, { sourceFileName: path.basename(file), legacySource: true });
+      const kRows = () => appDb.readGatewayBillRowPoolsByChannels(['JPM']).exactRows.filter((g) => /^GW-K-/.test(g.reconciliationid));
+
+      // 有效行在前（读到含 NUL 的行之前已交给写入），含 NUL 的行在后：整批拒绝时已写入的有效行随事务回滚。
+      const nulFile = await writeGatewayWorkbook('gateway-ooxml-nul.xlsx', [
+        ['K-OK', 'GW-K-OK', 'GB-K-OK'], ['A\u0000B', 'GW-K-NUL', 'GB-K-NUL']
       ]);
+      let nulError = null;
+      try { await importFile(nulFile); } catch (error) { nulError = error; }
+      assertTrue(!!nulError && /第 3 行「merchantid」列的文本含空字符（U\+0000）/.test(nulError.message),
+        '🔴 K: 含 NUL 的账号整批拒绝，报行号与列名');
+      assertEq(kRows().length, 0, '🔴 K: 拒绝后同批已写入的有效行也回滚、不落库');
+
+      await importFile(await writeGatewayWorkbook('gateway-ooxml-literal.xlsx', [['A_x0000_B', 'GW-K-LIT', 'GB-K-LIT']]));
+      appDb.saveFundTransferAccountMappings([{ midAccountId: 'A_x0000_B', clearingAccountId: 'CLR-K-LIT' }]);
       const bankRows = [
         { _rowId: 'BK-LIT', Channel: 'JPM', FundType: 'FundTransfer-out', MerchantId: 'CLR-K-LIT', Currency: 'USD',
-          'Credit Amount': 0, 'Debit Amount': 777, BillDate: '2026-05-04', ReconciliationId: '' },
-        { _rowId: 'BK-NUL', Channel: 'JPM', FundType: 'FundTransfer-out', MerchantId: 'CLR-K-NUL', Currency: 'USD',
           'Credit Amount': 0, 'Debit Amount': 777, BillDate: '2026-05-04', ReconciliationId: '' }
       ];
-      const gwRows = appDb.readGatewayBillRowPoolsByChannels(['JPM']).exactRows;
-      assertEq(
-        gwRows.filter((g) => /^GW-K-/.test(g.reconciliationid)).map((g) => [g.reconciliationid, g.merchantid]).sort(),
-        [['GW-K-LIT', 'A_x005F_x0000_B'], ['GW-K-NUL', 'A_x0000_B']],
-        'K: 单工作表流式导入不解 `_xHHHH_`，两个账号按工作簿里的转义原文落库（现状，见 knowledge/backlog.md）'
-      );
+      const gwRows = kRows();
+      assertEq(gwRows.map((g) => [g.reconciliationid, g.merchantid]), [['GW-K-LIT', 'A_x0000_B']],
+        'K: 字面 `A_x0000_B` 经流式导入按字面落库（B113 D4b）');
       const result = await runReconciliation({
         bankRows,
         gwRows,
         scenarios: [gatewaySourceScenario()],
         fundTransferAccountMappingMap: appDb.getFundTransferAccountMappingMap()
       });
-      assertEq(bankRows.map((b) => [b._rowId, b.ReconciliationId]), [['BK-LIT', ''], ['BK-NUL', '']],
-        '🔴 K: 映射非空时含转义写法的账号无法确定真实账户号，两条网关行都不回填（不串号）');
+      assertEq(bankRows.map((b) => [b._rowId, b.ReconciliationId]), [['BK-LIT', '']],
+        '🔴 K: 映射非空时含转义写法的账号无法确定真实账户号（可能是旧记录的转义原文），不回填');
       const ambiguous = result.errorReport.filter((w) => w.code === 'r5-mapped-account-escape-ambiguous');
-      assertEq(ambiguous.map((w) => w.reconId).sort(), ['GW-K-LIT', 'GW-K-NUL'], '🔴 K: 每条歧义网关行告警一次，提示人工核对');
-      assertTrue(ambiguous.every((w) => !w.message.includes('A_x0000_B') && !w.message.includes('A_x005F_x0000_B')),
-        'K: 告警不写完整账户号');
-      assertTrue(ambiguous.every((w) => !/_x[0-9A-Fa-f]{4}_/i.test(w.message) && /⟨U\+00(00|5F)⟩/.test(w.message)),
+      assertEq(ambiguous.map((w) => w.reconId), ['GW-K-LIT'], '🔴 K: 告警一次，提示人工核对');
+      assertTrue(ambiguous.every((w) => !w.message.includes('A_x0000_B')), 'K: 告警不写完整账户号');
+      assertTrue(ambiguous.every((w) => !/_x[0-9A-Fa-f]{4}_/i.test(w.message) && /⟨U\+0000⟩/.test(w.message)),
         'K: 告警里的转义片段按 ⟨U+HHHH⟩ 显示，错误报告读回不被解码');
       appDb.saveFundTransferAccountMappings([]);
     }
@@ -536,11 +544,13 @@ async function run() {
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Sheet1');
       sheet.addRow(headers);
-      for (const spec of rowsSpec) {
+      for (const [index, spec] of rowsSpec.entries()) {
+        // 业务键（幂等键）与订单号按文件名与行序生成，不含转义写法：与生产入口一样按 ReconBillBizId 校验（见下）。
+        const businessKey = `${path.basename(fileName, '.xlsx')}-${index + 1}`;
         sheet.addRow(headers.map((header) => {
           const value = ({
-            Billdate: '2026-05-04', TradeType: 'FundTransfer-out', currency: 'USD', orderid: `O-${spec.reconciliationid}`,
-            ReconBillBizId: `GB-${spec.reconciliationid}`, ...spec
+            Billdate: '2026-05-04', TradeType: 'FundTransfer-out', currency: 'USD', orderid: `O-${businessKey}`,
+            ReconBillBizId: `GB-${businessKey}`, ...spec
           })[header] ?? '';
           return (value && typeof value === 'object') || typeof value === 'number' ? value : encodeExcelStXstring(value);
         }));
@@ -559,7 +569,7 @@ async function run() {
         fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
       }
       await appDb.upsertLinkedGatewayBillStreaming(async (writeOne) => {
-        const { matched } = await streamLinkedRowsToInsert(file, signature, writeOne, (row) => row);
+        const { matched } = await streamLinkedRowsToInsert(file, signature, writeOne, (row) => row, { keyField: 'ReconBillBizId' });
         assertTrue(matched, `${fileName}: 流内定位到网关表头`);
       }, { sourceFileName: path.basename(file), legacySource: true });
     };
@@ -568,14 +578,26 @@ async function run() {
       'Credit Amount': 0, 'Debit Amount': debit, BillDate: '2026-05-04', ReconciliationId: ''
     });
 
-    // ===== Case L：富文本账号的片段边界在流式导入后丢失 → 映射非空时不按映射回填、告警 =====
+    // ===== Case L：富文本账号的转义由相邻片段拼成 → 流式导入整批拒绝；旧记录的拼接串映射非空时不回填、告警 =====
     {
-      await importGatewayWorkbook('gateway-rich-account.xlsx', [{
-        reconciliationid: 'GW-L', merchantid: { richText: [{ text: 'MID_x00' }, { text: '41__x0042_' }] }, amount: '-888', Channel: 'JPM'
-      }]);
+      let richError = null;
+      try {
+        await importGatewayWorkbook('gateway-rich-account.xlsx', [{
+          reconciliationid: 'GW-L0', merchantid: { richText: [{ text: 'MID_x00' }, { text: '41__x0042_' }] }, amount: '-888', Channel: 'JPM'
+        }]);
+      } catch (error) {
+        richError = error;
+      }
+      assertTrue(!!richError && /第 2 行「merchantid」列的文本含无法确认原值的 Excel 文本转义/.test(richError.message),
+        '🔴 L: 跨富文本片段拼成的转义无法确认原值，整批拒绝');
+      assertEq(appDb.readGatewayBillRowPoolsByChannels(['JPM']).exactRows.filter((g) => g.reconciliationid === 'GW-L0').length, 0,
+        '🔴 L: 拒绝后不落库');
+      // v3.2.22 之前流式导入把各片段直接拼接落库（逐段解码应为 MID_x0041_B，片段边界已丢失）
+      appDb.upsertLinkedGatewayBill([{
+        Channel: 'JPM', TradeType: 'FundTransfer-out', merchantid: 'MID_x0041__x0042_', currency: 'USD', amount: '-888',
+        Billdate: '2026-05-04', reconciliationid: 'GW-L', ReconBillBizId: 'GB-GW-L', orderid: 'O-GW-L'
+      }], { sourceFileName: 'gateway-rich-account-legacy.xlsx', legacySource: true });
       const gwRows = appDb.readGatewayBillRowPoolsByChannels(['JPM']).exactRows.filter((g) => g.reconciliationid === 'GW-L');
-      assertEq(gwRows.map((g) => g.merchantid), ['MID_x0041__x0042_'],
-        'L: 流式导入把富文本各片段直接拼接（逐段解码应为 MID_x0041_B，片段边界已丢失）');
       appDb.saveFundTransferAccountMappings([{ midAccountId: 'MID_x0041__x0042_', clearingAccountId: 'MIDAB' }]);
       const bankRows = [transferBank('BL-AB', 'MIDAB', 'JPM', 888)];
       const result = await runReconciliation({
@@ -585,72 +607,100 @@ async function run() {
         fundTransferAccountMappingMap: appDb.getFundTransferAccountMappingMap()
       });
       assertEq(bankRows.map((b) => [b._rowId, b.ReconciliationId]), [['BL-AB', '']],
-        '🔴 L: 原样映射与整串解码碰巧一致也不回填（真实账户号无法确定）');
+        '🔴 L: 旧记录原样映射与整串解码碰巧一致也不回填（真实账户号无法确定）');
       const ambiguous = result.errorReport.filter((w) => w.code === 'r5-mapped-account-escape-ambiguous');
       assertEq(ambiguous.map((w) => w.reconId), ['GW-L'], '🔴 L: 告警一次，提示人工核对账户号');
       appDb.saveFundTransferAccountMappings([]);
     }
 
-    // ===== Case M：流式导入的字面对账ID 经回填与生产导出后读回源表字面值 =====
+    // ===== Case M：源表字面对账ID 经流式导入按字面落库，回填与生产导出后读回源表字面值；旧记录读回转义写法 =====
     {
       await importGatewayWorkbook('gateway-literal-recon-id.xlsx', [
         { reconciliationid: 'RID_x0041_', merchantid: 'GW-M', amount: '-999', Channel: 'JPM' }
       ]);
+      // v3.2.22 之前流式导入按转义原文落库的旧记录（源表字面 `RID_x0041_` 存为 `RID_x005F_x0041_`）
+      appDb.upsertLinkedGatewayBill([{
+        Channel: 'JPM', TradeType: 'FundTransfer-out', merchantid: 'GW-M2', currency: 'USD', amount: '-998',
+        Billdate: '2026-05-04', reconciliationid: 'RID_x005F_x0041_', ReconBillBizId: 'GB-GW-M2', orderid: 'O-GW-M2'
+      }], { sourceFileName: 'gateway-literal-recon-id-legacy.xlsx', legacySource: true });
       assertEq(appDb.getFundTransferAccountMappingMap().size, 0, 'M: 空映射');
-      const gwRows = appDb.readGatewayBillRowPoolsByChannels(['JPM']).exactRows.filter((g) => g.merchantid === 'GW-M');
-      assertEq(gwRows.map((g) => g.reconciliationid), ['RID_x005F_x0041_'], 'M: 流式导入落库为转义原文（现状，见 B134）');
-      const bankRows = [transferBank('BM', 'GW-M', 'JPM', 999)];
+      const gwRows = appDb.readGatewayBillRowPoolsByChannels(['JPM']).exactRows.filter((g) => /^GW-M2?$/.test(g.merchantid));
+      assertEq(gwRows.filter((g) => g.merchantid === 'GW-M').map((g) => g.reconciliationid), ['RID_x0041_'],
+        'M: 流式导入按 SheetJS 同一口径还原，落库为源表字面值（B113 D4b）');
+      const bankRows = [transferBank('BM', 'GW-M', 'JPM', 999), transferBank('BM2', 'GW-M2', 'JPM', 998)];
       const result = await runReconciliation({
         bankRows,
         gwRows,
         scenarios: [gatewaySourceScenario()],
         fundTransferAccountMappingMap: appDb.getFundTransferAccountMappingMap()
       });
-      assertEq(bankRows[0].ReconciliationId, 'RID_x005F_x0041_', 'M: 回填的是落库值');
+      assertEq(bankRows.map((b) => b.ReconciliationId), ['RID_x0041_', 'RID_x005F_x0041_'], 'M: 回填的是落库值');
       const mainFilePath = path.join(tmpDir, 'literal-recon-id-output.xlsx');
       await writeBankStatementMainOutput({
         modifiedRows: result.modifiedRows, unmatchedRows: result.unmatchedRows, modifications: result.modifications,
         headers: ['MerchantId', 'ReconciliationId'], mainFilePath
       });
+      const expected = [['GW-M', 'RID_x0041_'], ['GW-M2', 'RID_x005F_x0041_']];
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.readFile(mainFilePath);
-      assertEq(workbook.getWorksheet('命中场景').getCell(2, 4).value, 'RID_x0041_', '🔴 M: ExcelJS 读回源表字面对账ID');
+      const hitSheet = workbook.getWorksheet('命中场景');
+      assertEq([2, 3].map((r) => [hitSheet.getCell(r, 3).value, hitSheet.getCell(r, 4).value]).sort(), expected,
+        '🔴 M: ExcelJS 读回源表字面对账ID；旧记录读回显示为转义写法（需人工核对，见 knowledge/backlog.md B134）');
       const sheetRows = XLSX.utils.sheet_to_json(XLSX.readFile(mainFilePath).Sheets['命中场景'], { header: 1, raw: true });
-      assertEq(sheetRows[1][3], 'RID_x0041_', '🔴 M: SheetJS 读回源表字面对账ID');
+      assertEq(sheetRows.slice(1).map((row) => [row[2], row[3]]).sort(), expected, '🔴 M: SheetJS 读回与 ExcelJS 一致');
     }
 
-    // ===== Case N：映射行的网关渠道含 `_xHHHH_` 写法 → 无法确认同渠道，不回填并告警 =====
+    // ===== Case N：网关渠道含回车 → 流式导入还原，只回填渠道相同的银行行；旧记录渠道为转义写法时不回填、告警 =====
     {
       await importGatewayWorkbook('gateway-escaped-channel.xlsx', [
         { reconciliationid: 'GW-N', merchantid: 'ALIAS-N', amount: '-777', Channel: 'BANK\rUS' }
       ]);
       appDb.saveFundTransferAccountMappings([{ midAccountId: 'ALIAS-N', clearingAccountId: 'CLR-N' }]);
+      const readN = (reconId) => appDb.readGatewayBillRowPoolsByChannels(['BANK\rUS', 'BANK_x000D_US']).exactRows
+        .filter((g) => g.reconciliationid === reconId);
+      const gwRows = readN('GW-N');
+      assertEq(gwRows.map((g) => g.Channel), ['BANK\rUS'], 'N: 流式导入还原渠道里的回车（B113 D4b）');
       const bankRows = [transferBank('BN-CR', 'CLR-N', 'BANK\rUS', 777), transferBank('BN-LIT', 'CLR-N', 'BANK_x000D_US', 777)];
-      const gwRows = appDb.readGatewayBillRowPoolsByChannels(['BANK\rUS', 'BANK_x000D_US']).exactRows
-        .filter((g) => g.reconciliationid === 'GW-N');
-      assertEq(gwRows.map((g) => g.Channel), ['BANK_x000D_US'], 'N: 流式导入把渠道里的回车存成转义原文，按字面渠道读进池');
       const result = await runReconciliation({
         bankRows,
         gwRows,
         scenarios: [gatewaySourceScenario()],
         fundTransferAccountMappingMap: appDb.getFundTransferAccountMappingMap()
       });
-      assertEq(bankRows.map((b) => [b._rowId, b.ReconciliationId]), [['BN-CR', ''], ['BN-LIT', '']],
-        '🔴 N: 渠道无法确认，回车版与字面版银行行都不回填');
-      assertEq(result.errorReport.filter((w) => w.code === 'r5-mapped-account-channel-escape-ambiguous').map((w) => w.reconId),
-        ['GW-N'], '🔴 N: 告警一次，提示人工核对渠道');
+      assertEq(bankRows.map((b) => [b._rowId, b.ReconciliationId]), [['BN-CR', 'GW-N'], ['BN-LIT', '']],
+        '🔴 N: 映射命中的网关行只回填渠道相同的银行行（字面 BANK_x000D_US 是另一渠道）');
+      assertEq(result.errorReport.filter((w) => w.code === 'r5-mapped-account-channel-escape-ambiguous').length, 0,
+        'N: 渠道已还原、可以确认，不告警');
+
+      // 旧记录：渠道按转义原文落库为 `BANK_x000D_US`，无法确认是回车还是字面写法
+      appDb.upsertLinkedGatewayBill([{
+        Channel: 'BANK_x000D_US', TradeType: 'FundTransfer-out', merchantid: 'ALIAS-N', currency: 'USD', amount: '-776',
+        Billdate: '2026-05-04', reconciliationid: 'GW-N-OLD', ReconBillBizId: 'GB-GW-N-OLD', orderid: 'O-GW-N-OLD'
+      }], { sourceFileName: 'gateway-escaped-channel-legacy.xlsx', legacySource: true });
+      const oldBankRows = [transferBank('BN-CR2', 'CLR-N', 'BANK\rUS', 776), transferBank('BN-LIT2', 'CLR-N', 'BANK_x000D_US', 776)];
+      const oldResult = await runReconciliation({
+        bankRows: oldBankRows,
+        gwRows: readN('GW-N-OLD'),
+        scenarios: [gatewaySourceScenario()],
+        fundTransferAccountMappingMap: appDb.getFundTransferAccountMappingMap()
+      });
+      assertEq(oldBankRows.map((b) => [b._rowId, b.ReconciliationId]), [['BN-CR2', ''], ['BN-LIT2', '']],
+        '🔴 N: 旧记录渠道无法确认，回车版与字面版银行行都不回填');
+      assertEq(oldResult.errorReport.filter((w) => w.code === 'r5-mapped-account-channel-escape-ambiguous').map((w) => w.reconId),
+        ['GW-N-OLD'], '🔴 N: 告警一次，提示人工核对渠道');
       appDb.saveFundTransferAccountMappings([]);
     }
 
-    // ===== Case N2：池外映射网关行的渠道只在解码后与银行渠道相符 → 池外诊断告警渠道转义，不回填 =====
+    // ===== Case N2：旧记录池外映射网关行的渠道只在解码后与银行渠道相符 → 池外诊断告警渠道转义，不回填 =====
     {
-      await importGatewayWorkbook('gateway-escaped-channel-out-of-pool.xlsx', [
-        { reconciliationid: 'GW-N2', merchantid: 'ALIAS-N2', amount: '-555', Channel: 'CITI\rHK' }
-      ]);
+      appDb.upsertLinkedGatewayBill([{
+        Channel: 'CITI_x000D_HK', TradeType: 'FundTransfer-out', merchantid: 'ALIAS-N2', currency: 'USD', amount: '-555',
+        Billdate: '2026-05-04', reconciliationid: 'GW-N2', ReconBillBizId: 'GB-GW-N2', orderid: 'O-GW-N2'
+      }], { sourceFileName: 'gateway-escaped-channel-out-of-pool-legacy.xlsx', legacySource: true });
       appDb.saveFundTransferAccountMappings([{ midAccountId: 'ALIAS-N2', clearingAccountId: 'CLR-N2' }]);
       const { result, bankRows, gwRows, diagnosticRows } = await runGatewaySource(appDb, undefined,
         [transferBank('BN2', 'CLR-N2', 'CITI\rHK', 555)]);
-      assertEq(gwRows.filter((g) => g.reconciliationid === 'GW-N2').length, 0, 'N2: 落库渠道 CITI_x000D_HK 不在按银行渠道读的池里');
+      assertEq(gwRows.filter((g) => g.reconciliationid === 'GW-N2').length, 0, 'N2: 旧记录渠道 CITI_x000D_HK 不在按银行渠道读的池里');
       assertEq(diagnosticRows.map((g) => g.reconciliationid), ['GW-N2'], 'N2: 真实读池暂存、按 id 回读池外诊断行');
       assertEq(bankRows[0].ReconciliationId, '', '🔴 N2: 池外行只读诊断，不回填');
       const warned = result.errorReport.filter((w) => w.code === 'r5-mapped-account-channel-escape-ambiguous');
@@ -661,14 +711,14 @@ async function run() {
       appDb.saveFundTransferAccountMappings([]);
     }
 
-    // ===== Case O：同一格既有 XML 字符引用又有转义原文的对账ID → 回填并导出后读回源对账ID =====
+    // ===== Case O：同一格既有 XML 字符引用又有 Excel 写法的字面 `_x0041_` 的对账ID → 回填并导出后读回源对账ID =====
     {
       await importGatewayWorkbook('gateway-mixed-recon-id.xlsx', [
         { reconciliationid: 'RIDCRMARKX_x0041_', merchantid: 'GW-O', amount: '-444', Channel: 'JPM' }
       ], { patchSharedStrings: (xml) => xml.split('CRMARK').join('&#13;') });
       const gwRows = appDb.readGatewayBillRowPoolsByChannels(['JPM']).exactRows.filter((g) => g.merchantid === 'GW-O');
-      assertEq(gwRows.map((g) => g.reconciliationid), ['RID\rX_x005F_x0041_'],
-        'O: 流式导入只还原 XML 字符引用，`_xHHHH_` 保留原文（源对账ID 为 RID\\rX_x0041_）');
+      assertEq(gwRows.map((g) => g.reconciliationid), ['RID\rX_x0041_'],
+        'O: 流式导入还原 XML 字符引用与 `_x005F_` 保护的字面 `_x0041_`，落库为源对账ID');
       const bankRows = [transferBank('BO', 'GW-O', 'JPM', 444)];
       const result = await runReconciliation({
         bankRows,
@@ -676,7 +726,7 @@ async function run() {
         scenarios: [gatewaySourceScenario()],
         fundTransferAccountMappingMap: appDb.getFundTransferAccountMappingMap()
       });
-      assertEq(bankRows[0].ReconciliationId, 'RID\rX_x005F_x0041_', 'O: 回填的是落库值');
+      assertEq(bankRows[0].ReconciliationId, 'RID\rX_x0041_', 'O: 回填的是落库值');
       const mainFilePath = path.join(tmpDir, 'mixed-recon-id-output.xlsx');
       await writeBankStatementMainOutput({
         modifiedRows: result.modifiedRows, unmatchedRows: result.unmatchedRows, modifications: result.modifications,
@@ -761,7 +811,7 @@ async function run() {
       appDb.saveFundTransferAccountMappings([]);
     }
 
-    // ===== Case R：C1 / C3 自定义值写入的已解码文本经生产导出读回字面值；C3 按网关字段写入的链接表原文读回源表值 =====
+    // ===== Case R：C1、C3 自定义值与 C3 按网关字段写入的值经生产导出都读回字面值 =====
     {
       const bankFile = path.join(tmpDir, 'bank-decoded-scenario-values.xlsx');
       const workbook = new ExcelJS.Workbook();
@@ -790,7 +840,7 @@ async function run() {
         gwRows: [],
         c3GwRows: [
           { orderid: 'CR-2', orderid2: 'none-1', remark: '' },
-          { orderid: 'none-2', orderid2: 'AR-3', remark: 'RAW_x005F_x0041_' }
+          { orderid: 'none-2', orderid2: 'AR-3', remark: 'RAW_x0041_' }
         ],
         scenarios: [
           { id: 1, name: 'C1 复制对账ID', category: 'extract-recon-id', priority: 1, enabled: true,
@@ -802,7 +852,7 @@ async function run() {
         ]
       });
       assertEq([bankRows[0].ReconciliationId, bankRows[1]['Remark-description'], bankRows[2].Datasource],
-        ['ID_x0041_', 'NOTE_x0041_', 'RAW_x005F_x0041_'], 'R: 三个场景各自写入');
+        ['ID_x0041_', 'NOTE_x0041_', 'RAW_x0041_'], 'R: 三个场景各自写入');
       const decodedOf = (rowId) => {
         const row = result.modifiedRows.find((r) => r._rowId === rowId);
         return row && row._decodedModifiedColumns ? Array.from(row._decodedModifiedColumns) : [];
@@ -819,7 +869,7 @@ async function run() {
       const sheetRows = XLSX.utils.sheet_to_json(XLSX.readFile(mainFilePath).Sheets['命中场景'], { header: 1, raw: true, defval: '' });
       const columnOf = (name) => sheetRows[0].indexOf(name);
       assertEq(sheetRows.slice(1).map((row) => headers.map((h) => row[columnOf(h)])), expected,
-        '🔴 R: SheetJS 读回——已解码文本读回字面值，链接表原文读回源表值');
+        '🔴 R: SheetJS 读回字面值');
       assertTrue(String(sheetRows[1][0]).includes('ID_x0041_') && !String(sheetRows[1][0]).includes('IDA'),
         'R: 命中明细里的新值与结果列一致');
       const readBack = new ExcelJS.Workbook();

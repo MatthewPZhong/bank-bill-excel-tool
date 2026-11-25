@@ -193,7 +193,7 @@ async function writeScenarioHitRows(modifiedRows, originalFilePath, opts = {}) {
   //   v2.1.9 D16=b：「匹配渠道」列改用 _hitChannelId 查 channels label（命中场景所属渠道）
   //   未传 opts.channels → 回退 _hitChannelKey（向后兼容老 caller / dispatcher 单维路径）
   for (const row of modifiedRows) {
-    // v3.2.22（🔴 资金红线）：与主输出同口径按来源编码——被场景改写的列按原文，银行账单原值与配置文案按已解码文本。
+    // v3.2.22（🔴 资金红线）：与主输出同口径按已解码文本编码（见 exceljs-writer encodeBankRowCellValue）。
     const baseValues = headers.map((h) => (row && row[h] !== undefined ? encodeBankRowCellValue(row, h) : ''));
     const channelLabel = buildHitChannelLabel(row, channelsLabelMap);
     const matchStatus = (row && row._matchStatus != null) ? row._matchStatus : '';
@@ -202,7 +202,7 @@ async function writeScenarioHitRows(modifiedRows, originalFilePath, opts = {}) {
   }
 
   // v3.2.22（🔴 资金红线）：与主输出同一文本编码（控制字符、回车写成 `_xHHHH_`），同一次导出的两份核对材料中
-  //   账号与对账ID 读回一致（ExcelJS 否则静默删掉 NUL 等字符）。各单元格已按来源编码，这里只是兜底。
+  //   账号与对账ID 读回一致（ExcelJS 否则静默删掉 NUL 等字符）。各单元格已按已解码文本编码，这里只是兜底。
   encodeWorkbookCellTexts(workbook);
   applyWatermark(workbook);
 

@@ -249,7 +249,7 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId, decodedColsByRo
       }
       // 跨轮合并后的标黄列：必须是 Set（exceljs-writer 标黄依赖 .size / .has；与 dispatcher 产出一致）。
       out._modifiedColumns = new Set(modColsByRowId.get(r._rowId) || []);
-      // v3.2.22：改写列里当前值为已解码文本的列（见 decodedColsByRowId）；为空时不加，导出按「改写过 = 链接表原文」处理。
+      // v3.2.22：改写列里当前值为已解码文本的列（见 decodedColsByRowId）；为空时不加。
       const decodedColumns = decodedColsByRowId.get(r._rowId);
       if (decodedColumns && decodedColumns.size > 0) out._decodedModifiedColumns = new Set(decodedColumns);
       return out;
@@ -376,7 +376,9 @@ async function runReconciliation({
   const modColsByRowId = new Map(); // rowId -> Set<column>（标黄来源，跨 5 轮合并）
   // v3.2.22（🔴 资金红线·导出保真）：rowId -> 当前值为已解码文本的改写列（场景写入的值来自银行行字段或用户配置，见
   //   scenario-engines.scenarioWritesDecodedValues），按同一行同一列最后一次改写判断。改写过、不在其中的列，当前值来自
-  //   链接表单元格原文（可能保留 `_xHHHH_` 转义原文）：导出按原文编码，R5s2 映射回填据此判断银行账号能否确认。
+  //   链接表单元格（v3.2.22 之前经流式导入落库的旧记录可能保留 `_xHHHH_` 转义原文）：R5s2 映射回填据此判断银行账号能否
+  //   确认。导出不再按来源区分，一律按已解码文本编码（链接表各导入路径自 v3.2.22 起都落库已解码文本，见 exceljs-writer
+  //   encodeBankRowCellValue）。
   const decodedColsByRowId = new Map();
   const mergeMods = (mods, isDecoded = null) => {
     for (const m of mods || []) {
@@ -449,7 +451,7 @@ async function runReconciliation({
   const isDecodedR2Modification = (m) => decodedR2ScenarioIds.has(m.scenarioId);
   mergeMods(r2.modifications, isDecodedR2Modification);
   appendWarnings(r2.errorReport);
-  // v3.2.22：值为已解码文本的改写标 _valueDecoded（命中明细、Payment 核对页按来源编码）。
+  // v3.2.22：值为已解码文本的改写标 _valueDecoded（随改写记录留痕；导出一律按已解码文本编码）。
   for (const m of r2.modifications || []) {
     allMods.push(isDecodedR2Modification(m) ? { ...m, _round: 'R2', _valueDecoded: true } : { ...m, _round: 'R2' });
   }
@@ -535,9 +537,9 @@ async function runReconciliation({
         region: paymentOptions.region
       }
     );
-    // v3.2.22（🔴 资金红线·导出保真）：在并入 Payment 自己的改写前，为每个配对记下其银行行此前已被改写的列（列名数组，
-    //   可序列化）。核对页「银行行-原始」与原对账ID 是 Payment 写入前的快照：这些列的值来自前序场景（按原文写出），
-    //   其余列是银行账单原值（按已解码文本写出），见 exceljs-writer.js paymentOfflineCellEncoders。
+    // v3.2.22：在并入 Payment 自己的改写前，为每个配对记下其银行行此前已被改写的列（列名数组，可序列化），随配对留痕。
+    //   核对页「银行行-原始」与原对账ID 是 Payment 写入前的快照，导出一律按已解码文本编码（见 exceljs-writer.js
+    //   appendPaymentOfflineSheets）。
     for (const pair of paymentResult.matchedPairs || []) {
       const rowId = pair && pair.bankRow ? pair.bankRow._rowId : undefined;
       pair.modifiedColumnsBeforePayment = Array.from(modColsByRowId.get(rowId) || []);

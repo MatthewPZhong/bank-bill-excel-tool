@@ -367,6 +367,7 @@ async function verifyBigAccountRecognitionRead(dir) {
   const uniqueNormalizedValues = loadNamed('uniqueNormalizedValues', { normalizeCell });
   const resolveDirect = loadNamed('resolveDirectBigAccountRecognition', {
     expandBigAccountConfigurations: loadNamed('expandBigAccountConfigurations', { normalizeMaintainedBigAccounts }),
+    isHeaderOnlyDetailRows: loadNamed('isHeaderOnlyDetailRows'),
     uniqueNormalizedValues,
     getEntryTemplateConfig: () => ({ exportMappings: [], template: { headers: HEADER } }),
     isMultiBigAccountMapping: () => true,

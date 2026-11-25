@@ -320,8 +320,8 @@ function isPrecisionAmbiguousBankAccount(value, fingerprints) {
   return typeof value === 'number' && numericReadAccountAmbiguous(value, fingerprints);
 }
 
-// v3.2.22：告警里的 `_xHHHH_` 写法显示为「⟨U+HHHH⟩」。错误报告按 OOXML 原文写出，`_xHHHH_` 会被 Excel / 读取库解码成
-//   对应字符（控制字符不可见），人工复核需要看到的是写法本身。替换结果不含下划线，不会拼出新的转义写法。
+// v3.2.22：告警里的 `_xHHHH_` 写法显示为「⟨U+HHHH⟩」：写法本身可能代表控制字符（不可见），也可能就是文字，人工复核需要
+//   一眼看出是哪一段。替换结果不含下划线，不会拼出新的转义写法。
 function showOoxmlEscapes(text) {
   return String(text).replace(/_x([0-9A-Fa-f]{4})_/gi, (_match, hex) => `⟨U+${hex.toUpperCase()}⟩`);
 }

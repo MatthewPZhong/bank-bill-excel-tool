@@ -727,16 +727,17 @@ test.describe('writeScenarioHitRows — 多行 + 行序保持', () => {
 
 // v3.2.22（🔴 资金红线）：命中场景独立报表与主输出同一文本编码，含 NUL / 回车 / 字面 `_xHHHH_` 的账号与对账ID
 //   在两份核对材料中读回一致（ExcelJS 否则静默删掉 NUL）。
-test('v3.2.22 命中场景独立报表：按来源编码（银行原值读回原值、改写列按原文），ExcelJS / SheetJS 读回与主输出一致', async () => {
+test('v3.2.22 命中场景独立报表：按已解码文本编码（银行原值与改写列都读回原值），ExcelJS / SheetJS 读回与主输出一致', async () => {
   const XLSX = require('xlsx');
   const { writeBankStatementOutput } = require('../../../src/main-process/exceljs-writer');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-hit-rows-nul-'));
   try {
     const headers = ['MerchantId', 'ReconciliationId'];
     const accounts = ['A\u0000B', 'AB', 'X\rY', 'X\nY', '_x0041_\u0001', 'A_x0000_B'];
-    // 与主输出同口径按来源编码：银行账单原值（MerchantId）读回原值，含真实 NUL 的 `A\0B` 与字面 `A_x0000_B` 可区分；
-    //   场景改写的对账ID 按 OOXML 原文写出（流式导入落库形态的转义原文读回源表值，同格含控制字符时也一样）。
-    const reconIds = ['GW\u00010', 'GW\u00011', 'GW\u00012', 'GW\u00013', 'RID\rX_x005F_x0041_', 'RID_x005F_x0041_'];
+    // 与主输出同口径按已解码文本编码：银行账单原值（MerchantId）读回原值，含真实 NUL 的 `A\0B` 与字面 `A_x0000_B` 可区分；
+    //   场景改写的对账ID 来自链接表，各导入路径落库的都是已解码文本（release/v3.2.22 合入 B113 D4b 后单工作表流式导入同样
+    //   还原 `_xHHHH_`），源表字面 `RID_x0041_` 读回仍是字面值，同格含控制字符时也一样。
+    const reconIds = ['GW\u00010', 'GW\u00011', 'GW\u00012', 'GW\u00013', 'RID\rX_x0041_', 'RID_x0041_'];
     const rows = accounts.map((account, i) => ({
       _rowId: `R${i}`, _modifiedColumns: new Set(['ReconciliationId']), MerchantId: account, ReconciliationId: reconIds[i]
     }));

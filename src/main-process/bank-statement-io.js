@@ -324,10 +324,8 @@ function* enrichWarningsWithReconId(warnings, reconIdByRowId) {
       yield warning;
       continue;
     }
-    const entry = reconIdByRowId.get(warning.rowId);
-    yield entry === undefined
-      ? warning
-      : { ...warning, reconciliationId: entry.reconciliationId, reconciliationIdDecoded: entry.decoded };
+    const reconciliationId = reconIdByRowId.get(warning.rowId);
+    yield reconciliationId === undefined ? warning : { ...warning, reconciliationId };
   }
 }
 
@@ -342,13 +340,7 @@ async function writeErrorReportOutputToPath({ warnings, outputPath, bankRows, wr
       const reconciliationId = row.ReconciliationId;
       if (reconciliationId === undefined || reconciliationId === null
           || String(reconciliationId).trim() === '') continue;
-      // v3.2.22：对账ID 未被场景改写时是银行账单原值（已解码），writer 按已解码文本编码，与主输出同一列读回一致。
-      const modifiedColumns = row._modifiedColumns;
-      const decodedColumns = row._decodedModifiedColumns;
-      // v3.2.22：未被改写（银行原值），或最后一次改写的值为已解码文本（C1 / C2 / C3 自定义值等）→ 已解码文本。
-      const decoded = !(modifiedColumns && typeof modifiedColumns.has === 'function' && modifiedColumns.has('ReconciliationId')) ||
-        !!(decodedColumns && typeof decodedColumns.has === 'function' && decodedColumns.has('ReconciliationId'));
-      reconIdByRowId.set(row._rowId, { reconciliationId, decoded });
+      reconIdByRowId.set(row._rowId, reconciliationId);
     }
     enrichedWarnings = enrichWarningsWithReconId(warnings, reconIdByRowId);
   }

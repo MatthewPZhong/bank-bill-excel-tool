@@ -271,7 +271,7 @@ test('v3.2.22 writeErrorReportOutputToPath：对账ID 逐条补全，输出不�
   await assert.rejects(withinMs(pending, 5000), /disk gone/);
 });
 
-test('v3.2.22（🔴）writeErrorReportOutputToPath：对账ID 与主输出同口径按来源编码（银行原值读回原值、回填值按原文）', async () => {
+test('v3.2.22（🔴）writeErrorReportOutputToPath：对账ID 与主输出同口径按已解码文本编码（银行原值与回填值都读回原值）', async () => {
   const XLSX = require('xlsx');
   const { writeErrorReportOutputToPath } = require('../../../src/main-process/bank-statement-io');
   const outputPath = tmpFile('recon-id-source.xlsx');
@@ -281,8 +281,9 @@ test('v3.2.22（🔴）writeErrorReportOutputToPath：对账ID 与主输出同�
     bankRows: [
       { _rowId: 'r1', ReconciliationId: 'A_x0000_B' },
       { _rowId: 'r2', ReconciliationId: 'A\u0000B' },
-      { _rowId: 'r3', _modifiedColumns: new Set(['ReconciliationId']), ReconciliationId: 'RID_x005F_x0041_' },
-      // 🔴 改写值是已解码文本（C1 提取 / C3 自定义值，编排器标 _decodedModifiedColumns）：与主输出同口径读回字面值。
+      // 🔴 回填值来自链接表（release/v3.2.22 合入 B113 D4b 后链接表各导入路径都落库已解码文本）：读回源表字面值。
+      { _rowId: 'r3', _modifiedColumns: new Set(['ReconciliationId']), ReconciliationId: 'RID_x0041_' },
+      // 🔴 改写值是 C1 提取 / C3 自定义值（编排器标 _decodedModifiedColumns）：同样读回字面值。
       { _rowId: 'r4', _modifiedColumns: new Set(['ReconciliationId']), _decodedModifiedColumns: new Set(['ReconciliationId']),
         ReconciliationId: 'C1_x0041_' }
     ]
@@ -354,7 +355,7 @@ test('v3.2.22 writeErrorReport：告警文本中的 NUL 等控制字符无损写
   const XLSX = require('xlsx');
   const rows = XLSX.utils.sheet_to_json(XLSX.readFile(out).Sheets['error-report'], { header: 1, raw: true });
   assert.strictEqual(rows[1][2], 'R\u0000X');
-  assert.strictEqual(rows[1][3], '账号 A\u0000B / A', '控制字符编码，同格已成对的 `_x0041_` 按原文写出');
+  assert.strictEqual(rows[1][3], '账号 A\u0000B / _x0041_', '控制字符编码，同格的字面 `_x0041_` 读回原样（按已解码文本）');
   assert.strictEqual(rows[2][2], '_x0041\u0000');
   assert.strictEqual(rows[2][3], '边界账号 _x0041\u0000');
   assert.strictEqual(rows[3][2], 'Ax0000_');
@@ -607,15 +608,16 @@ test('v3.2.22 cleanupInterruptedErrorReportTemporaryFiles：登记读不到（�
   assert.deepEqual(fs.readdirSync(markerDir), [], 'JSON 损坏（写登记中被终止）的登记撤销');
 });
 
-test('v3.2.22 writeErrorReport：流式导入的转义原文与编码后的控制字符经 ExcelJS、SheetJS 读回一致（与主输出同口径）', async () => {
+test('v3.2.22 writeErrorReport：对账ID 的字面 `_xHHHH_` 与控制字符经 ExcelJS、SheetJS 读回一致（与主输出同口径）', async () => {
   const XLSX = require('xlsx');
   const out = tmpFile('xstring.xlsx');
   await writeErrorReport([
-    { scenarioName: 'S', reconciliationId: 'RID_x005F_x0041_', code: 'x', message: '对账ID RID_x005F_x0041_' },
+    // 对账ID 与告警正文都按已解码文本编码（与主输出同口径）：正文里插入的对账ID 与第 3 列读回相同。
+    { scenarioName: 'S', reconciliationId: 'RID_x0041_', code: 'x', message: '对账ID RID_x0041_' },
     { scenarioName: 'S', reconciliationId: 'R\u0000X', code: 'x', message: '账号 A\u0000B / _x0041_' },
     { scenarioName: 'S', reconciliationId: 'PLAIN', code: 'x', message: '普通告警' }
   ], out);
-  const expected = [['RID_x0041_', '对账ID RID_x0041_'], ['R\u0000X', '账号 A\u0000B / A'], ['PLAIN', '普通告警']];
+  const expected = [['RID_x0041_', '对账ID RID_x0041_'], ['R\u0000X', '账号 A\u0000B / _x0041_'], ['PLAIN', '普通告警']];
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(out);
   const sheet = workbook.getWorksheet('error-report');
@@ -631,12 +633,14 @@ test('v3.2.22 writeErrorReport：超长告警分段不切断 `_xHHHH_` 写法与
   const XLSX = require('xlsx');
   const { openSingleSheetRichWorkbook } = require('../../../src/backend/xlsx/rich-workbook');
   const cases = [
-    // 流式导入的转义原文跨第一段末尾（32,000 处落在 `_x005F_` 中间）。
-    { raw: `${'P'.repeat(31997)}_x005F_x0041_${'Q'.repeat(1000)}`, visible: `${'P'.repeat(31997)}_x0041_${'Q'.repeat(1000)}` },
-    // 含控制字符的整格编码后，`_x0000_` 跨第一段末尾；同格已成对的 `_x0041_` 按原文写出。
-    { raw: `${'P'.repeat(31995)}\u0000_x0041_${'Q'.repeat(1000)}`, visible: `${'P'.repeat(31995)}\u0000A${'Q'.repeat(1000)}` },
-    // 两个转义写法组成的代理对，分界正好落在两者之间（32,000 处）。
-    { raw: `${'P'.repeat(31993)}_xD83D__xDE00_${'Q'.repeat(1000)}`, visible: `${'P'.repeat(31993)}\u{1F600}${'Q'.repeat(1000)}` }
+    // 字面 `_x0041_` 编码为 `_x005F_x0041_` 后跨第一段末尾（32,000 处落在 `_x005F_` 中间）。
+    { raw: `${'P'.repeat(31997)}_x0041_${'Q'.repeat(1000)}`, visible: `${'P'.repeat(31997)}_x0041_${'Q'.repeat(1000)}` },
+    // 含控制字符的整格编码后，`_x0000_` 跨第一段末尾；同格的字面 `_x0041_` 读回原样。
+    { raw: `${'P'.repeat(31995)}\u0000_x0041_${'Q'.repeat(1000)}`, visible: `${'P'.repeat(31995)}\u0000_x0041_${'Q'.repeat(1000)}` },
+    // 代理对的高、低代理分别落在 32,000 处两侧。
+    { raw: `${'P'.repeat(31999)}\u{1F600}${'Q'.repeat(1000)}`, visible: `${'P'.repeat(31999)}\u{1F600}${'Q'.repeat(1000)}` },
+    // 控制字符编码后的 `_xD83D_`、`_xDE00_` 不会出现：代理项不是控制字符，原样写出；高代理后接控制字符时分界也不拆开。
+    { raw: `${'P'.repeat(31993)}\u0001\u{1F600}${'Q'.repeat(1000)}`, visible: `${'P'.repeat(31993)}\u0001\u{1F600}${'Q'.repeat(1000)}` }
   ];
   for (const [index, { raw, visible }] of cases.entries()) {
     const out = tmpFile(`long-escape-${index}.xlsx`);
@@ -660,4 +664,39 @@ test('v3.2.22 writeErrorReport：超长告警分段不切断 `_xHHHH_` 写法与
       await projectWorkbook.close();
     }
   }
+});
+
+test('v3.2.22（🔴）writeErrorReport：真实 R1 告警正文插入的对账ID 与第 3 列读回相同（链接表落库已解码文本）', async () => {
+  const XLSX = require('xlsx');
+  const { runRound1ReconIdMatch } = require('../../../src/main-process/scenario-engines/r1-recon-id-match');
+  // 源表字面对账ID `RID_x0041_`：release/v3.2.22 合入 B113 D4b 后链接表各导入路径都按字面落库；两条银行行同 ID 触发 R1 告警。
+  const reconId = 'RID_x0041_';
+  const r1 = runRound1ReconIdMatch(
+    [{ _rowId: 'b1', ReconciliationId: reconId }, { _rowId: 'b2', ReconciliationId: reconId }],
+    [{ reconciliationid: reconId }]
+  );
+  const warning = r1.warnings.find((w) => w.code === 'multi-bank-match-r1');
+  assert.ok(warning && warning.message.includes(`「${reconId}」`), '前置：告警正文插入已解码的对账ID');
+  const out = tmpFile('r1-literal-recon-id.xlsx');
+  await writeErrorReport([{ scenarioName: 'R1', ...warning }], out);
+  const rows = XLSX.utils.sheet_to_json(XLSX.readFile(out).Sheets['error-report'], { header: 1, raw: true });
+  assert.strictEqual(rows[1][2], reconId, 'SheetJS：第 3 列读回源表字面值');
+  assert.ok(rows[1][3].includes(`「${reconId}」`) && !rows[1][3].includes('RIDA'), 'SheetJS：正文里的对账ID 与第 3 列相同');
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(out);
+  const sheet = workbook.getWorksheet('error-report');
+  const text = (cell) => (cell.value && cell.value.richText ? cell.value.richText.map((run) => run.text).join('') : cell.value);
+  assert.strictEqual(text(sheet.getCell(2, 3)), reconId, 'ExcelJS：第 3 列读回源表字面值');
+  assert.ok(text(sheet.getCell(2, 4)).includes(`「${reconId}」`), 'ExcelJS：正文里的对账ID 与第 3 列相同');
+});
+
+test('v3.2.22 writeErrorReport：是否拆行按编码前的文本长度判断，编码后变长但未超限的对账ID 不拆行', async () => {
+  const XLSX = require('xlsx');
+  const reconId = '_x0041_'.repeat(3000); // 21,000 个 UTF-16 单元，编码为 `_x005F_x0041_` 后 39,000 个
+  const out = tmpFile('encoded-long-recon-id.xlsx');
+  await writeErrorReport([{ scenarioName: 'S', reconciliationId: reconId, code: 'x', message: '短原因' }], out);
+  const rows = XLSX.utils.sheet_to_json(XLSX.readFile(out).Sheets['error-report'], { header: 1, raw: true });
+  assert.strictEqual(rows.length, 2, '只有表头与一行记录');
+  assert.strictEqual(rows[1][2], reconId, '对账ID 完整读回');
+  assert.strictEqual(rows[1][3], '短原因', '原因列不加分段前缀');
 });

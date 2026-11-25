@@ -161,8 +161,8 @@ function makeUnionFind(n) {
 }
 
 // 命中说明（中文，供人工复核）：对手方 + 分组键（账号/币种/金额）+ 本连通分量 银行N×对手M。
-// v3.2.22：说明同时给出分段（noteParts）：账号、币种两段标明取自银行行的哪一列（{ column, value }），其余为文字，供导出按
-//   该列值的来源分别编码（见 exceljs-writer encodeManyToManyNoteParts）；note 为分段拼接后的文字，与改动前逐字一致。
+// v3.2.22：说明同时给出分段（noteParts）：账号、币种两段标明取自银行行的哪一列（{ column, value }），其余为文字，供导出逐段
+//   编码后拼接（见 exceljs-writer encodeManyToManyNoteParts）；note 为分段拼接后的文字，与改动前逐字一致。
 //   同一组 / 连通分量的各银行行共用同一个说明与分段（只读，不按行复制）。
 function noteOf(parts) {
   return { note: parts.map((part) => (typeof part === 'string' ? part : part.value)).join(''), noteParts: parts };

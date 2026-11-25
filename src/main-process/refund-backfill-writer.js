@@ -25,6 +25,7 @@ const {
   REFUND_BANK_COLUMNS
 } = require('../constants/refund-backfill-fields');
 const { applyWatermark } = require('./workbook-watermark');
+const { encodeDecodedExcelJsCellText, encodeWorkbookCellTexts } = require('./exceljs-writer');
 
 // sheet 名（双 sheet：回填模板 + 未匹配报错）
 const BACKFILL_SHEET_NAME = '回填模板';
@@ -47,8 +48,10 @@ const UNMATCHED_HEADERS = Object.freeze([
 ]);
 
 // 按表头数组对一行对象投影：缺/空 → ''（防御性，避免 undefined / null 写入）
+//   v3.2.22（🔴 资金红线）：与同次导出的主输出同口径按已解码文本编码（见 exceljs-writer encodeBankRowCellValue），
+//   银行字段与中台字段读回即原值（按原文写出时 `RID_x0041_` 会读回 `RIDA`）。
 function projectRow(headers, row) {
-  return headers.map((h) => (row && row[h] !== undefined && row[h] !== null ? row[h] : ''));
+  return headers.map((h) => (row && row[h] !== undefined && row[h] !== null ? encodeDecodedExcelJsCellText(row[h]) : ''));
 }
 
 // writeRefundBackfillOutput
@@ -106,6 +109,7 @@ async function writeRefundBackfillOutput(backfillRows, unmatchedRows, savePath) 
   for (const row of unmatchedRows) {
     unmatchedSheet.addRow(projectRow(UNMATCHED_HEADERS, row));
   }
+  encodeWorkbookCellTexts(workbook);
 
   applyWatermark(workbook);
 

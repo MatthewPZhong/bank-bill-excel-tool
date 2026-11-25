@@ -217,16 +217,16 @@ test('B 空边界：空 modifiedRows + 空 unmatchedRows 不报错', async () =>
   assert.strictEqual(wb.getWorksheet(SHEET2_HIT_NAME).getCell(1, 1).value, HIT_DETAIL_HEADER);
 });
 
-test('v3.2.22 writeBankStatementOutput：按来源编码——银行账单原值读回原值，场景改写的列按 OOXML 原文写出', async () => {
+test('v3.2.22 writeBankStatementOutput：按已解码文本编码——银行账单原值与场景改写的列都读回原值', async () => {
   const XLSX = require('xlsx');
   const { writeBankStatementOutput: write } = require('../../../src/main-process/exceljs-writer');
   const out = tmpFile('nul.xlsx');
   const headers = ['MerchantId', 'ReconciliationId', 'Payment Detail'];
-  // 银行账单原值（经 SheetJS 读取，已解码）读回原值；场景改写的列（_modifiedColumns，回填值可能是流式导入的转义原文）按
-  //   OOXML 原文写出：同一格的控制字符不说明其余部分已解码，流式导入的混合单元格 `RID\rX_x005F_x0041_` 读回源对账ID。
+  // 银行账单原值（经 SheetJS 读取，已解码）与场景改写的列（回填值来自链接表，release/v3.2.22 合入 B113 D4b 后链接表各导入路径都落库已解码文本）都按已解码文本
+  //   编码：同一格既有回车又有字面 `_x0041_` 的对账ID `RID\rX_x0041_` 读回原值。
   const hit = [{
     _rowId: 'r1', _modifiedColumns: new Set(['ReconciliationId']),
-    MerchantId: 'A\u0000B', ReconciliationId: 'RID\rX_x005F_x0041_', 'Payment Detail': 'x\u007fy_x0041_z'
+    MerchantId: 'A\u0000B', ReconciliationId: 'RID\rX_x0041_', 'Payment Detail': 'x\u007fy_x0041_z'
   }];
   const unmatched = [
     { _rowId: 'r2', MerchantId: 'AB', ReconciliationId: '', 'Payment Detail': 'line1\nline2\ttab' },
@@ -350,14 +350,15 @@ test('v3.2.22 writeBankStatementOutput：回车写成 _x000D_，`X\\rY`、`X\\nY
   assert.deepStrictEqual([1, 2, 3].map((row) => rows[row][1]), expected, 'SheetJS 读回');
 });
 
-test('v3.2.22 writeBankStatementOutput：流式导入落库的转义原文（如对账ID `RID_x005F_x0041_`）原样写出，读回源表字面值', async () => {
+test('v3.2.22 writeBankStatementOutput：链接表落库的字面对账ID `RID_x0041_` 回填后写成 `RID_x005F_x0041_`，读回源表字面值', async () => {
   const XLSX = require('xlsx');
-  const { writeBankStatementOutput: write, encodeExcelJsCellText } = require('../../../src/main-process/exceljs-writer');
-  // 单工作表 .xlsx 流式导入不解 `_xHHHH_`：源表字面 `RID_x0041_` 落库为 `RID_x005F_x0041_`，回填到银行行后导出。
-  assert.strictEqual(encodeExcelJsCellText('RID_x005F_x0041_'), 'RID_x005F_x0041_', '不含控制字符：不再转义');
+  const { writeBankStatementOutput: write, encodeDecodedExcelJsCellText } = require('../../../src/main-process/exceljs-writer');
+  // release/v3.2.22 合入 B113 D4b 后链接表各导入路径都落库已解码文本：源表字面 `RID_x0041_` 落库为 `RID_x0041_`，回填到银行行后导出
+  //   （按原文写出会读回 `RIDA`）。
+  assert.strictEqual(encodeDecodedExcelJsCellText('RID_x0041_'), 'RID_x005F_x0041_', '字面写法前的下划线写成 _x005F_');
   const out = tmpFile('escaped-id.xlsx');
   const headers = ['MerchantId', 'ReconciliationId'];
-  await write([{ _rowId: 'r1', _modifiedColumns: new Set(['ReconciliationId']), MerchantId: 'M1', ReconciliationId: 'RID_x005F_x0041_' }],
+  await write([{ _rowId: 'r1', _modifiedColumns: new Set(['ReconciliationId']), MerchantId: 'M1', ReconciliationId: 'RID_x0041_' }],
     headers, out, [], []);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(out);
@@ -366,37 +367,35 @@ test('v3.2.22 writeBankStatementOutput：流式导入落库的转义原文（如
   assert.strictEqual(rows[1][3], 'RID_x0041_', 'SheetJS 读回源表字面值');
 });
 
-test('v3.2.22 命中明细按来源逐值编码：旧值（银行原值）读回原值、新值（流式导入的转义原文）读回与结果列一致', async () => {
+test('v3.2.22 命中明细逐值按已解码文本编码：旧值与新值读回与结果列一致', async () => {
   const XLSX = require('xlsx');
   const { writeBankStatementOutput: write } = require('../../../src/main-process/exceljs-writer');
   assert.strictEqual(
-    buildHitDetail([{ column: 'ReconciliationId', oldValue: 'OLD\rID', newValue: 'RID_x005F_x0041_' }]),
+    buildHitDetail([{ column: 'ReconciliationId', oldValue: 'OLD\rID', newValue: 'RID_x0041_' }]),
     'ReconciliationId:<OLD_x000D_ID>→“RID_x005F_x0041_”',
-    '旧值单独编码，新值原样（不随旧值的回车整格再转义一次）'
+    '旧值、新值各自编码（不随旧值的回车整格再转义一次）'
   );
   assert.strictEqual(
     buildHitDetail([
-      { column: 'ReconciliationId', oldValue: 'OLD_x0041_', newValue: 'MID_x005F_x0041_' },
-      { column: 'ReconciliationId', oldValue: 'MID_x005F_x0041_', newValue: 'NEW' }
+      { column: 'ReconciliationId', oldValue: 'OLD_x0041_', newValue: 'MID_x0041_' },
+      { column: 'ReconciliationId', oldValue: 'MID_x0041_', newValue: 'NEW' }
     ]),
     'ReconciliationId:“OLD_x005F_x0041_”→“MID_x005F_x0041_”; ReconciliationId:“MID_x005F_x0041_”→<NEW>',
-    '首次改写的旧值是银行原值（按已解码文本）；同列再次改写时旧值即前一次的新值（按原文）'
+    '同列再次改写时旧值即前一次的新值，同样按已解码文本'
   );
-  // 🔴 值为已解码文本的改写（_valueDecoded：C1 提取、C2 标记、C3 自定义值）按已解码文本；其后再改写时旧值按同一口径。
+  // 改写来源（_valueDecoded：C1 提取、C2 标记、C3 自定义值）不影响编码：release/v3.2.22 合入 B113 D4b 后链接表各导入路径都落库已解码文本。
   assert.strictEqual(
     buildHitDetail([
       { column: 'ReconciliationId', oldValue: 'OLD', newValue: 'C1_x0041_', _valueDecoded: true },
-      { column: 'ReconciliationId', oldValue: 'C1_x0041_', newValue: 'GW_x005F_x0041_' },
-      { column: 'ReconciliationId', oldValue: 'GW_x005F_x0041_', newValue: 'C3_x0041_', _valueDecoded: true }
+      { column: 'ReconciliationId', oldValue: 'C1_x0041_', newValue: 'GW_x0041_' }
     ]),
-    'ReconciliationId:<OLD>→“C1_x005F_x0041_”; ReconciliationId:“C1_x005F_x0041_”→“GW_x005F_x0041_”; ' +
-      'ReconciliationId:“GW_x005F_x0041_”→“C3_x005F_x0041_”',
-    '已解码值读回字面值；链接表原文仍按原文'
+    'ReconciliationId:<OLD>→“C1_x005F_x0041_”; ReconciliationId:“C1_x005F_x0041_”→“GW_x005F_x0041_”',
+    '已解码值读回字面值'
   );
   const out = tmpFile('hit-detail-mixed.xlsx');
   const headers = ['MerchantId', 'ReconciliationId'];
-  const modifications = [{ rowId: 'r1', column: 'ReconciliationId', oldValue: 'OLD\rID', newValue: 'RID_x005F_x0041_' }];
-  await write([{ _rowId: 'r1', _modifiedColumns: new Set(['ReconciliationId']), MerchantId: 'M1', ReconciliationId: 'RID_x005F_x0041_' }],
+  const modifications = [{ rowId: 'r1', column: 'ReconciliationId', oldValue: 'OLD\rID', newValue: 'RID_x0041_' }];
+  await write([{ _rowId: 'r1', _modifiedColumns: new Set(['ReconciliationId']), MerchantId: 'M1', ReconciliationId: 'RID_x0041_' }],
     headers, out, [], modifications);
   const expectedDetail = 'ReconciliationId:<OLD\rID>→“RID_x0041_”';
   const wb = new ExcelJS.Workbook();
@@ -407,7 +406,7 @@ test('v3.2.22 命中明细按来源逐值编码：旧值（银行原值）读回
   assert.deepStrictEqual([rows[1][0], rows[1][3]], [expectedDetail, 'RID_x0041_'], 'SheetJS 读回');
 });
 
-test('v3.2.22（🔴）异常说明的账号、币种段各按本行该列的来源编码：读回与结果列一致', async () => {
+test('v3.2.22（🔴）异常说明的账号、币种段与结果列同样按已解码文本编码：读回一致', async () => {
   const XLSX = require('xlsx');
   const { writeBankStatementOutput: write } = require('../../../src/main-process/exceljs-writer');
   const out = tmpFile('many-to-many-note-encoding.xlsx');
@@ -422,20 +421,20 @@ test('v3.2.22（🔴）异常说明的账号、币种段各按本行该列的来
   const rows = [
     // r1：MerchantId 是银行账单原值（字面 `A_x0041_B`）→ 按已解码文本，读回字面值。
     { _rowId: 'r1', _modifiedColumns: new Set(['ReconciliationId']), MerchantId: 'A_x0041_B', Currency: 'USD', ReconciliationId: 'RID-1' },
-    // r2：MerchantId 被前序场景按链接表原文改写 → 按原文，与结果列同样读回 `B_x0041_`。
-    { _rowId: 'r2', _modifiedColumns: new Set(['MerchantId']), MerchantId: 'B_x005F_x0041_', Currency: 'USD', ReconciliationId: '' },
-    // r3：只有 Currency 按原文改写 → 币种段按原文，账号段仍按银行原值（两段各自判断）。
+    // r2：MerchantId 被前序场景用链接表的值改写（release/v3.2.22 合入 B113 D4b 后链接表各导入路径都落库已解码文本）→ 与结果列同样读回 `B_x0041_`。
+    { _rowId: 'r2', _modifiedColumns: new Set(['MerchantId']), MerchantId: 'B_x0041_', Currency: 'USD', ReconciliationId: '' },
+    // r3：只有 Currency 被改写 → 账号段、币种段都读回原值。
     { _rowId: 'r3', _modifiedColumns: new Set(['Currency']), MerchantId: 'C_x0041_', Currency: 'U_x0053_D', ReconciliationId: '' },
-    // r4：MerchantId 被改写但值是已解码文本（C1 提取 / C3 自定义值等，_decodedModifiedColumns）→ 按已解码文本。
+    // r4：MerchantId 被改写、值是 C1 提取 / C3 自定义值等（_decodedModifiedColumns）→ 同样读回原值。
     { _rowId: 'r4', _modifiedColumns: new Set(['MerchantId']), _decodedModifiedColumns: new Set(['MerchantId']), MerchantId: 'D_x0041_', Currency: 'USD', ReconciliationId: '' }
   ];
   const manyToManyRows = [
     { row: rows[0], note: noteOf('A_x0041_B', 'USD'), noteParts: partsOf('A_x0041_B', 'USD') },
-    { row: rows[1], note: noteOf('B_x005F_x0041_', 'USD'), noteParts: partsOf('B_x005F_x0041_', 'USD') },
+    { row: rows[1], note: noteOf('B_x0041_', 'USD'), noteParts: partsOf('B_x0041_', 'USD') },
     { row: rows[2], note: noteOf('C_x0041_', 'U_x0053_D'), noteParts: partsOf('C_x0041_', 'U_x0053_D') },
     { row: rows[3], note: noteOf('D_x0041_', 'USD'), noteParts: partsOf('D_x0041_', 'USD') },
-    // 同一行多条说明按 '; ' 拼接，各段仍按来源编码。
-    { row: rows[1], note: noteOf('B_x005F_x0041_', 'USD').replaceAll('网关', '调拨'), noteParts: partsOf('B_x005F_x0041_', 'USD').map((part) => (typeof part === 'string' ? part.replaceAll('网关', '调拨') : part)) }
+    // 同一行多条说明按 '; ' 拼接，各段同样编码。
+    { row: rows[1], note: noteOf('B_x0041_', 'USD').replaceAll('网关', '调拨'), noteParts: partsOf('B_x0041_', 'USD').map((part) => (typeof part === 'string' ? part.replaceAll('网关', '调拨') : part)) }
   ];
   await write(rows, headers, out, [], [], null, null, manyToManyRows);
   const hitRows = XLSX.utils.sheet_to_json(XLSX.readFile(out).Sheets['命中场景'], { header: 1, raw: true });
@@ -443,11 +442,11 @@ test('v3.2.22（🔴）异常说明的账号、币种段各按本行该列的来
   assert.strictEqual(hitRows[1][1], noteOf('A_x0041_B', 'USD'), '🔴 银行原值账号在说明里读回字面值，与 MerchantId 列一致');
   assert.strictEqual(hitRows[2][2], 'B_x0041_');
   assert.strictEqual(hitRows[2][1], `${noteOf('B_x0041_', 'USD')}; ${noteOf('B_x0041_', 'USD').replaceAll('网关', '调拨')}`,
-    '被场景按原文改写的账号在说明里与结果列同样按原文读回（多条说明各段同口径）');
-  assert.deepEqual([hitRows[3][2], hitRows[3][3]], ['C_x0041_', 'USD']);
-  assert.strictEqual(hitRows[3][1], noteOf('C_x0041_', 'USD'), '🔴 只改写了币种：账号段仍读回银行原值');
+    '被场景改写的账号在说明里与结果列读回一致（多条说明各段同口径）');
+  assert.deepEqual([hitRows[3][2], hitRows[3][3]], ['C_x0041_', 'U_x0053_D']);
+  assert.strictEqual(hitRows[3][1], noteOf('C_x0041_', 'U_x0053_D'), '🔴 只改写了币种：账号段、币种段都读回原值');
   assert.strictEqual(hitRows[4][2], 'D_x0041_');
-  assert.strictEqual(hitRows[4][1], noteOf('D_x0041_', 'USD'), '已解码文本的改写值按已解码文本读回');
+  assert.strictEqual(hitRows[4][1], noteOf('D_x0041_', 'USD'), 'C1 / C3 自定义值等改写值读回原值');
 });
 
 test('v3.2.22：没有 noteParts 的说明（旧调用方）按整段已解码文本写出', async () => {
@@ -459,4 +458,27 @@ test('v3.2.22：没有 noteParts 的说明（旧调用方）按整段已解码�
     [{ row: rows[0], note: ' 说明 A_x0041_ ' }, { row: rows[0], note: '   ' }]);
   const hitRows = XLSX.utils.sheet_to_json(XLSX.readFile(out).Sheets['命中场景'], { header: 1, raw: true });
   assert.strictEqual(hitRows[1][1], '说明 A_x0041_');
+});
+
+test('v3.2.22 writeBankStatementOutput：按读回长度校验 Excel 单格上限——超限整本拒绝、不截断，按原文编码后变长的已解码文本照常写出', async () => {
+  const XLSX = require('xlsx');
+  const { writeBankStatementOutput: write } = require('../../../src/main-process/exceljs-writer');
+  const headers = ['MerchantId', 'ReconciliationId'];
+  // 已解码文本含 4,600 个字面 `_x0041_`（32,200 个字符）：编码后写出 59,800 个字符，读回仍是 32,200 个，不超限。
+  const literal = '_x0041_'.repeat(4600);
+  const okOut = tmpFile('limit-ok.xlsx');
+  await write([], headers, okOut, [{ _rowId: 'r1', MerchantId: 'A', ReconciliationId: literal }], []);
+  const okRows = XLSX.utils.sheet_to_json(XLSX.readFile(okOut).Sheets[XLSX.readFile(okOut).SheetNames[0]], { header: 1, raw: true });
+  assert.strictEqual(okRows[1][2], literal, '按读回长度判断，不按写出长度误拒');
+
+  // 🔴 v3.2.22 之前按转义原文落库的旧记录（源值 2,600 个 `_x0041_`，落库 33,800 个字符）读回即落库文本，超过上限：
+  //   整本拒绝并报出工作表与单元格，不生成文件。
+  const legacy = '_x005F_x0041_'.repeat(2600);
+  const badOut = tmpFile('limit-bad.xlsx');
+  await assert.rejects(
+    write([{ _rowId: 'r2', _modifiedColumns: new Set(['ReconciliationId']), MerchantId: 'A', ReconciliationId: legacy }],
+      headers, badOut, [], []),
+    (error) => /工作表「命中场景」单元格 D2 的文本有 33800 个字符，超过 Excel 单元格 32767 个字符的上限/.test(error.message)
+  );
+  assert.strictEqual(fs.existsSync(badOut), false, '超限时不生成文件');
 });

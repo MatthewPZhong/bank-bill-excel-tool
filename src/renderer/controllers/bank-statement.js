@@ -33,17 +33,17 @@
     let flowBusy = false;
     const live = (generation = renderGeneration) => !disposed && active && generation === renderGeneration;
     const reportError = (error) => { if (ui.reportError) ui.reportError(error); };
-    function writeStatusBox(element, text, tone) {
+    function writeStatusBox(element, text, tone, options) {
       if (!live() || !element) return;
-      if (ui.status) ui.status(element, text, tone);
+      if (ui.status) ui.status(element, text, tone, options);
       else { element.textContent = text; element.dataset.tone = tone; }
     }
-    function updateStatusBox(element, text, tone) {
+    function updateStatusBox(element, text, tone, options) {
       if (!live() || !element) return;
       // 业务、进度或其他读取反馈已接替状态框，旧session错误不再拥有恢复资格。
       statusReadFeedback = null;
-      lastStatusFeedback = { text, tone };
-      writeStatusBox(element, text, tone);
+      lastStatusFeedback = { text, tone, options };
+      writeStatusBox(element, text, tone, options);
     }
     function alert(message, options, generation = renderGeneration) {
       if (!live(generation) || !ui.alert || !ui.modalHost) return;
@@ -121,7 +121,7 @@
         const previousFeedback = statusReadFeedback;
         render(replaceFeedback);
         if (!replaceFeedback && previousFeedback) {
-          updateStatusBox(elements.bankStatementStatusBox, previousFeedback.text, previousFeedback.tone);
+          updateStatusBox(elements.bankStatementStatusBox, previousFeedback.text, previousFeedback.tone, previousFeedback.options);
         }
         return true;
       } catch (error) {
@@ -393,18 +393,42 @@
       if (!state.processingResult) { alert('请先点击"开始运行"处理对账单'); return; }
       return action('导出', async (generation) => {
         const epoch = resultEpoch;
-        const result = await api.export();
-        if (!live(generation) || epoch !== resultEpoch || !result || result.status === 'cancelled') return result;
-        if (result.status === 'failed') { alert(`导出失败：${result.message || '未知错误'}`, undefined, generation); return result; }
+        // 离页期间 IPC 被拒（如输出目录无权限）同样保存原因，重入后显示；再交给 action 的统一失败处理（离页时不弹窗）。
+        const rememberFailure = (message, title = '导出失败') => {
+          state.bankStatementExport = { failed: true, title, message: message || '未知错误' };
+          resultFeedbackInvalidated = true;
+        };
+        let result;
+        try {
+          result = await api.export();
+        } catch (error) {
+          if (!live(generation) && epoch === resultEpoch) rememberFailure(error?.message || String(error));
+          throw error;
+        }
+        if (epoch !== resultEpoch || !result || result.status === 'cancelled') return result;
+        // 离页不等于取消 Main 写入（见 src/renderer/README.md）：仍属本批结果的导出反馈（含导出失败与附属报表未生成的
+        //   原因）保存在领域状态，重入时展示；页面已离开时不弹窗、不更新 DOM（alert 与 render 按代次跳过），也不重发导出。
+        // busy：升级或存储维护占用业务入口，Main 未执行本次导出（TaskLifecycle 返回 { status: 'busy', message }）。
+        if (result.status === 'failed' || result.status === 'busy') {
+          const title = result.status === 'busy' ? '导出未执行' : '导出失败';
+          if (!live(generation)) {
+            rememberFailure(result.message, title);
+            return result;
+          }
+          alert(`${title}：${result.message || '未知错误'}`, undefined, generation);
+          return result;
+        }
         if (result.status === 'empty' || result.status === 'ok') {
           state.bankStatementExport = {
             mainFileName: result.status === 'empty' ? result.message || '无修改记录，未生成主输出文件' : result.mainFileName || result.mainFilePath,
             errorReportName: result.errorReportName || null,
             platformCleanupName: result.platformCleanupName || null,
-            refundBackfillName: result.refundBackfillName || null
+            refundBackfillName: result.refundBackfillName || null,
+            sideReportFailures: Array.isArray(result.sideReportFailures) ? result.sideReportFailures : []
           };
           state.bankStatementImportIssues = null;
-          render();
+          if (live(generation)) render();
+          else resultFeedbackInvalidated = true; // 重入后的状态重读按领域状态重绘状态框
         } else alert(`未知导出状态：${JSON.stringify(result)}`, undefined, generation);
         return result;
       });
@@ -459,9 +483,17 @@
       // 多行用 \n 分隔（CSS .status-box-text { white-space: pre-line } 渲染换行）
       let text;
       let tone = 'info';
+      let statusOptions;
       if (!bs) {
         text = '欢迎使用小助手';
         tone = 'neutral';
+      } else if (ex && ex.failed) {
+        // v3.2.22：导出期间离页、导出失败（如单元格超过 Excel 上限）或未执行（busy）时保存的原因，重入后显示；处理结果
+        //   仍在，可直接重新导出。日志只记事件，不记原因原文（可能含用户命名的文件路径）。
+        const title = ex.title || '导出失败';
+        text = `${title}：${ex.message}`;
+        tone = 'error';
+        statusOptions = { logMessage: `资金对账${title}（导出期间已离开页面），原因见界面状态框` };
       } else if (ex) {
         // v2.1.9 N6 (T31, D18=a)：删冒号后冗余 \n
         //   updateStatusBox 内层 (`renderer.js:542-566` `String(message).replace(/：/g, '：\n')`) 已统一处理「：」后换行，
@@ -473,6 +505,14 @@
         if (ex.platformCleanupName) text += `\n加款单剔除文件：${ex.platformCleanupName}`;
         if (ex.refundBackfillName) text += `\n中台回填文件：${ex.refundBackfillName}`;
         tone = 'success';
+        // v3.2.22：附属报表写失败（主文件已生成）逐条提示原因，状态框转为错误样式，需人工复核。
+        //   错误样式会把状态框文字写入日志：日志只记失败的报表类型，不记用户命名的文件名与原始异常。
+        const sideFailureText = formatSideReportFailures(ex.sideReportFailures);
+        if (sideFailureText) {
+          text += sideFailureText;
+          tone = 'error';
+          statusOptions = { logMessage: formatSideReportFailureLog(ex.sideReportFailures) };
+        }
       } else if (pr) {
         // v3.0.7 需求1a：「已处理」分支改用 pr.channelRegionHits 按「渠道-地区」分组多行展示——
         //   每个 hit 一行 `渠道-地区:n条（场景名1、场景名2）`，组间 \n，整体接在「已处理：」后。
@@ -558,7 +598,7 @@
       // v2.1.7 round 3 B5：走 updateStatusBox 入口（R3 wiring — 自动获中文「：」换行 + null 兜底）
       //   原现状：直写 textEl.textContent = text + dataset.tone = tone（漏 R3 replace 处理）
       //   spec §9.6.2
-      if (updateStatus) updateStatusBox(elements.bankStatementStatusBox, text, tone);
+      if (updateStatus) updateStatusBox(elements.bankStatementStatusBox, text, tone, statusOptions);
 
       // 按钮 disabled 控制
       // v3.0.11 codex-P3 修复：导入按钮也受 inflight 闸约束——否则运行/导出期间的 UI 刷新（如切回本模块）会无条件复活导入按钮，
@@ -576,6 +616,17 @@
         .replaceAll('"', '&quot;');
     }
 
+    // v3.2.22：导出时未生成的附属报表（主文件已生成），每条一行「<报表>未生成：<原因>」；无失败时为空串。
+    function formatSideReportFailures(failures) {
+      return (Array.isArray(failures) ? failures : [])
+        .map((failure) => `\n${failure && failure.label ? failure.label : '附属报表'}未生成：${failure && failure.message ? failure.message : '未知原因'}`)
+        .join('');
+    }
+    // 日志摘要：只含失败的报表类型（固定文案），不含文件名、路径与异常原文。
+    function formatSideReportFailureLog(failures) {
+      const labels = (Array.isArray(failures) ? failures : []).map((failure) => (failure && failure.label ? failure.label : '附属报表'));
+      return `资金对账导出：主文件已生成，附属报表未生成（${labels.join('、')}），原因见界面状态框`;
+    }
     function buildImportIssuesSummary(results) {
       const list = Array.isArray(results) ? results : [];
       // 与 buildBatchImportSummaryHtml 完全一致的失败原因口径

@@ -2431,6 +2431,8 @@ class ArchiveService {
       artifact: publicArtifact(recorded ? recorded.artifact : this.repository.getArtifact(artifact.id)),
       batch: recorded ? recorded.batch : this.repository.getBatch(artifact.batchId),
       metadataRecorded: Boolean(recorded),
+      // 与按路径归档遇 ENOENT 的同码结果区分：这里是业务明确声明未生成，告警可断言「本次未生成」。
+      declaredNotProduced: true,
       ...failure
     };
   }
