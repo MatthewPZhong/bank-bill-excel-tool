@@ -40,6 +40,8 @@
 // ⚠️ 资金红线：金额归分错误 / 日期 ±1day 配错 / 大账号方向取反 → 写错 ReconciliationId（下游影响大）。
 
 const {
+  createEscapeSameValueWarning,
+  isEscapeAmbiguousSameValue,
   makeModificationCollector,
   makeWarningCollector,
   normalizeCellValue,
@@ -58,7 +60,8 @@ const {
   bankAmountWithExtraFee,
   createInvalidExtraFeeWarning,
   hasInvalidExtraFee,
-  makeInvalidExtraFeeWarningDeduper
+  makeInvalidExtraFeeWarningDeduper,
+  amountCents
 } = require('./r5-fund-transfer-backfill');
 
 const {
@@ -81,12 +84,11 @@ function reconAmountAbs(reconRow) {
 }
 
 // R5 银行匹配金额与调拨金额精确到分比对（🔴 容差 0，与 R5s2 amountEqual 同口径）。
-//   两侧都必须是有限数；否则不命中（防 NaN 误判相等）。
+//   两侧都必须是有限数；否则不命中（防 NaN 误判相等）。v3.2.22：精确到分后溢出也不命中（同 amountCents 判据）。
 function amountEqual(reconRow, bankRow) {
-  const bankAmount = bankAmountWithExtraFee(bankRow);
-  const reconAbs = reconAmountAbs(reconRow);
-  if (!Number.isFinite(bankAmount) || !Number.isFinite(reconAbs)) return false;
-  return Math.round(bankAmount * 100) === Math.round(reconAbs * 100);
+  const bankCents = amountCents(bankAmountWithExtraFee(bankRow));
+  const reconCents = amountCents(reconAmountAbs(reconRow));
+  return bankCents !== null && reconCents !== null && bankCents === reconCents;
 }
 
 function dateMismatchReason(counterpartDateValue, bankDateValue) {
@@ -238,6 +240,15 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
     if (nv !== '' && old !== nv) {
       chosen.ReconciliationId = nv;
       modCollector.record(chosen._rowId, 'ReconciliationId', old, nv);
+    } else if (isEscapeAmbiguousSameValue(old, nv)) {
+      // v3.2.22（🔴 资金红线·可观测）：调拨对账单 ReconID 含 `_xHHHH_` 写法、与银行当前值文字相同，无法确认是否同一个值。
+      warningCollector.push(createEscapeSameValueWarning({
+        rowId: chosen._rowId,
+        engine: 'r5-fund-transfer-recon-backfill',
+        column: 'ReconciliationId',
+        value: nv,
+        source: 'R5 调拨对账单：ReconID'
+      }));
     }
     // nv 为空（调拨无 ReconID）或与原值相同 → 不写、不标黄，但仍已消费该银行行（1v1 红线不变）。
   };

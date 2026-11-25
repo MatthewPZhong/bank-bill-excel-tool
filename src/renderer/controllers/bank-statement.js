@@ -417,7 +417,7 @@
       const scenarios = await readScenarios();
       if (!live(generation)) return;
       const choices = scenarios.filter((scenario) => scenario.category === 'gateway-recon-id-fix' && enabled(scenario));
-      if (!choices.length) { alert('请先在网关对账单修复-场景管理启用场景'); return; }
+      if (!choices.length) { alert('请先在「对账单修复」中将账单类别选为「网关对账单」，再点「场景管理」启用场景'); return; }
       if (choices.length === 1) return runGatewayReconScenario(choices[0].id);
       if (ui.gatewayScenarioPicker && ui.modalHost) {
         let handle;
@@ -621,7 +621,12 @@
       const lines = linkedOks.map((r) => {
         const label = LINKED_TABLE_LABELS[r.tableKey] || r.tableKey || '';
         const cnt = Number(r.rowCount) || 0;
-        return `${String(r.fileName || '')} → ${label}（${cnt} 行）`;
+        const line = `${String(r.fileName || '')} → ${label}（${cnt} 行）`;
+        // v3.2.22（🔴 资金红线·可观测）：中台调拨订单派生调拨对账单的提醒（全部被状态过滤、账户号转义歧义不参与匹配等）
+        //   与「链接表管理」导入入口同样显示，不只写日志。
+        const derive = r.tableKey === 'mid-allocation' && r.fundTransferReconDerive ? r.fundTransferReconDerive : null;
+        const warning = derive && derive.created !== false && derive.warning ? String(derive.warning) : '';
+        return warning ? `${line}\n调拨对账单提醒: ${warning}` : line;
       });
       return `已存入链接表 ${linkedOks.length} 个:\n${lines.join('\n')}`;
     }

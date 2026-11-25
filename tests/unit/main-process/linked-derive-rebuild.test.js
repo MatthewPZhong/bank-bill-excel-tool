@@ -22,7 +22,8 @@ const {
   rebuildAdmDerivation,
   rebuildBankDepositBocDerivation,
   rebuildFxBocDerivation,
-  rebuildFundTransferReconDerivation
+  rebuildFundTransferReconDerivation,
+  prepareRunFundTransferReconDerivation
 } = require('../../../src/main-process/linked-derive-rebuild');
 
 // 真实 builder（rebuildFxBocDerivation 端到端用）
@@ -483,6 +484,33 @@ test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生�
     assert.deepEqual(fundTransferReconDerive, { created: true, total: 4 }, '🔴 fundTransferReconDerive 字节一致（total = 派生行数）');
   });
 
+  test('v3.2.22：注入 accountMappingMap 时直接用它、不再读 facade（run 入口整轮只读一次映射）', () => {
+    const injected = new Map([['GW-1', 'CLR-1']]);
+    let facadeReads = 0;
+    let builderOptions = null;
+    const database = {
+      readLinkedTableRows: () => [],
+      getFundTransferAccountMappingMap: () => { facadeReads += 1; throw new Error('不应读取'); },
+      replaceFundTransferReconRows: () => ({ rowCount: 0 })
+    };
+    const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({
+      database,
+      buildFundTransferReconRows: (_midRows, options) => { builderOptions = options; return { rows: [] }; },
+      accountMappingMap: injected
+    });
+    assert.equal(fundTransferReconDerive.created, true);
+    assert.equal(facadeReads, 0);
+    assert.equal(builderOptions.accountMappingMap, injected, '同一份 Map 透传给 builder');
+
+    // 未注入（mid-allocation 导入入口）仍在函数内实时读 facade
+    let importReads = 0;
+    rebuildFundTransferReconDerivation({
+      database: { ...database, getFundTransferAccountMappingMap: () => { importReads += 1; return new Map(); } },
+      buildFundTransferReconRows: () => ({ rows: [] })
+    });
+    assert.equal(importReads, 1);
+  });
+
   test('mid 为空 → 派生空表不抛，total=0', () => {
     let replacedRows = null;
     const database = {
@@ -517,6 +545,33 @@ test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生�
     assert.equal(ret.fundTransferReconDerive.sourceTotal, 3);
     assert.equal(ret.fundTransferReconDerive.skippedStatusCount, 3);
     assert.match(ret.fundTransferReconDerive.warning, /没有「调拨状态=付款成功」的数据/);
+  });
+
+  test('v3.2.22：账号含转义写法且映射结果有歧义 → big_account 留空、返回歧义计数与提示', () => {
+    let replacedRows = null;
+    const database = {
+      readLinkedTableRows: () => [midRow({ [M.payeeCard]: 'A_x0000_B' }), midRow()],
+      replaceFundTransferReconRows: (rows) => { replacedRows = rows; return { rowCount: rows.length }; }
+    };
+    const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({
+      database,
+      buildFundTransferReconRows,
+      accountMappingMap: new Map([['A_x0000_B', 'CLR-LIT'], ['A\u0000B', 'CLR-NUL'], ['PAYEE-CARD-1', 'CLR-1']])
+    });
+    assert.equal(fundTransferReconDerive.created, true);
+    assert.equal(fundTransferReconDerive.total, 4);
+    assert.equal(fundTransferReconDerive.ambiguousMappedAccountCount, 1);
+    assert.match(fundTransferReconDerive.warning, /1 行的账户号含 Excel 转义写法/);
+    assert.deepEqual(replacedRows.filter((r) => r[R.fundType] === 'FundTransfer-in').map((r) => r[R.bigAccount]), ['', 'CLR-1'],
+      '🔴 歧义行不参与匹配，其余照常映射');
+
+    const plain = rebuildFundTransferReconDerivation({
+      database: { ...database, readLinkedTableRows: () => [midRow()] },
+      buildFundTransferReconRows,
+      accountMappingMap: new Map([['PAYEE-CARD-1', 'CLR-1']])
+    }).fundTransferReconDerive;
+    assert.equal(plain.ambiguousMappedAccountCount, undefined, '没有歧义行时不带计数与提示（与改动前一致）');
+    assert.equal(plain.warning, undefined);
   });
 
   test('mid 混合状态 → 只派生付款成功行，非成功行不进入隐藏调拨对账单', () => {
@@ -685,5 +740,168 @@ test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生�
       // 调拨对账单表仍为 2 行（ADM 派生写的是另一张隐藏表 linked_adm_bank_deposit）。
       assert.equal(appDb.readFundTransferReconRows().length, 2, '🔴 ADM 派生后调拨对账单表行数不变（两隐藏表隔离）');
     });
+  });
+});
+
+// ---- v3.2.22：bank-statement:run 入口账户映射读取 + 调拨对账单重派生（故障注入）-----------------------------
+test.describe('prepareRunFundTransferReconDerivation（v3.2.22 run 入口，🔴 资金红线）', () => {
+  // 记录对 database 的每一次调用；mappingBehavior / builderBehavior 控制注入的故障。
+  function harness({
+    mapping = new Map([['GW-1', 'CLR-1']]),
+    mappingError = null,
+    builderError = null,
+    persistedRows = []
+  } = {}) {
+    const calls = [];
+    const logs = [];
+    const database = {
+      getFundTransferAccountMappingMap: () => {
+        calls.push('getFundTransferAccountMappingMap');
+        if (mappingError) throw mappingError;
+        return mapping;
+      },
+      readLinkedTableRows: (key) => { calls.push(`readLinkedTableRows:${key}`); return []; },
+      replaceFundTransferReconRows: () => { calls.push('replaceFundTransferReconRows'); return { rowCount: 0 }; },
+      readFundTransferReconRows: () => { calls.push('readFundTransferReconRows'); return persistedRows; }
+    };
+    let builderMapping = null;
+    const deps = {
+      database,
+      buildFundTransferReconRows: (_midRows, options) => {
+        builderMapping = options.accountMappingMap;
+        if (builderError) throw builderError;
+        return { rows: [] };
+      },
+      appendActivityLogEntry: (entry) => logs.push(entry)
+    };
+    return { deps, calls, logs, getBuilderMapping: () => builderMapping };
+  }
+
+  test('无映射消费方：不读映射、不重派生，返回空 Map', () => {
+    const { deps, calls } = harness({ mappingError: new Error('不应读取') });
+    const { accountMappingMap } = prepareRunFundTransferReconDerivation(deps, {});
+    assert.equal(accountMappingMap.size, 0);
+    assert.deepEqual(calls, []);
+  });
+
+  test('成功：映射只读一次，同一份 Map 注入派生并返回给编排器', () => {
+    const mapping = new Map([['GW-1', 'CLR-1']]);
+    const { deps, calls, logs, getBuilderMapping } = harness({ mapping });
+    const { accountMappingMap } = prepareRunFundTransferReconDerivation(deps, {
+      dbsChargeScenarioEnabled: true,
+      r5s2GatewaySourceEnabled: true
+    });
+    assert.strictEqual(accountMappingMap, mapping);
+    assert.strictEqual(getBuilderMapping(), mapping);
+    assert.deepEqual(calls, ['getFundTransferAccountMappingMap', 'readLinkedTableRows:mid-allocation', 'replaceFundTransferReconRows']);
+    assert.deepEqual(logs, []);
+  });
+
+  test('v3.2.22：重派生有转义歧义行 → 记 warning 日志后继续（不阻断运行）', () => {
+    const { deps, logs } = harness();
+    deps.buildFundTransferReconRows = () => ({ rows: [], ambiguousMappedAccountCount: 2 });
+    const { accountMappingMap } = prepareRunFundTransferReconDerivation(deps, { dbsChargeScenarioEnabled: true });
+    assert.equal(accountMappingMap.size, 1);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].level, 'warning');
+    assert.equal(logs[0].domain, 'fund-transfer-recon-derive');
+    assert.match(logs[0].details[0], /2 行的账户号含 Excel 转义写法/);
+  });
+
+  test('只开网关来源：读映射但不重派生', () => {
+    const { deps, calls } = harness();
+    const { accountMappingMap } = prepareRunFundTransferReconDerivation(deps, { r5s2GatewaySourceEnabled: true });
+    assert.equal(accountMappingMap.get('GW-1'), 'CLR-1');
+    assert.deepEqual(calls, ['getFundTransferAccountMappingMap']);
+  });
+
+  test('读映射失败：整轮报错 fund-transfer-account-mapping-read-failed，不重派生、不读派生表', () => {
+    const { deps, calls } = harness({ mappingError: new Error('disk I/O error') });
+    assert.throws(
+      () => prepareRunFundTransferReconDerivation(deps, { reconSourceMidEnabled: true, r5s2GatewaySourceEnabled: false }),
+      (error) => error.code === 'fund-transfer-account-mapping-read-failed' && /读取账户映射失败：disk I\/O error/.test(error.message)
+    );
+    assert.deepEqual(calls, ['getFundTransferAccountMappingMap']);
+  });
+
+  test('网关来源 + DBS-Charge 重派生失败：阻断 fund-transfer-recon-derive-failed-account-mapping，不降级读旧派生表', () => {
+    const { deps, calls, logs } = harness({ builderError: new Error('builder boom') });
+    assert.throws(
+      () => prepareRunFundTransferReconDerivation(deps, { dbsChargeScenarioEnabled: true, r5s2GatewaySourceEnabled: true }),
+      (error) => error.code === 'fund-transfer-recon-derive-failed-account-mapping' && /builder boom/.test(error.message)
+    );
+    assert.ok(!calls.includes('replaceFundTransferReconRows'));
+    assert.ok(!calls.includes('readFundTransferReconRows'));
+    assert.equal(logs.length, 1);
+    assert.match(logs[0].message, /运行已阻断/);
+    assert.doesNotMatch(logs[0].message, /降级继续/);
+  });
+
+  test('Payment 开启时重派生失败：阻断 payment-offline-recon-derive-failed', () => {
+    const { deps, logs } = harness({ builderError: new Error('builder boom') });
+    assert.throws(
+      () => prepareRunFundTransferReconDerivation(deps, { reconSourceMidEnabled: true, paymentOfflineEnabled: true }),
+      (error) => error.code === 'payment-offline-recon-derive-failed'
+    );
+    assert.match(logs[0].message, /Payment运行已阻断/);
+  });
+
+  test('只开 DBS-Charge（无 Payment、无网关来源）重派生失败：保留历史降级，记 warning 后继续', () => {
+    const { deps, logs } = harness({ builderError: new Error('builder boom') });
+    const { accountMappingMap } = prepareRunFundTransferReconDerivation(deps, { dbsChargeScenarioEnabled: true });
+    assert.equal(accountMappingMap.get('GW-1'), 'CLR-1');
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].level, 'warning');
+    assert.match(logs[0].message, /降级继续（读现有持久表）/);
+  });
+
+  test('v3.2.22（🔴）降级沿用持久表前核对：大账号与本轮映射不一致（旧版本未加歧义护栏 / 映射改过）→ 阻断，不按旧映射回填', () => {
+    const RC = FT_RECON_FIELD_MAP.recon;
+    const outRow = (payCard, bigAccount) => ({
+      [RC.fundType]: FT_RECON_FIELD_MAP.FUND_TYPE_OUT, [RC.payAccount]: payCard, [RC.payeeAccount]: 'X', [RC.bigAccount]: bigAccount
+    });
+    const ambiguousMap = new Map([['A_x0000_B', 'C-LIT'], ['A\u0000B', 'C-NUL']]);
+    for (const [label, mapping, persistedRows] of [
+      ['旧版本派生的歧义账号大账号非空', ambiguousMap, [outRow('A_x0000_B', 'C-LIT')]],
+      ['映射改过但表没重建', new Map([['GW-1', 'CLR-NEW']]), [outRow('GW-1', 'CLR-OLD'), outRow('GW-2', 'GW-2')]]
+    ]) {
+      const { deps, logs } = harness({ builderError: new Error('builder boom'), mapping, persistedRows });
+      assert.throws(
+        () => prepareRunFundTransferReconDerivation(deps, { reconSourceMidEnabled: true, dbsChargeScenarioEnabled: true }),
+        (error) => error.code === 'fund-transfer-recon-derive-failed-account-mapping-stale' && /有 1 行的大账号/.test(error.message),
+        label
+      );
+      assert.match(logs[logs.length - 1].message, /不能降级沿用，运行已阻断/);
+    }
+  });
+
+  test('v3.2.22：降级核对一致时照常继续；留空的歧义行与重派生新出现的歧义都作为结构化告警返回', () => {
+    const RC = FT_RECON_FIELD_MAP.recon;
+    const mapping = new Map([['A_x0000_B', 'C-LIT'], ['A\u0000B', 'C-NUL'], ['GW-1', 'CLR-1']]);
+    const persistedRows = [
+      { [RC.fundType]: FT_RECON_FIELD_MAP.FUND_TYPE_IN, [RC.payAccount]: 'P', [RC.payeeAccount]: 'A_x0000_B', [RC.bigAccount]: '' },
+      { [RC.fundType]: FT_RECON_FIELD_MAP.FUND_TYPE_OUT, [RC.payAccount]: 'GW-1', [RC.payeeAccount]: 'Q', [RC.bigAccount]: 'CLR-1' }
+    ];
+    const fallback = harness({ builderError: new Error('builder boom'), mapping, persistedRows });
+    const { runWarnings } = prepareRunFundTransferReconDerivation(fallback.deps, { dbsChargeScenarioEnabled: true });
+    assert.equal(runWarnings.length, 1);
+    assert.equal(runWarnings[0].code, 'fund-transfer-recon-mapped-account-ambiguous');
+    assert.equal(runWarnings[0].rowId, null);
+    assert.match(runWarnings[0].message, /有 1 行的账户号含 Excel 转义写法/);
+
+    const fresh = harness();
+    fresh.deps.buildFundTransferReconRows = () => ({ rows: [], ambiguousMappedAccountCount: 3 });
+    const freshResult = prepareRunFundTransferReconDerivation(fresh.deps, { reconSourceMidEnabled: true });
+    assert.deepEqual(freshResult.runWarnings.map((w) => [w.code, /有 3 行/.test(w.message)]),
+      [['fund-transfer-recon-mapped-account-ambiguous', true]], '运行时才出现的歧义（先导入、后维护映射）也进运行结果');
+    assert.ok(!fresh.calls.includes('readFundTransferReconRows'), '重派生成功时不额外读表');
+    assert.deepEqual(prepareRunFundTransferReconDerivation(harness().deps, {}).runWarnings, []);
+  });
+
+  test('facade 缺失（旧 mock）：按空映射继续', () => {
+    const { deps } = harness();
+    delete deps.database.getFundTransferAccountMappingMap;
+    const { accountMappingMap } = prepareRunFundTransferReconDerivation(deps, { reconSourceMidEnabled: true });
+    assert.equal(accountMappingMap.size, 0);
   });
 });

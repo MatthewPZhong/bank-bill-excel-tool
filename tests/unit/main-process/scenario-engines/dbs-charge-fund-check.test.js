@@ -1314,3 +1314,25 @@ test.describe('DBS-Charge — Channel 门控 + 空入参', () => {
     assert.equal(bank.FundType, 'OUT-X');
   });
 });
+
+test.describe('DBS-Charge — v3.2.22 含转义写法的同值告警', () => {
+  test('步骤1 调拨 ReconID 与银行当前值文字相同且含 _xHHHH_ 写法 → 不改写，告警人工核对；不含写法的同值不告警', () => {
+    const bank = bankRow({ rowId: 'b-esc', merchantId: 'C1', credit: 0, debit: 100, reconId: 'RID_x000D_X' });
+    const disp = dispRow({ bigAccount: 'C1', amount: 100, reconId: 'RID_x000D_X', fundType: FT_OUT });
+    const result = runDbsChargeFundCheck([], [bank], [disp], OPTIONS);
+    assert.equal(findMod(result.modifications, 'b-esc', 'ReconciliationId'), undefined);
+    assert.equal(bank.ReconciliationId, 'RID_x000D_X');
+    const escape = result.warnings.filter((w) => w.code === 'linked-value-escape-same-value-ambiguous');
+    assert.equal(escape.length, 1);
+    assert.equal(escape[0].rowId, 'b-esc');
+    assert.equal(escape[0].engine, 'dbs-charge-fund-check-step1');
+    assert.match(escape[0].message, /调拨对账单 ReconID（尾号「0D_X」，共 11 个字符，含 Excel 转义写法：⟨U\+000D⟩）与银行行/);
+    assert.ok(!escape[0].message.includes('RID'), '告警不写完整值');
+
+    const plainBank = bankRow({ rowId: 'b-plain', merchantId: 'C1', credit: 0, debit: 100, reconId: 'RID-PLAIN' });
+    const plainDisp = dispRow({ bigAccount: 'C1', amount: 100, reconId: 'RID-PLAIN', fundType: FT_OUT });
+    const plain = runDbsChargeFundCheck([], [plainBank], [plainDisp], OPTIONS);
+    assert.equal(findMod(plain.modifications, 'b-plain', 'ReconciliationId'), undefined);
+    assert.equal(plain.warnings.some((w) => w.code === 'linked-value-escape-same-value-ambiguous'), false);
+  });
+});

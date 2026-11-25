@@ -20,6 +20,8 @@ const path = require('node:path');
 
 const { AppDatabase } = require('../../../../src/backend/database');
 const linkedRepo = require('../../../../src/backend/database/linked-table-repository');
+const { normalizeCellValue } = require('../../../../src/main-process/scenario-engines/engine-utils');
+const { buildR5ChannelMissingDiagnosticPrefilter } = require('../../../../src/main-process/scenario-engines/r5-fund-transfer-backfill');
 
 let appDb;
 let db;
@@ -207,5 +209,288 @@ test.describe('readGatewayBillRowPoolsByChannels（v3.0.23 C3 专用大小写不
     const pools = appDb.readGatewayBillRowPoolsByChannels(['Maybank']);
     assert.deepEqual(pools.exactRows, []);
     assert.deepEqual(pools.c3Rows.map((r) => r.reconciliationid), ['MIXED']);
+  });
+});
+
+test.describe('readGatewayBillRowPoolsByChannels outOfPoolDiagnostic（v3.2.22 R5s2 缺渠道诊断与读池同一次扫描）', () => {
+  const FT = ['FundTransfer-in', 'FundTransfer-out'];
+  const ids = (rows) => rows.map((r) => r.reconciliationid);
+  const rowsOf = (collected) => collected.map((entry) => entry.row);
+  const diagnostic = (collected, extra = {}) => ({
+    outOfPoolDiagnostic: {
+      tradeTypes: FT,
+      accounts: ['GW-1'],
+      collect: (row, rowId) => { collected.push({ row, rowId }); },
+      ...extra
+    }
+  });
+  const seed = () => {
+    const ft = (reconciliationid, extra) => insertGwRaw({
+      reconciliationid, TradeType: 'FundTransfer-in', merchantid: 'GW-1', Billdate: '2026-06-01', ...extra
+    });
+    ft('MISSING', {});
+    ft('EMPTY', { Channel: '' });
+    ft('SPACES', { Channel: '   ' });
+    ft('TAB', { Channel: '\t' });
+    ft('IDEOGRAPHIC', { Channel: '　' });
+    ft('NBSP-JPM', { Channel: '\u00a0JPM' });
+    ft('JPM', { Channel: 'JPM' });
+    ft('LOWER-JPM', { Channel: 'jpm' });
+    ft('CITI', { Channel: 'CITI' });
+    ft('SKIP', { Channel: '' });
+    insertGwRaw({ reconciliationid: 'OUT-PADDED', TradeType: '　FundTransfer-out\t', merchantid: 'GW-1', Channel: '' });
+    insertGwRaw({ reconciliationid: 'PAYMENT', TradeType: 'Payment', merchantid: 'GW-1', Channel: '' });
+    insertGwRaw({ reconciliationid: 'OTHER-ACCOUNT', TradeType: 'FundTransfer-in', merchantid: 'GW-2', Channel: '' });
+    db.prepare(
+      `INSERT INTO linked_gateway_bill (reconciliation_id, bill_date, raw_json, imported_at) VALUES (?, ?, ?, ?)`
+    ).run('BAD', '2026-06-01', '{bad json', '2026-06-16T00:00:00.000Z');
+  };
+  const idOf = (reconciliationid) => db.prepare(
+    `SELECT id FROM linked_gateway_bill WHERE json_extract(raw_json, '$.reconciliationid') = ?`
+  ).get(reconciliationid).id;
+
+  test('银行批次都有渠道：池外 = 空渠道（缺字段 / 空串 / 任意 JS 空白）+ 大小写或空白不同 / 银行侧未出现的渠道；一次查询、按 id 顺序交 collect', () => {
+    seed();
+    let prepareCount = 0;
+    const countingDb = { prepare(sql) { prepareCount += 1; return db.prepare(sql); } };
+    const collected = [];
+    const pools = linkedRepo.readGatewayBillRowPoolsByChannels(countingDb, ['JPM'], diagnostic(collected));
+    assert.equal(prepareCount, 1, '池与池外诊断候选由同一条 SQL 生成');
+    assert.deepEqual(Object.keys(pools), ['exactRows', 'c3Rows'], '仓储不累积诊断候选，返回结构不变');
+    assert.deepEqual(ids(pools.exactRows), ['JPM']);
+    assert.deepEqual(ids(pools.c3Rows), ['JPM', 'LOWER-JPM']);
+    const expected = ['MISSING', 'EMPTY', 'SPACES', 'TAB', 'IDEOGRAPHIC', 'NBSP-JPM', 'LOWER-JPM', 'CITI', 'SKIP', 'OUT-PADDED'];
+    assert.deepEqual(ids(rowsOf(collected)), expected,
+      'TradeType 按 JS trim 同口径预筛；非调拨行、账号不在映射内的行与池内 JPM 行不交 collect');
+    assert.deepEqual(collected.map((entry) => entry.rowId), expected.map(idOf), 'collect 拿到的是该行的表 id');
+    assert.strictEqual(pools.c3Rows[1], collected[6].row, 'C3 池与诊断候选共享同一次解析');
+    const viaFacade = [];
+    appDb.readGatewayBillRowPoolsByChannels([' JPM '], diagnostic(viaFacade));
+    assert.deepEqual(ids(rowsOf(viaFacade)), expected, 'facade 透传');
+  });
+
+  test('银行批次含空渠道：缺字段 / 空串已在池内，池外只剩其余空白与银行侧未出现的渠道', () => {
+    seed();
+    const collected = [];
+    linkedRepo.readGatewayBillRowPoolsByChannels(db, ['', 'JPM'], diagnostic(collected));
+    assert.deepEqual(ids(rowsOf(collected)), ['SPACES', 'TAB', 'IDEOGRAPHIC', 'NBSP-JPM', 'LOWER-JPM', 'CITI']);
+  });
+
+  test('与 exactRows 严格互补、不改变两个池', () => {
+    seed();
+    const all = ['MISSING', 'EMPTY', 'SPACES', 'TAB', 'IDEOGRAPHIC', 'NBSP-JPM', 'JPM', 'LOWER-JPM', 'CITI', 'SKIP', 'OUT-PADDED', 'PAYMENT', 'OTHER-ACCOUNT'];
+    for (const channels of [['JPM'], [''], ['', 'JPM'], ['CITI', 'JPM'], ['　']]) {
+      const plain = linkedRepo.readGatewayBillRowPoolsByChannels(db, channels);
+      const collected = [];
+      const pools = linkedRepo.readGatewayBillRowPoolsByChannels(db, channels,
+        diagnostic(collected, { tradeTypes: [...FT, 'Payment'], accounts: ['GW-1', 'GW-2'] }));
+      assert.deepEqual(Object.keys(plain), ['exactRows', 'c3Rows'], '未请求诊断时返回结构不变');
+      assert.deepEqual(ids(pools.exactRows), ids(plain.exactRows), `${JSON.stringify(channels)} exactRows 不变`);
+      assert.deepEqual(ids(pools.c3Rows), ids(plain.c3Rows), `${JSON.stringify(channels)} c3Rows 不变`);
+      const inPool = ids(pools.exactRows);
+      const outOfPool = ids(rowsOf(collected));
+      assert.deepEqual(inPool.filter((id) => outOfPool.includes(id)), [], `${JSON.stringify(channels)} 不重叠`);
+      assert.deepEqual([...inPool, ...outOfPool].sort(), all.slice().sort(), `${JSON.stringify(channels)} 合起来覆盖全部有效行`);
+    }
+  });
+
+  test('账号预筛是精确判据的超集：文本按 JS trim 比对，非文本值与含 JSON 转义（NUL 等）的行交 collect 判断', () => {
+    const row = (reconciliationid, merchantid) => insertGwRaw({ reconciliationid, TradeType: 'FundTransfer-out', Channel: '', merchantid });
+    row('PADDED', '　GW-1\t');
+    row('NUMBER', 123);
+    row('NUL', 'A\u0000B');
+    row('LITERAL', 'A_x0000_B');
+    row('CTRL-OTHER', 'Z\u0001');
+    row('UNRELATED', 'GW-9');
+    row('NULL-ACCOUNT', null);
+    insertGwRaw({ reconciliationid: 'MISSING-ACCOUNT', TradeType: 'FundTransfer-out', Channel: '' });
+    const collected = [];
+    linkedRepo.readGatewayBillRowPoolsByChannels(db, ['JPM'], diagnostic(collected, { accounts: ['GW-1', '123', 'A\u0000B'] }));
+    assert.deepEqual(ids(rowsOf(collected)), ['PADDED', 'NUMBER', 'NUL', 'CTRL-OTHER'],
+      '不相关的文本账号、字面 _x0000_、缺账号与 null 账号在 SQL 端即排除；其余交 collect 精确判断');
+  });
+
+  test('零命中的大表：诊断只增加同一次扫描的条件，不交 collect、不多一次全表扫描', () => {
+    const insert = db.prepare(
+      `INSERT INTO linked_gateway_bill (reconciliation_id, bill_date, raw_json, imported_at) VALUES (?, ?, ?, ?)`
+    );
+    const total = 20000;
+    db.exec('BEGIN');
+    for (let i = 0; i < total; i += 1) {
+      const kind = i % 4;
+      const fields = kind === 0
+        ? { reconciliationid: `IN-${i}`, TradeType: 'FundTransfer-in', merchantid: 'GW-1', Channel: 'JPM' }
+        : kind === 1
+          ? { reconciliationid: `PAY-${i}`, TradeType: 'Payment', merchantid: 'GW-1', Channel: '' }
+          : kind === 2
+            ? { reconciliationid: `OTHER-${i}`, TradeType: 'FundTransfer-out', merchantid: 'GW-2', Channel: 'CITI' }
+            : { reconciliationid: `BLANK-${i}`, TradeType: 'FundTransfer-out', merchantid: `GW-X${i}`, Channel: '' };
+      insert.run(fields.reconciliationid, '2026-06-01', JSON.stringify(fields), '2026-06-16T00:00:00.000Z');
+    }
+    db.exec('COMMIT');
+    const statements = [];
+    const countingDb = { prepare(sql) { statements.push(sql); return db.prepare(sql); } };
+    const collected = [];
+    const pools = linkedRepo.readGatewayBillRowPoolsByChannels(countingDb, ['JPM'], diagnostic(collected));
+    assert.equal(statements.length, 1);
+    assert.equal(pools.exactRows.length, total / 4);
+    assert.equal(collected.length, 0, '粗筛不过的行不交 collect');
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${statements[0]}`).all();
+    const tableSteps = plan.filter((step) => /linked_gateway_bill/.test(String(step.detail)));
+    assert.equal(tableSteps.length, 1, `网关表只扫描一次：${JSON.stringify(plan.map((step) => step.detail))}`);
+  });
+
+  test('渠道集合以 JSON 数组绑定：数千个渠道启用诊断也不超过 SQLite 变量上限，参数个数不随渠道数增长', () => {
+    insertGwRaw({ reconciliationid: 'C1', TradeType: 'FundTransfer-in', merchantid: 'GW-1', Channel: 'CH-1' });
+    insertGwRaw({ reconciliationid: 'OUT', TradeType: 'FundTransfer-in', merchantid: 'GW-1', Channel: 'OTHER' });
+    const channels = Array.from({ length: 40000 }, (_v, i) => `CH-${i}`);
+    const statements = [];
+    const countingDb = {
+      prepare(sql) {
+        const stmt = db.prepare(sql);
+        return { iterate: (...args) => { statements.push(args.length); return stmt.iterate(...args); } };
+      }
+    };
+    const collected = [];
+    const pools = linkedRepo.readGatewayBillRowPoolsByChannels(countingDb, ['', ...channels], diagnostic(collected));
+    assert.deepEqual(ids(pools.exactRows), ['C1']);
+    assert.deepEqual(ids(rowsOf(collected)), ['OUT']);
+    assert.ok(statements[0] < 20, `绑定参数个数为常数：${statements[0]}`);
+  });
+
+  test('collect 抛错向上传（不当坏行吞掉），坏 JSON 仍跳过', () => {
+    seed();
+    assert.throws(
+      () => linkedRepo.readGatewayBillRowPoolsByChannels(db, ['JPM'], diagnostic([], { collect: () => { throw new Error('暂存失败'); } })),
+      /暂存失败/
+    );
+    const collected = [];
+    linkedRepo.readGatewayBillRowPoolsByChannels(db, ['JPM'], diagnostic(collected));
+    assert.ok(!ids(rowsOf(collected)).includes('BAD'));
+  });
+
+  test('诊断参数无效时按未请求处理；没有渠道时返回两个空池', () => {
+    seed();
+    const identity = (row) => row;
+    for (const invalid of [
+      { tradeTypes: [], accounts: ['GW-1'], collect: () => {} },
+      { tradeTypes: FT, accounts: [], collect: () => {} },
+      { tradeTypes: FT, accounts: ['GW-1'] },
+      { tradeTypes: FT, accounts: ['GW-1'], select: identity },
+      null
+    ]) {
+      assert.deepEqual(Object.keys(linkedRepo.readGatewayBillRowPoolsByChannels(db, ['JPM'], { outOfPoolDiagnostic: invalid })),
+        ['exactRows', 'c3Rows']);
+    }
+    assert.deepEqual(linkedRepo.readGatewayBillRowPoolsByChannels(db, [], diagnostic([])), { exactRows: [], c3Rows: [] });
+  });
+
+  test('随机对照：读池暂存的候选 = 全表逐行取 exactRows 补集后按同一粗筛暂存（id、键摘要、渠道为空位一致）', () => {
+    const mapping = new Map([['GW-1', 'CLR-1'], ['A\u0000B', 'CLR-N'], ['123', 'CLR-123']]);
+    const pick = (list, rand) => list[Math.floor(rand() * list.length)];
+    let state = 20261124;
+    const rand = () => {
+      state = (state * 1103515245 + 12345) % 2147483648;
+      return state / 2147483648;
+    };
+    const ABSENT = Symbol('absent');
+    const channels = ['JPM', 'jpm', ' JPM', '', '  ', '　', null, ABSENT, 'CITI', 0];
+    const tradeTypes = ['FundTransfer-in', 'FundTransfer-out', ' FundTransfer-in　', 'Payment', 7, ABSENT];
+    const accounts = ['GW-1', ' GW-1 ', ' GW-1', 'CLR-1', 'A\u0000B', 'A_x0000_B', 'GW-2', 123, 1.5, null, ABSENT, true, '', '　', 'Z\u0001'];
+    const reconIdValues = ['R', '', '  ', null, 0];
+    const currencies = ['USD', ' usd', '', ABSENT];
+    const amounts = [100, '100.00', -100, 'x', ABSENT, 1e307];
+    const bankChannelSets = [['JPM'], [''], ['', 'JPM'], ['CITI', 'JPM'], ['jpm']];
+    const all = db.prepare('SELECT id, raw_json FROM linked_gateway_bill ORDER BY id ASC');
+    const snapshot = (prefilter) => {
+      const staged = prefilter.stagedCandidates();
+      return { ids: Array.from(staged.ids), digests: Array.from(staged.keyDigests), blank: Array.from(staged.unverifiableChannel) };
+    };
+    for (let round = 0; round < 200; round += 1) {
+      db.exec('DELETE FROM linked_gateway_bill');
+      for (let i = 0; i < 30; i += 1) {
+        const fields = {};
+        const set = (key, value) => { if (value !== ABSENT) fields[key] = value; };
+        const reconId = pick(reconIdValues, rand);
+        set('reconciliationid', reconId === 'R' ? `R${round}-${i}` : reconId);
+        set('TradeType', pick(tradeTypes, rand));
+        set('merchantid', pick(accounts, rand));
+        set('Channel', pick(channels, rand));
+        set('currency', pick(currencies, rand));
+        set('amount', pick(amounts, rand));
+        insertGwRaw(fields);
+      }
+      const bankChannels = pick(bankChannelSets, rand);
+      const prefilter = buildR5ChannelMissingDiagnosticPrefilter(mapping);
+      const pools = linkedRepo.readGatewayBillRowPoolsByChannels(db, bankChannels, { outOfPoolDiagnostic: prefilter });
+      const exactSet = new Set(pools.exactRows.map((row) => JSON.stringify(row)));
+      const expected = buildR5ChannelMissingDiagnosticPrefilter(mapping);
+      for (const { id, raw_json: rawJson } of all.all()) {
+        const row = JSON.parse(rawJson);
+        if (!exactSet.has(JSON.stringify(row))) expected.collect(row, id);
+      }
+      assert.deepEqual(snapshot(prefilter), snapshot(expected), `round ${round} channels ${JSON.stringify(bankChannels)}`);
+    }
+  });
+});
+
+test.describe('readGatewayBillRowsByIds（v3.2.22 R5s2 缺渠道诊断按 id 回读）', () => {
+  test('按 id 升序逐行回调（与传入顺序无关），不存在的 id 无回调，坏 JSON 跳过；facade 透传', () => {
+    for (let i = 0; i < 5; i += 1) insertGwRaw({ reconciliationid: `R${i}`, Channel: 'JPM' });
+    db.prepare(
+      `INSERT INTO linked_gateway_bill (reconciliation_id, bill_date, raw_json, imported_at) VALUES (?, ?, ?, ?)`
+    ).run('BAD', '2026-06-01', '{bad json', '2026-06-16T00:00:00.000Z');
+    const rows = db.prepare('SELECT id FROM linked_gateway_bill ORDER BY id ASC').all().map((row) => row.id);
+    const seen = [];
+    linkedRepo.readGatewayBillRowsByIds(db, [rows[3], rows[0], rows[5], 999999, rows[1]], (row, rowId) => {
+      seen.push([row.reconciliationid, rowId]);
+    });
+    assert.deepEqual(seen, [['R0', rows[0]], ['R1', rows[1]], ['R3', rows[3]]]);
+    const viaFacade = [];
+    appDb.readGatewayBillRowsByIds(new Float64Array([rows[4], rows[2]]), (row) => viaFacade.push(row.reconciliationid));
+    assert.deepEqual(viaFacade, ['R2', 'R4'], '接受类型化数组');
+  });
+
+  test('超过一块的 id 分块回读：同一条预编译语句、按主键查找、整体仍按 id 升序', () => {
+    const insert = db.prepare(
+      `INSERT INTO linked_gateway_bill (reconciliation_id, bill_date, raw_json, imported_at) VALUES (?, ?, ?, ?)`
+    );
+    db.exec('BEGIN');
+    for (let i = 0; i < 1300; i += 1) {
+      insert.run(`R${i}`, '2026-06-01', JSON.stringify({ reconciliationid: `R${i}` }), '2026-06-16T00:00:00.000Z');
+    }
+    db.exec('COMMIT');
+    const allIds = db.prepare('SELECT id FROM linked_gateway_bill ORDER BY id ASC').all().map((row) => row.id);
+    const wanted = allIds.filter((_id, index) => index % 2 === 0).reverse();
+    const statements = [];
+    const iterations = [];
+    const countingDb = {
+      prepare(sql) {
+        statements.push(sql);
+        const stmt = db.prepare(sql);
+        return { iterate: (...args) => { iterations.push(args); return stmt.iterate(...args); } };
+      }
+    };
+    const seen = [];
+    linkedRepo.readGatewayBillRowsByIds(countingDb, wanted, (_row, rowId) => seen.push(rowId));
+    assert.deepEqual(seen, wanted.slice().sort((a, b) => a - b));
+    assert.equal(statements.length, 1);
+    assert.equal(iterations.length, Math.ceil(wanted.length / 500), '每块至多 500 个 id');
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${statements[0]}`).all(JSON.stringify([allIds[0]]))
+      .map((step) => String(step.detail));
+    assert.ok(plan.some((detail) => /linked_gateway_bill USING INTEGER PRIMARY KEY/.test(detail)),
+      `按主键查找，不全表扫描：${JSON.stringify(plan)}`);
+  });
+
+  test('id 无效时抛 TypeError；onRow 抛错向上传；空 id 列表不查表', () => {
+    insertGwRaw({ reconciliationid: 'R0' });
+    const id = db.prepare('SELECT id FROM linked_gateway_bill').get().id;
+    for (const bad of [[1.5], ['1'], [Number.NaN], [2 ** 53]]) {
+      assert.throws(() => linkedRepo.readGatewayBillRowsByIds(db, bad, () => {}), TypeError, JSON.stringify(bad));
+    }
+    assert.throws(() => linkedRepo.readGatewayBillRowsByIds(db, [id]), TypeError, '缺回调');
+    assert.throws(() => linkedRepo.readGatewayBillRowsByIds(db, [id], () => { throw new Error('裁决失败'); }), /裁决失败/);
+    const noQuery = { prepare() { throw new Error('不应查表'); } };
+    linkedRepo.readGatewayBillRowsByIds(noQuery, [], () => {});
   });
 });

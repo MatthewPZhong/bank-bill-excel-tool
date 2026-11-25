@@ -254,3 +254,57 @@ test.describe('Payment gating 与兼容', () => {
     assert.ok(result.errorReport.some((warning) => warning.code === 'payment-offline-invalid-big-account-config'));
   });
 });
+
+test('v3.2.22（🔴）Payment 配对记下银行行此前已被改写的列：含前序场景、不含 Payment 自己的回填（核对页按来源编码用）', async () => {
+  const offsetScenario = {
+    id: 200,
+    name: 'R2-冲销打标',
+    category: 'offset-bill-mark',
+    priority: 5,
+    enabled: true,
+    displayIndex: 1,
+    config: {
+      billTypes: [{ seq: 1, conditions: [{ field: 'BillTag', op: '包含', value: 'OFFSET' }] }],
+      reconFields: [],
+      markValue: { type: 1, field: 'Transaction Description', value: '已对账' }
+    }
+  };
+  const bankRows = [
+    { ...makeBankRow({ _rowId: 'b-prior' }), BillTag: 'OFFSET', 'Transaction Description': '' },
+    { ...makeBankRow({ _rowId: 'b-plain', 'Credit Amount': 200 }), BillTag: '', 'Transaction Description': '' }
+  ];
+  const reconRows = [makeReconRow({ ReconID: 'PAY-1' }), makeReconRow({ ReconID: 'PAY-2', 金额: 200 })];
+  const result = await runReconciliation({
+    bankRows,
+    gwRows: [],
+    scenarios: [offsetScenario, makeR5s2Scenario({ paymentOfflineBackfill: PAYMENT_ON })],
+    fundTransferReconContext: { reconRows }
+  });
+  const byRowId = new Map(result.paymentOfflineMatchedPairs.map((pair) => [pair.bankRow._rowId, pair]));
+  assert.equal(bankRows[0]['Transaction Description'], '已对账', '前序场景已改写');
+  assert.deepEqual(byRowId.get('b-prior').modifiedColumnsBeforePayment, ['Transaction Description']);
+  assert.deepEqual(byRowId.get('b-prior').decodedColumnsBeforePayment, ['Transaction Description'], 'C2 标记值是已解码文本');
+  assert.deepEqual(byRowId.get('b-plain').modifiedColumnsBeforePayment, [], 'Payment 自己的对账ID 回填不算写入前');
+  assert.deepEqual(byRowId.get('b-plain').decodedColumnsBeforePayment, []);
+  assert.equal(bankRows[1].ReconciliationId, 'PAY-2');
+});
+
+test('v3.2.22（🔴）值的来源按同一列最后一次改写：C1 写入的已解码对账ID 被 Payment 改写为派生表原文后按原文导出', async () => {
+  const c1 = {
+    id: 100, name: 'C1 复制', category: 'extract-recon-id', priority: 1, enabled: true,
+    config: { conditions: [{ field: 'Transaction Description', op: '非空值', value: '' }], extractByOtherField: { field: 'Transaction Description' } }
+  };
+  const bankRows = [{ ...makeBankRow({ _rowId: 'b1' }), 'Transaction Description': 'C1_x0041_' }];
+  const result = await runReconciliation({
+    bankRows,
+    gwRows: [],
+    scenarios: [c1, makeR5s2Scenario({ paymentOfflineBackfill: PAYMENT_ON })],
+    fundTransferReconContext: { reconRows: [makeReconRow({ ReconID: 'PAY_x005F_x0041_' })] }
+  });
+  assert.equal(bankRows[0].ReconciliationId, 'PAY_x005F_x0041_');
+  assert.deepEqual(result.modifications.map((m) => [m._round, m._valueDecoded === true]), [['R2', true], ['R5s2b', false]]);
+  assert.equal(result.modifiedRows[0]._decodedModifiedColumns, undefined, '🔴 最后一次是派生表原文：按原文导出');
+  const pair = result.paymentOfflineMatchedPairs[0];
+  assert.deepEqual([pair.modifiedColumnsBeforePayment, pair.decodedColumnsBeforePayment], [['ReconciliationId'], ['ReconciliationId']],
+    'Payment 写入前的对账ID 是 C1 写入的已解码文本');
+});

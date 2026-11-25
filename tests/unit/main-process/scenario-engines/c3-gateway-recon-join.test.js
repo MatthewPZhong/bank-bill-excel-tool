@@ -638,3 +638,35 @@ test.describe('runC3Scenario — F1 取反迁移边界（v3.0.4 资金红线）'
     assert.equal(r.lockedRowIds.size, 1, '仍 lock（first-match-wins 红线，匹配成功必锁定）');
   });
 });
+
+test.describe('runC3Scenario — v3.2.22 含转义写法的同值告警', () => {
+  test('mode=direct：网关值与银行当前值文字相同且含 _xHHHH_ 写法 → 不改写，告警人工核对；custom 与不含写法的同值不告警', () => {
+    const bankRows = [{ OrderId: 'O001', Narrative: 'REF_x000D_X' }];
+    const gwRows = [{ OrderId: 'O001', Reference: 'REF_x000D_X' }];
+    const r = runC3Scenario(makeScenario({ mode: 'direct' }), bankRows, gwRows);
+    assert.equal(r.modifications.length, 0);
+    assert.equal(bankRows[0].Narrative, 'REF_x000D_X');
+    const escape = r.warnings.filter((w) => w.code === 'linked-value-escape-same-value-ambiguous');
+    assert.equal(escape.length, 1);
+    assert.equal(escape[0].engine, 'c3-gateway-recon-join');
+    assert.match(escape[0].message, /C3 网关字段「Reference」（尾号「0D_X」，共 11 个字符，含 Excel 转义写法：⟨U\+000D⟩）与银行行/);
+    assert.ok(!escape[0].message.includes('REF'), '🔴 告警不写完整值（C3 字段可能是账号、卡号、附言）');
+
+    const customBanks = [{ OrderId: 'O001', Narrative: 'REF_x000D_X' }];
+    const custom = runC3Scenario(
+      makeScenario({ mode: 'custom', customValue: 'REF_x000D_X' }),
+      customBanks,
+      [{ OrderId: 'O001', Reference: 'ANY' }]
+    );
+    assert.equal(custom.modifications.length, 0);
+    assert.equal(custom.warnings.some((w) => w.code === 'linked-value-escape-same-value-ambiguous'), false);
+
+    const plain = runC3Scenario(
+      makeScenario({ mode: 'direct' }),
+      [{ OrderId: 'O001', Narrative: 'REF-PLAIN' }],
+      [{ OrderId: 'O001', Reference: 'REF-PLAIN' }]
+    );
+    assert.equal(plain.modifications.length, 0);
+    assert.equal(plain.warnings.some((w) => w.code === 'linked-value-escape-same-value-ambiguous'), false);
+  });
+});

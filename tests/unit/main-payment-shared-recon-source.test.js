@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { prepareRunFundTransferReconDerivation } = require('../../src/main-process/linked-derive-rebuild');
 
 const mainPath = path.join(__dirname, '..', '..', 'src', 'main.js');
 const source = fs.readFileSync(mainPath, 'utf8');
@@ -36,8 +37,24 @@ test('Payment 开启时强制加载 fundTransferReconContext 工作副本', () =
 });
 
 test('Payment 开启时派生失败必须阻断，不能读取陈旧持久表降级', () => {
-  assert.ok(block.includes("deriveError.code = 'payment-offline-recon-derive-failed'"));
-  assert.ok(/if\s*\(paymentOfflineEnabled\)\s*throw\s+ftrRunErr/.test(block));
+  // v3.2.22：run 入口的映射读取与重派生抽到 prepareRunFundTransferReconDerivation；Payment 开关必须传入，且在读派生表之前。
+  const prepAt = block.indexOf('prepareRunFundTransferReconDerivation(');
+  assert.ok(prepAt >= 0);
+  assert.ok(/\{\s*reconSourceMidEnabled,\s*dbsChargeScenarioEnabled,\s*r5s2GatewaySourceEnabled,\s*paymentOfflineEnabled\s*\}/.test(block.slice(prepAt)));
+  assert.ok(block.indexOf('database.readFundTransferReconRows()', prepAt) > prepAt);
+  const logs = [];
+  assert.throws(
+    () => prepareRunFundTransferReconDerivation({
+      database: {
+        readLinkedTableRows: () => [],
+        replaceFundTransferReconRows: () => { throw new Error('不应写入'); }
+      },
+      buildFundTransferReconRows: () => { throw new Error('builder boom'); },
+      appendActivityLogEntry: (entry) => logs.push(entry)
+    }, { reconSourceMidEnabled: true, paymentOfflineEnabled: true }),
+    (error) => error.code === 'payment-offline-recon-derive-failed'
+  );
+  assert.match(logs[0].message, /Payment运行已阻断/);
 });
 
 test('Payment 预检阻断的 code 和明细从 main 透传并在运行弹框显示', () => {

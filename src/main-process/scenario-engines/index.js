@@ -50,10 +50,28 @@ function runScenario(scenario, bankRows, gwRows = null) {
   }
 }
 
+// v3.2.22（🔴 资金红线·导出保真）：本场景写入银行行的值是否为已解码文本——C1 提取（含自带写死提取场景）取自银行行字段，
+//   C2 写配置的标记值，C3 自定义值是配置文字，都与银行账单原值同一口径；C3 按网关字段赋值时值来自链接表单元格（单工作表
+//   流式导入保留 `_xHHHH_` 转义原文），不是。编排器据此记下每列当前值的来源，导出按来源编码、R5s2 映射回填据此判断银行账号。
+function scenarioWritesDecodedValues(scenario) {
+  if (!scenario) return false;
+  switch (scenario.category) {
+    case 'extract-recon-id':
+    case 'builtin-fixed':
+    case 'offset-bill-mark':
+      return true;
+    case 'gateway-recon-join':
+      return !!(scenario.config && scenario.config.assign && scenario.config.assign.mode === 'custom');
+    default:
+      return false;
+  }
+}
+
 module.exports = {
   BUILTIN_EXTRACT_FUND_TYPES,
   builtinExtractRowGate,
   runScenario,
+  scenarioWritesDecodedValues,
   runC1Scenario,
   runC2Scenario,
   runC3Scenario

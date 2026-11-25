@@ -32,6 +32,7 @@ const path = require('node:path');
 
 const { BANK_STATEMENT_FIELDS } = require('../constants/bank-statement-fields');
 const { applyWatermark } = require('./workbook-watermark');
+const { encodeBankRowCellValue, encodeDecodedExcelJsCellText, encodeWorkbookCellTexts } = require('./exceljs-writer');
 const { buildTimestamp } = require('./bank-statement-io');
 
 // 末尾 3 列固定表头（spec §5.2 + D17=b 列序）
@@ -185,20 +186,24 @@ async function writeScenarioHitRows(modifiedRows, originalFilePath, opts = {}) {
 
   // 表头（原 N 列 headers + 末尾 3 列）
   const fullHeaders = headers.concat(SUFFIX_HEADERS);
-  sheet.addRow(fullHeaders);
+  sheet.addRow(fullHeaders.map(encodeDecodedExcelJsCellText));
   sheet.getRow(1).font = { bold: true, size: 10 };
 
   // 数据行：投影 headers + 末尾 3 列值（_ 前缀字段不入 headers → 自动过滤）
   //   v2.1.9 D16=b：「匹配渠道」列改用 _hitChannelId 查 channels label（命中场景所属渠道）
   //   未传 opts.channels → 回退 _hitChannelKey（向后兼容老 caller / dispatcher 单维路径）
   for (const row of modifiedRows) {
-    const baseValues = headers.map((h) => (row && row[h] !== undefined ? row[h] : ''));
+    // v3.2.22（🔴 资金红线）：与主输出同口径按来源编码——被场景改写的列按原文，银行账单原值与配置文案按已解码文本。
+    const baseValues = headers.map((h) => (row && row[h] !== undefined ? encodeBankRowCellValue(row, h) : ''));
     const channelLabel = buildHitChannelLabel(row, channelsLabelMap);
     const matchStatus = (row && row._matchStatus != null) ? row._matchStatus : '';
     const hitLabel = buildHitScenarioLabel(row);
-    sheet.addRow(baseValues.concat([channelLabel, matchStatus, hitLabel]));
+    sheet.addRow(baseValues.concat([channelLabel, matchStatus, hitLabel].map(encodeDecodedExcelJsCellText)));
   }
 
+  // v3.2.22（🔴 资金红线）：与主输出同一文本编码（控制字符、回车写成 `_xHHHH_`），同一次导出的两份核对材料中
+  //   账号与对账ID 读回一致（ExcelJS 否则静默删掉 NUL 等字符）。各单元格已按来源编码，这里只是兜底。
+  encodeWorkbookCellTexts(workbook);
   applyWatermark(workbook);
 
   // atomic write：先写 tmp 再 rename（spec §5.3 不留半文件）

@@ -8,7 +8,15 @@ const linkedTableRepository = require('../../backend/database/linked-table-repos
 const scenariosRepository = require('../../backend/database/scenarios-repository');
 const { canonicalSha256, canonicalJsonSnapshot } = require('../background-execution/canonical-json-v1');
 const { resolveFundTransferDatePolicy } = require('../fund-transfer-date-policy');
+const {
+  checkFundTransferReconRowsAgainstMapping,
+  createFundTransferReconAmbiguityWarning
+} = require('../fund-transfer-recon-builder');
 const { C4_CATEGORIES } = require('../scenario-dispatcher');
+const {
+  buildR5ChannelMissingDiagnosticPrefilter,
+  createR5ChannelMissingDiagnosticSource
+} = require('../scenario-engines/r5-fund-transfer-backfill');
 
 class FundReconEvidenceError extends Error {
   constructor(code, message, details = null) {
@@ -71,15 +79,26 @@ function enabledConsumerFlags(scenarios, fundTransferDatePolicy) {
   const configuredReconSourceMidEnabled = Boolean(owner && owner.config && owner.config.reconSourceMid !== false);
   const dbsChargeScenarioEnabled = scenarios.some((scenario) =>
     scenario && scenario.config && scenario.config.funcCategory === 'dbs-charge-fund-check');
+  const reconSourceMidEnabled = paymentOfflineEnabled || configuredReconSourceMidEnabled;
   return Object.freeze({
     refundBackfillEnabled,
     paymentOfflineEnabled,
-    reconSourceMidEnabled: paymentOfflineEnabled || configuredReconSourceMidEnabled,
-    dbsChargeScenarioEnabled
+    reconSourceMidEnabled,
+    dbsChargeScenarioEnabled,
+    // v3.2.22：R5s2 走网关来源（按账户映射匹配网关 merchantid），与 main.js r5s2GatewaySourceEnabled 同口径。
+    r5s2GatewaySourceEnabled: Boolean(owner) && !reconSourceMidEnabled
   });
 }
 
-function assertDerivationPrepared(flags, meta, derivationEvidence) {
+// v3.2.22（🔴 资金红线）：账户映射摘要。调拨对账单派生（big_account）与 R5s2 网关来源须用同一份映射：
+//   Main 派生完成时把派生所用映射的摘要写入 derivationEvidence.accountMappingSignature，worker 接受派生行前
+//   与只读快照中的映射摘要核对，防派生后、快照前映射被改导致新旧口径混用。
+function createAccountMappingSignature(accountMappingMap) {
+  const entries = accountMappingMap instanceof Map ? Array.from(accountMappingMap.entries()) : [];
+  return canonicalSha256(entries);
+}
+
+function assertDerivationPrepared(flags, meta, derivationEvidence, accountMappingSignature) {
   if (!flags.reconSourceMidEnabled && !flags.dbsChargeScenarioEnabled) return null;
   if (!derivationEvidence || derivationEvidence.prepared !== true ||
       typeof derivationEvidence.signature !== 'string' ||
@@ -97,10 +116,18 @@ function assertDerivationPrepared(flags, meta, derivationEvidence) {
       { expectedSourceSignature }
     );
   }
+  if (derivationEvidence.accountMappingSignature !== accountMappingSignature) {
+    throw new FundReconEvidenceError(
+      'FUND_RECON_DERIVATION_ACCOUNT_MAPPING_STALE',
+      '调拨派生证据与当前账户映射不一致，请重新运行',
+      { expectedAccountMappingSignature: accountMappingSignature }
+    );
+  }
   return canonicalJsonSnapshot({
     prepared: true,
     signature: derivationEvidence.signature,
-    sourceSignature: derivationEvidence.sourceSignature
+    sourceSignature: derivationEvidence.sourceSignature,
+    accountMappingSignature: derivationEvidence.accountMappingSignature
   });
 }
 
@@ -148,13 +175,47 @@ function createFundReconEvidenceProvider(options = {}) {
       const linkedMeta = linkedRepo === linkedTableRepository
         ? linkedMetaSnapshot(snapshot.db)
         : linkedRepo.readMetaSnapshot(snapshot.db);
-      const derivation = assertDerivationPrepared(flags, linkedMeta, derivationEvidence);
+      // v3.2.22（🔴 资金红线）：与主路径同口径读账户映射（链接表账户号 → 清结算系统银行账号），供调拨派生核对、R5s2 网关来源与
+      //   多对多检测器网关侧使用；先读再核对派生证据，保证派生行与网关匹配用的是同一份映射；有序 entries 进入证据签名。
+      //   本轮没有任何映射消费方（调拨来源 / DBS-Charge / 网关来源均关闭）时不读，按空映射处理（与 main.js 同边界）。
+      const accountMappingConsumersEnabled = flags.reconSourceMidEnabled || flags.dbsChargeScenarioEnabled ||
+        flags.r5s2GatewaySourceEnabled;
+      const accountMappingMap = accountMappingConsumersEnabled
+        ? accountMappingRepo.getMappingMap(snapshot.db)
+        : new Map();
+      const accountMappingSnapshot = canonicalJsonSnapshot(Array.from(accountMappingMap.entries()));
+      const derivation = assertDerivationPrepared(
+        flags,
+        linkedMeta,
+        derivationEvidence,
+        createAccountMappingSignature(accountMappingMap)
+      );
       const channels = Array.isArray(bankRows)
         ? bankRows.map((row) => row && row.Channel != null ? String(row.Channel).trim() : '')
         : [];
-      const gatewayPools = includeRows
-        ? linkedRepo.readGatewayBillRowPoolsByChannels(snapshot.db, channels)
+      // v3.2.22：与主路径一致，R5s2 网关来源且映射非空时，读池的同一次扫描（快照事务内）另暂存池外诊断候选（id 与键摘要），
+      //   R5 运行时在同一只读快照事务内按 id 回读摘要对得上的候选再裁决账户映射缺渠道告警，不进可写池。
+      const r5ChannelMissingDiagnosticPrefilter = includeRows && flags.r5s2GatewaySourceEnabled
+        ? buildR5ChannelMissingDiagnosticPrefilter(accountMappingMap)
+        : null;
+      const readPools = includeRows
+        ? linkedRepo.readGatewayBillRowPoolsByChannels(
+          snapshot.db,
+          channels,
+          r5ChannelMissingDiagnosticPrefilter ? { outOfPoolDiagnostic: r5ChannelMissingDiagnosticPrefilter } : undefined
+        )
+        : null;
+      const gatewayPools = readPools
+        ? { exactRows: readPools.exactRows, c3Rows: readPools.c3Rows }
         : { exactRows: [], c3Rows: [] };
+      const r5ChannelMissingDiagnosticSource = r5ChannelMissingDiagnosticPrefilter
+        ? createR5ChannelMissingDiagnosticSource({
+          accountMappingMap,
+          bankChannels: channels,
+          prefilter: r5ChannelMissingDiagnosticPrefilter,
+          readRowsByIds: (ids, onRow) => linkedRepo.readGatewayBillRowsByIds(snapshot.db, ids, onRow)
+        })
+        : null;
       const depositRows = includeRows && flags.refundBackfillEnabled
         ? linkedRepo.readLinkedTableRows(snapshot.db, 'bank-deposit')
         : [];
@@ -162,10 +223,23 @@ function createFundReconEvidenceProvider(options = {}) {
       const reconRows = includeRows && needsReconRows
         ? linkedRepo.readFundTransferReconRows(snapshot.db)
         : [];
-      // v3.2.22（🔴 资金红线）：与主路径同口径读账户映射（链接表账户号 → 清结算系统银行账号），供 R5s2 网关来源与
-      //   多对多检测器网关侧使用；有序 entries 进入证据签名。
-      const accountMappingMap = accountMappingRepo.getMappingMap(snapshot.db);
-      const accountMappingSnapshot = canonicalJsonSnapshot(Array.from(accountMappingMap.entries()));
+      // v3.2.22（🔴 资金红线）：与主路径同口径逐行核对派生行的大账号（按原始收付款账号与快照映射重算）；不一致即拒绝
+      //   （派生证据的映射摘要相同也可能是旧规则生成的表）。有转义写法、大账号留空的行时追加主路径同一条结构化告警，
+      //   使 worker 与主路径对相同输入报告相同的未参与匹配行数。
+      let initialWarnings = resolution.warnings;
+      if (reconRows.length > 0) {
+        const { staleCount, ambiguousMappedAccountCount } = checkFundTransferReconRowsAgainstMapping(reconRows, accountMappingMap);
+        if (staleCount > 0) {
+          throw new FundReconEvidenceError(
+            'FUND_RECON_DERIVATION_ACCOUNT_MAPPING_STALE',
+            `调拨对账单有 ${staleCount} 行的大账号与当前账户映射不一致，请重新运行`,
+            { staleCount }
+          );
+        }
+        if (ambiguousMappedAccountCount > 0) {
+          initialWarnings = [...resolution.warnings, createFundTransferReconAmbiguityWarning(ambiguousMappedAccountCount)];
+        }
+      }
       const scenarioSnapshot = canonicalJsonSnapshot(scenarios);
       const datePolicySnapshot = canonicalJsonSnapshot(resolution.policy);
       const evidenceSignature = createEvidenceSignature({
@@ -182,9 +256,10 @@ function createFundReconEvidenceProvider(options = {}) {
         deps: { channelsRepo, db: snapshot.db },
         scenarios,
         datePolicy: resolution.policy,
-        initialWarnings: resolution.warnings,
+        initialWarnings,
         flags,
         gatewayPools,
+        r5ChannelMissingDiagnosticSource,
         depositRows,
         reconRows,
         accountMappingMap,
@@ -219,6 +294,7 @@ function createFundReconEvidenceProvider(options = {}) {
 
 module.exports = {
   FundReconEvidenceError,
+  createAccountMappingSignature,
   createEvidenceSignature,
   createFundReconEvidenceProvider,
   detailedScenarios,

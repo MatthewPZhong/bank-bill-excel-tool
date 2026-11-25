@@ -208,3 +208,26 @@ test.describe('errorCodeToCause — 错误码 → 中文描述', () => {
     assert.equal(typeof errorCodeToCause(null), 'string');
   });
 });
+
+test.describe('CAUSE_MAP — v3.2.22 网关来源账户映射', () => {
+  test('账户映射与转义同值告警码均有中文原因（错误报告不显示「未知错误」）', () => {
+    for (const code of [
+      'r5-mapped-account-contention',
+      'r5-mapped-account-channel-missing',
+      'r5-mapped-account-escape-ambiguous',
+      'r5-mapped-account-precision-ambiguous',
+      'r5-mapped-account-bank-precision-ambiguous',
+      'r5-mapped-account-bank-escape-ambiguous',
+      'r5-mapped-account-channel-escape-ambiguous',
+      'fund-transfer-recon-mapped-account-ambiguous',
+      'fund-transfer-recon-derive-failed-account-mapping-stale',
+      'linked-value-escape-same-value-ambiguous'
+    ]) {
+      assert.ok(CAUSE_MAP[code], `${code} 应已定义`);
+      assert.notEqual(errorCodeToCause(code), '未知错误');
+    }
+    assert.match(errorCodeToCause('r5-mapped-account-bank-precision-ambiguous'), /银行行.*15 位有效数字/);
+    assert.match(errorCodeToCause('r5-mapped-account-bank-escape-ambiguous'), /银行行.*转义写法/);
+    assert.match(errorCodeToCause('linked-value-escape-same-value-ambiguous'), /未改写/);
+  });
+});
