@@ -1788,6 +1788,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
       assertStatementBatchWritable: generation.assertStatementBatchWritable,
       assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
       FileValidationError,
+      createStatementOutputJournal: require('../../../src/main-process/statement-output-rollback').createStatementOutputJournal,
       removeStatementSessionEntriesByFilePath: () => {},
       generateStatementFiles: (options) => {
         const result = generation.generateStatementFiles(options);
@@ -2426,6 +2427,7 @@ test('主进程：导入多组生成与补录重算中，其他组错误不遮�
       buildChannelBalancePlanningError,
       assertGenerationOutputNameUnique: () => {},
       findGenerationGroupOutputPathConflicts: () => null,
+      createStatementOutputJournal: require('../../../src/main-process/statement-output-rollback').createStatementOutputJournal,
       removeStatementSessionEntriesByFilePath: () => {},
       generateStatementFiles: ({ preparedBatch }) => {
         calls.generated.push(preparedBatch.tid);
@@ -2849,4 +2851,28 @@ test('mergeGeneratedXlsxFiles：各组明细中的字面 _xHHHH_ 合并写出后
   const workbook = XLSX.readFile(merged);
   assert.deepEqual(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }),
     [['Ref'], ['FEE_x0041_'], ['REF_x0041\r\nB']]);
+});
+
+// v3.2.22 B45（Codex 第六轮）：写出期间的系统异常写入日志前去掉消息——Node 文件异常的消息带完整路径，内部文件名含完整账号
+test('主进程：多模板写出期间的系统异常写入日志时不带内部文件名，保留错误代码、系统调用与调用栈', () => {
+  const statementOutputErrorForLog = loadMainFunction('statementOutputErrorForLog');
+  const logged = [];
+  const restoredResult = loadMainFunction(
+    'createRestoredStatementRuntimeFailureResult',
+    ['appendLog', 'ensureStorageRoot', 'appendActivityLogEntry', 'statementOutputErrorForLog'],
+    [(_root, error) => { logged.push(error.stack); return 'logs/x.log'; }, () => '/storage', () => {}, statementOutputErrorForLog]
+  );
+  let busy = null;
+  try {
+    fs.openSync(path.join(os.tmpdir(), 'no-such-dir-b45', '1-中行-6222020200012345678-COMMON.xlsx'), 'r');
+  } catch (error) {
+    busy = error;
+  }
+  assert.match(busy.message, /6222020200012345678/, '前置：Node 文件异常的消息带路径');
+  const result = restoredResult(busy, { step: '生成网银账单', errorCode: 'STATEMENT_GENERATE_FAILED' });
+  assert.equal(result.preservesSession, true);
+  assert.equal(logged.length, 1);
+  assert.doesNotMatch(logged[0], /6222020200012345678|no-such-dir-b45/);
+  assert.match(logged[0], /^Error（ENOENT，open）：/);
+  assert.match(logged[0], /\n\s+at /, '保留调用栈');
 });

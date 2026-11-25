@@ -683,6 +683,7 @@ const {
   createStatementGenerationHelpers,
   selectBalanceAccountRows
 } = require('./main-process/statement-generation');
+const { createStatementOutputJournal, isStatementOutputsRestored } = require('./main-process/statement-output-rollback');
 const {
   DUPLICATE_REVIEW_STATUS,
   createStatementDuplicateReview,
@@ -13665,6 +13666,90 @@ function regenerateVirtualTemplateBalanceFromSession(
   };
 }
 
+// v3.2.22 B45：多模板写出期间的系统异常（如导出文件被占用）且本批写出的文件都已还原：导入入口只提示原因
+//   （preservesSession，上一批的会话、导出与补录入口不变），不按失败的导入清空上一批。业务校验失败仍走普通失败处理
+//   （界面列出明细、可导出报错文件）；预检、新鲜度失败不经此处。
+function isRestoredStatementRuntimeFailure(error) {
+  return isStatementOutputsRestored(error)
+    && !(error instanceof FileValidationError)
+    && error.code !== STATEMENT_SOURCE_FRESHNESS_FAILURE.code;
+}
+
+// 不调用 createErrorResult：上一批的状态框与可导出的报错文件保持不变（不替换 lastErrorReport），异常堆栈可能含内部文件名
+//   （含账号），不写入可导出的报告。诊断尽力写入日志文件与活动日志（不含路径），写不出不影响返回（导出盘已满或只读时）。
+// 写日志前去掉异常消息（Codex 第六轮）：Node 文件异常的消息带完整路径，内部文件名含完整账号；保留错误名、代码、系统调用与调用栈
+function statementOutputErrorForLog(error) {
+  const code = error && error.code ? String(error.code) : '';
+  const syscall = error && error.syscall ? String(error.syscall) : '';
+  const frames = String((error && error.stack) || '').split('\n').filter((line) => /^\s+at\s/.test(line));
+  const header = `${(error && error.name) || 'Error'}${code ? `（${code}${syscall ? `，${syscall}` : ''}）` : ''}：异常消息可能含内部文件名，已省略`;
+  return { stack: [header, ...frames].join('\n') };
+}
+
+function createRestoredStatementRuntimeFailureResult(error, { step, errorCode }) {
+  try {
+    appendLog(ensureStorageRoot(), statementOutputErrorForLog(error));
+  } catch (_logError) {
+    // 诊断落盘尽力而为
+  }
+  try {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'statement',
+      message: `${step}失败，已还原为导入前的状态`,
+      details: [`错误代码：${errorCode}`, `系统错误：${error && error.code ? error.code : '未知'}`]
+    });
+  } catch (_logError) {
+    // 同上
+  }
+  return {
+    status: 'error',
+    message: '生成失败（可能是导出文件正被其他程序占用），已还原为导入前的状态，请关闭占用的文件后重新导入',
+    errorCode,
+    errorReportReady: false,
+    preservesSession: true
+  };
+}
+
+// v3.2.22 B45（D7）：还原不完整（STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE）。报错文件尽力写入：导出所在的数据目录已满或只读
+//   （正是还原失败的常见原因）时写报错文件也会失败，此时仍返回给出未还原数量与恢复清单位置的消息，不让写报错文件的异常
+//   盖掉恢复指引；活动日志尽力只记错误代码。
+function createRollbackIncompleteErrorResult(options) {
+  const reportBefore = lastErrorReport;
+  try {
+    return createErrorResult(options);
+  } catch (_reportError) {
+    // 报错文件已写出、之后写活动日志失败：照常指向本次的报错文件
+    if (lastErrorReport && lastErrorReport !== reportBefore) {
+      return {
+        status: 'error',
+        message: options.message,
+        errorReportReady: true,
+        errorReportFileName: lastErrorReport.fileName
+      };
+    }
+    try {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'statement',
+        message: `${options.step}失败，且有文件未能自动还原（报错文件未能写出）`,
+        details: [`错误代码：${options.errorCode}`]
+      });
+    } catch (_logError) {
+      // 尽力而为
+    }
+    return {
+      status: 'error',
+      message: options.message,
+      errorCode: options.errorCode,
+      detailLines: Array.isArray(options.detailLines) ? options.detailLines.slice() : [],
+      errorReportReady: false
+    };
+  }
+}
+
 function generateMultiTemplateGroupFiles({
   fileEntries,
   fallbackTemplateConfig,
@@ -13826,70 +13911,128 @@ function generateMultiTemplateGroupFiles({
     groupPlans.map((plan) => ({ config: plan.groupConfig, preparedBatch: plan.groupPreparedBatch }))
   );
   if (outputPathConflicts) throw buildStatementOutputPathConflictError(outputPathConflicts);
+
+  // v3.2.22 B45：逐组写出与合并期间任一步失败（如文件被占用、合并失败）时，按写出记录还原本批已写的明细 / 余额 /
+  //   合并文件与余额种子，再原样抛出；旧会话条目在全部组与合并成功后才替换。后组仍可读取前组刚写的种子（同批语义不变）。
+  const outputJournal = createStatementOutputJournal();
+  // 批次临时备份（含账单原内容）重试后仍未能删除时留痕，只记目录位置（目录名不含业务信息，Codex 第八轮）
+  const noteStatementBackupCleanupFailure = (directory) => {
+    if (!directory) return;
+    try {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'statement',
+        message: '网银多模板生成的临时备份未能删除，含账单原内容，请手动删除该目录',
+        details: [`目录：${directory}`]
+      });
+    } catch (_logError) {
+      // 留痕尽力而为，不影响本批结果
+    }
+  };
+  let mergedDetail = null;
+  let mergedBalance = null;
+  let balancePending = false;
+  const templateCount = generationGroups.length;
+  try {
+    for (const {
+      groupTemplateConfig,
+      groupConfig,
+      effectiveEntries,
+      groupPreparedBatch
+    } of groupPlans) {
+
+      const groupGeneratedFiles = {
+        ...generateStatementFiles({
+          config: groupConfig,
+          preparedBatch: groupPreparedBatch,
+          scope: 'current',
+          writeOutput: outputJournal.write,
+          checkOutputTarget: outputJournal.checkTarget
+        }),
+        fileEntries: effectiveEntries,
+        preparedBatch: groupPreparedBatch
+      };
+
+      if (groupGeneratedFiles.detail) allDetailPaths.push(groupGeneratedFiles.detail.filePath);
+      if (groupGeneratedFiles.balance) allBalancePaths.push(groupGeneratedFiles.balance.filePath);
+      for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) allBalanceDates.push(date);
+      // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
+      if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
+      // v3.2.21：明细汇总按各组写出明细时确定的日期命名（剔除跳过的零金额行，与单组明细文件、另存为默认文件名同口径）；
+      //   逐个追加，展开成参数在大批量时会超出调用栈
+      for (const date of (groupGeneratedFiles.detail && groupGeneratedFiles.detail.billDates) || []) allBillDates.push(date);
+
+      lastGenerationTemplateConfig = groupTemplateConfig;
+      allFileEntries.push(...effectiveEntries);
+    }
+
+    // 合并多组文件为汇总文件，命名：组数-COMMON/BALANCE-日期范围.xlsx（渠道按一组计）
+    const dateRangeLabel = buildDateRangeLabel(allBillDates);
+
+    mergedDetail = allDetailPaths.length > 1
+      ? (() => {
+          const mergedFileName = `${templateCount}-COMMON-${dateRangeLabel || getToday()}.xlsx`;
+          const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'detail', outputFileName: mergedFileName });
+          outputJournal.write(mergedPath, () => mergeGeneratedXlsxFiles(allDetailPaths, mergedPath));
+          return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
+        })()
+      : allDetailPaths.length === 1
+        ? { filePath: allDetailPaths[0], fileName: path.basename(allDetailPaths[0]), templateName: '按文件名映射模板' }
+        : null;
+
+    // 任一模板组还需补录或确认断档时不合并、不缓存余额：汇总只含已算出的组，文件名却按全部模板计数。
+    // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
+    balancePending = allWarnings.some(
+      (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
+        || w.type === 'balance-mismatch-confirm' || w.type === 'balance-seed-replace-confirm'
+    );
+    const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
+    mergedBalance = mergeableBalancePaths.length > 1
+      ? (() => {
+          const mergedFileName = `${templateCount}-BALANCE-${buildDateRangeLabel(allBalanceDates) || getToday()}.xlsx`;
+          const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
+          outputJournal.write(mergedPath, () => mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath));
+          return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
+        })()
+      : mergeableBalancePaths.length === 1
+        ? { filePath: mergeableBalancePaths[0], fileName: path.basename(mergeableBalancePaths[0]), templateName: '按文件名映射模板' }
+        : null;
+  } catch (error) {
+    const { error: failure, outcome } = outputJournal.failBatch(error);
+    if (!outcome.restored) {
+      // 还原不完整：系统异常的堆栈照常写入日志；活动日志只记数量与恢复清单位置，不写含账号的文件路径
+      //   诊断落盘尽力而为：导出盘已满或只读时写日志可能再次失败，不能掩盖回滚结果与恢复清单位置
+      if (!(error instanceof FileValidationError)) {
+        try {
+          failure.detailLines.push(`系统异常已额外写入日志文件：${appendLog(ensureStorageRoot(), statementOutputErrorForLog(error))}`);
+        } catch (_logError) {
+          failure.detailLines.push('系统异常未能写入日志文件');
+        }
+      }
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'statement',
+          message: '网银多模板生成失败后部分文件未能自动还原',
+          details: [failure.context.rollbackSummary, failure.context.rollbackLocation]
+        });
+      } catch (_logError) {
+        // 同上
+      }
+    }
+    noteStatementBackupCleanupFailure(outcome.cleanupFailedDirectory);
+    throw failure;
+  }
+  noteStatementBackupCleanupFailure(outputJournal.commit().cleanupFailedDirectory);
+
+  // 全部组与合并成功后才替换旧会话条目（v3.2.22 B45）
   if (Array.isArray(replacePaths)) {
     replacePaths.forEach((filePath) => {
       removeStatementSessionEntriesByFilePath(session, filePath);
     });
   }
-
-  for (const {
-    groupTemplateConfig,
-    groupConfig,
-    effectiveEntries,
-    groupPreparedBatch
-  } of groupPlans) {
-
-    const groupGeneratedFiles = {
-      ...generateStatementFiles({ config: groupConfig, preparedBatch: groupPreparedBatch, scope: 'current' }),
-      fileEntries: effectiveEntries,
-      preparedBatch: groupPreparedBatch
-    };
-
-    if (groupGeneratedFiles.detail) allDetailPaths.push(groupGeneratedFiles.detail.filePath);
-    if (groupGeneratedFiles.balance) allBalancePaths.push(groupGeneratedFiles.balance.filePath);
-    for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) allBalanceDates.push(date);
-    // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
-    if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
-    // v3.2.21：明细汇总按各组写出明细时确定的日期命名（剔除跳过的零金额行，与单组明细文件、另存为默认文件名同口径）；
-    //   逐个追加，展开成参数在大批量时会超出调用栈
-    for (const date of (groupGeneratedFiles.detail && groupGeneratedFiles.detail.billDates) || []) allBillDates.push(date);
-
-    lastGenerationTemplateConfig = groupTemplateConfig;
-    allFileEntries.push(...effectiveEntries);
-  }
-
-  // 合并多组文件为汇总文件，命名：组数-COMMON/BALANCE-日期范围.xlsx（渠道按一组计）
-  const templateCount = generationGroups.length;
-  const dateRangeLabel = buildDateRangeLabel(allBillDates);
-
-  const mergedDetail = allDetailPaths.length > 1
-    ? (() => {
-        const mergedFileName = `${templateCount}-COMMON-${dateRangeLabel || getToday()}.xlsx`;
-        const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'detail', outputFileName: mergedFileName });
-        mergeGeneratedXlsxFiles(allDetailPaths, mergedPath);
-        return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
-      })()
-    : allDetailPaths.length === 1
-      ? { filePath: allDetailPaths[0], fileName: path.basename(allDetailPaths[0]), templateName: '按文件名映射模板' }
-      : null;
-
-  // 任一模板组还需补录或确认断档时不合并、不缓存余额：汇总只含已算出的组，文件名却按全部模板计数。
-  // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
-  const balancePending = allWarnings.some(
-    (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
-      || w.type === 'balance-mismatch-confirm' || w.type === 'balance-seed-replace-confirm'
-  );
-  const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
-  const mergedBalance = mergeableBalancePaths.length > 1
-    ? (() => {
-        const mergedFileName = `${templateCount}-BALANCE-${buildDateRangeLabel(allBalanceDates) || getToday()}.xlsx`;
-        const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
-        mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath);
-        return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
-      })()
-    : mergeableBalancePaths.length === 1
-      ? { filePath: mergeableBalancePaths[0], fileName: path.basename(mergeableBalancePaths[0]), templateName: '按文件名映射模板' }
-      : null;
 
   // session 只 append 一次（避免 importCount 膨胀导致首次导入就弹 scope 选择）
   const mergedSessionEntries = allFileEntries.map((entry) => buildStatementFileEntry({
@@ -16510,6 +16653,12 @@ async function handleFilenameMappingImport(prepared) {
     }
     return executeFilenameMappingImportPlan(statementImportPlan, prepared);
   } catch (error) {
+    if (!prepared.previewOnly && isRestoredStatementRuntimeFailure(error)) {
+      return createRestoredStatementRuntimeFailureResult(error, {
+        step: '导入网银明细文件',
+        errorCode: 'FILE_IMPORT_RUNTIME'
+      });
+    }
     if (!prepared.previewOnly) {
       clearGeneratedExports();
       clearPendingManualBalancePrompt();
@@ -16529,21 +16678,23 @@ async function handleFilenameMappingImport(prepared) {
     if (error instanceof FileValidationError) {
       // v3.2.16：币种未维护大账号需要把文件 / 币种 / 行号带回界面弹窗（spec D1）；
       //   v3.2.21：渠道余额方式冲突、出余额的交易缺账单日期或 MerchantId 同样带回明细
+      //   v3.2.22 B45：还原不完整时报错文件写不出也返回恢复指引
       const buildResult = String(error.code || '').startsWith('CURRENCY_BIG_ACCOUNT_')
         || error.code === 'CHANNEL_BALANCE_MODE_MISMATCH'
         || error.code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE'
         ? createDetailedErrorResult
-        : createErrorResult;
+        : (error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? createRollbackIncompleteErrorResult : createErrorResult);
       return buildResult({
         step: '导入网银明细文件',
         message: error.message,
         errorCode: error.code,
         originalError: error,
         detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+        // 按文件名映射：各组错误的上下文可能带该组模板的真实名称（可能含完整账号），最后以固定名称覆盖（Codex 第九轮）
         context: {
           templateId: FILENAME_MAPPING_TEMPLATE_ID,
-          templateName: virtualTemplateName,
-          ...(error.context || {})
+          ...(error.context || {}),
+          templateName: virtualTemplateName
         },
         templateName: virtualTemplateName
       });
@@ -17921,6 +18072,8 @@ function registerFileHandlers() {
     clearPendingBigAccountSelection(prepared.contextId);
     statementDuplicateReview.clear();
     const { isFixedMode, normalizedAssignments, rememberOrder } = prepared;
+    // 按文件名映射的多模板分组生成：报错文件名、上下文与活动日志用固定名称（见下方错误处理）
+    let multiTemplateGeneration = false;
     try {
       const session = getOrCreateStatementImportSession({
         statementImportSessions,
@@ -17951,6 +18104,7 @@ function registerFileHandlers() {
         resolvedFileEntries.map((entry) => entry.matchedTemplateId || 0)
       );
       if (isFilenameMappingMode(pendingContext.templateId) && distinctTemplateIds.size > 1) {
+        multiTemplateGeneration = true;
         const { lastResult, lastBatchId, lastGenerationTemplateConfig } = generateMultiTemplateGroupFiles({
           fileEntries: resolvedFileEntries,
           fallbackTemplateConfig,
@@ -18042,6 +18196,12 @@ function registerFileHandlers() {
         result
       });
     } catch (error) {
+      if (isRestoredStatementRuntimeFailure(error)) {
+        return createRestoredStatementRuntimeFailureResult(error, {
+          step: '选择大账号',
+          errorCode: 'BIG_ACCOUNT_SELECTION_RUNTIME'
+        });
+      }
       clearGeneratedExports();
       clearPendingManualBalancePrompt();
 
@@ -18056,23 +18216,29 @@ function registerFileHandlers() {
           || error.code === 'CHANNEL_BALANCE_MODE_MISMATCH'
           || error.code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE'
           ? createDetailedErrorResult
-          : createErrorResult;
+          : (error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? createRollbackIncompleteErrorResult : createErrorResult);
+        // v3.2.22 B45（Codex 第七、八轮）：多模板分组生成的错误（还原不完整、导出位置不安全、写出期间被改动等）报错文件名、
+        //   上下文与活动日志用固定名称（与直接导入入口相同），不写入首个匹配模板的真实名称（可能含完整账号）
+        const reportTemplateName = multiTemplateGeneration ? '按文件名映射模板' : pendingContext.template.name;
         return buildResult({
           step: '选择大账号',
           message: error.message,
           errorCode: error.code,
           originalError: error,
           detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+          // 多模板时各组错误的上下文可能带该组模板的真实名称（如收支同时有值），最后以固定名称覆盖（Codex 第九轮）
           context: {
             templateId: pendingContext.templateId,
-            templateName: pendingContext.template.name,
-            ...(error.context || {})
+            templateName: reportTemplateName,
+            ...(error.context || {}),
+            ...(multiTemplateGeneration ? { templateName: reportTemplateName } : {})
           },
-          templateName: pendingContext.template.name
+          templateName: reportTemplateName
         });
       }
 
       const logPath = appendLog(ensureStorageRoot(), error);
+      const runtimeTemplateName = multiTemplateGeneration ? '按文件名映射模板' : pendingContext.template.name;
       return createErrorResult({
         step: '选择大账号',
         message: '文件转换错误，请导出报错文件查看详情',
@@ -18084,10 +18250,10 @@ function registerFileHandlers() {
         ],
         context: {
           templateId: pendingContext.templateId,
-          templateName: pendingContext.template.name
+          templateName: runtimeTemplateName
         },
         originalError: error,
-        templateName: pendingContext.template.name
+        templateName: runtimeTemplateName
       });
     }
   

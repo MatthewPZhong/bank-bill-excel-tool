@@ -257,6 +257,7 @@ function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEnt
     assertStatementBatchWritable: generation.assertStatementBatchWritable,
     assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
     FileValidationError,
+    createStatementOutputJournal: require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,

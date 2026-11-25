@@ -45,6 +45,116 @@ function appendLog(logRoot, error) {
   return targetFile;
 }
 
+function removeQuietly(filePath) {
+  try {
+    fs.rmSync(filePath, { force: true });
+  } catch (_cleanupError) {
+    // 尽力而为：临时文件不带 .txt，不是正式报告
+  }
+}
+
+// 临时文件删除：短暂占用（如 Windows 上被杀毒软件扫描）时有限重试；同步等待（报告由主进程同步写出）
+const PARTIAL_REMOVE_ATTEMPTS = 4;
+const PARTIAL_REMOVE_RETRY_DELAY_MS = 100;
+const PARTIAL_REMOVE_WAIT_CELL = new Int32Array(new SharedArrayBuffer(4));
+function removeWithRetry(filePath, attempts = PARTIAL_REMOVE_ATTEMPTS) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      fs.rmSync(filePath, { force: true });
+      return true;
+    } catch (_error) {
+      if (attempt >= attempts) return false;
+      Atomics.wait(PARTIAL_REMOVE_WAIT_CELL, 0, 0, PARTIAL_REMOVE_RETRY_DELAY_MS);
+    }
+  }
+}
+
+// 已发布报告的临时名重试后仍删不掉时记在这里，下次写报错文件时再删（Codex 第十三轮）
+const pendingPartialFiles = new Set();
+function retryPendingPartialFiles() {
+  for (const filePath of [...pendingPartialFiles]) {
+    if (removeWithRetry(filePath, 1)) pendingPartialFiles.delete(filePath);
+  }
+}
+
+// 以正式名称发布写好的临时文件，不覆盖已有的报告：硬链接在目标已存在时失败；不支持硬链接的卷改为确认目标不存在后改名
+//   （报告只由主进程同步写出，确认与改名之间不会插入本应用的同名报告）
+function publishReportFile(sourceFile, targetFile) {
+  try {
+    fs.linkSync(sourceFile, targetFile);
+  } catch (error) {
+    if (error && error.code === 'EEXIST') return false;
+    try {
+      fs.lstatSync(targetFile);
+      return false;
+    } catch (statError) {
+      if (!statError || statError.code !== 'ENOENT') throw statError;
+    }
+    fs.renameSync(sourceFile, targetFile);
+    return true;
+  }
+  // 硬链接发布后正式名与临时名指向同一份完整报告：临时名有限重试删除；仍删不掉时报告照常发布，临时名记为待清理
+  //   （下次写报错文件时再删，调用方写告警日志），不让完整报告的副本无人知晓地留下（Codex 第十三轮）
+  if (!removeWithRetry(sourceFile)) pendingPartialFiles.add(sourceFile);
+  return true;
+}
+
+// 正式名不超过 255 个 UTF-8 字节（按字节限制文件名的卷）：同名报告追加序号后缀时从基本名末尾按字符缩短（Codex 第十二轮）
+const MAX_REPORT_FILE_NAME_BYTES = 255;
+function fitReportFileName(baseName, suffix) {
+  const tail = `${suffix}.txt`;
+  const chars = Array.from(baseName);
+  while (chars.length > 1 && Buffer.byteLength(chars.join('') + tail) > MAX_REPORT_FILE_NAME_BYTES) chars.pop();
+  return chars.join('') + tail;
+}
+
+// v3.2.22 B45：同一秒、同一模板与步骤的报告不覆盖已有的那份（覆盖写到一半失败时，上一份报告会变成半份新报告）：
+//   重名时依次加 -2、-3……（Codex 第五轮）。先写不带 .txt 的临时文件，写入与关闭都成功后才以正式名称发布：写到一半失败、
+//   临时文件又删不掉（如 Windows 上被占用）时，不留下外观正常的残缺报告（Codex 第六、十轮）
+let partialReportSequence = 0;
+function writeNewReportFile(targetDir, baseName, content) {
+  let partialFile;
+  let fd;
+  for (let attempt = 1; ; attempt += 1) {
+    partialReportSequence += 1;
+    // 临时名只需在目录内唯一，不含模板名与步骤名：正式名恰在文件名长度上限时临时名不会超长（Codex 第十一轮）
+    partialFile = path.join(targetDir, `.report-${process.pid}-${partialReportSequence}.partial`);
+    try {
+      fd = fs.openSync(partialFile, 'wx');
+      break;
+    } catch (error) {
+      if (error && error.code === 'EEXIST' && attempt < 1000) continue;
+      throw error;
+    }
+  }
+  let failure = null;
+  try {
+    fs.writeFileSync(fd, content, 'utf8');
+  } catch (error) {
+    failure = error;
+  }
+  // 只关闭一次；网络文件系统可能到关闭时才报告延迟写入的错误，同样按写入失败处理（Codex 第六轮）
+  try {
+    fs.closeSync(fd);
+  } catch (error) {
+    failure = failure || error;
+  }
+  if (failure) {
+    removeQuietly(partialFile);
+    throw failure;
+  }
+  try {
+    for (let attempt = 1; ; attempt += 1) {
+      const targetFile = path.join(targetDir, fitReportFileName(baseName, attempt > 1 ? `-${attempt}` : ''));
+      if (publishReportFile(partialFile, targetFile)) return targetFile;
+      if (attempt >= 1000) throw Object.assign(new Error(`EEXIST: file already exists, ${targetFile}`), { code: 'EEXIST' });
+    }
+  } catch (error) {
+    removeQuietly(partialFile);
+    throw error;
+  }
+}
+
 function writeErrorReport(reportRoot, payload = {}) {
   const now = new Date();
   const date = formatLocalDate(now);
@@ -57,10 +167,7 @@ function writeErrorReport(reportRoot, payload = {}) {
       'APP'
   );
   const targetDir = path.join(reportRoot, 'error-reports', date);
-  const targetFile = path.join(
-    targetDir,
-    `${formatCompactLocalTimestamp(now)}-${safeTemplateName}-${safeStep}.txt`
-  );
+  const baseName = `${formatCompactLocalTimestamp(now)}-${safeTemplateName}-${safeStep}`;
   const detailLines = Array.isArray(payload.detailLines)
     ? payload.detailLines.filter((line) => String(line || '').trim() !== '')
     : [];
@@ -87,13 +194,31 @@ function writeErrorReport(reportRoot, payload = {}) {
     sections.push('', '原始异常：', payload.originalError.stack || payload.originalError.message || String(payload.originalError));
   }
 
+  retryPendingPartialFiles();
   fs.mkdirSync(targetDir, { recursive: true });
-  fs.writeFileSync(targetFile, `${sections.join('\n')}\n`, 'utf8');
+  const pendingBefore = new Set(pendingPartialFiles);
+  const targetFile = writeNewReportFile(targetDir, baseName, `${sections.join('\n')}\n`);
+  const leftover = [...pendingPartialFiles].filter((filePath) => !pendingBefore.has(filePath));
+  if (leftover.length) {
+    // 临时名只含进程号与序号，不含模板名、步骤名或账号
+    try {
+      appendStructuredLog(reportRoot, {
+        level: 'warning',
+        source: 'main',
+        domain: 'error-report',
+        message: '报错文件已写出，但其临时副本未能删除，将在下次写报错文件时重试；也可手动删除',
+        details: leftover.map((filePath) => path.relative(reportRoot, filePath))
+      }, now);
+    } catch (_logError) {
+      // 告警日志写不出不影响报告本身
+    }
+  }
 
   return {
     filePath: targetFile,
     fileName: path.basename(targetFile),
-    createdAt: time
+    createdAt: time,
+    ...(leftover.length ? { pendingCleanupFiles: leftover } : {})
   };
 }
 

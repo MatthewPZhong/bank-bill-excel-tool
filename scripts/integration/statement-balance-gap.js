@@ -368,6 +368,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
     assertStatementBatchWritable: generation.assertStatementBatchWritable,
     assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
     FileValidationError,
+    createStatementOutputJournal: require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,

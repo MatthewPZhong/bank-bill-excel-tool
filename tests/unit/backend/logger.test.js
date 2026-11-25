@@ -323,3 +323,246 @@ test('writeErrorReport：15 万行明细照常写出报告', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// v3.2.22 B45（Codex 第五轮）：同一秒、同名的报告不覆盖上一份；写到一半失败时删掉新文件，上一份的字节不变
+test('writeErrorReport：同一秒同名时另建 -2 文件；写入失败时不留下半份、上一份报告不变', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 23, 10, 20, 30).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { global.Date = RealDate; });
+  const payload = { step: '生成网银账单', templateName: '模板A', message: '第一份', errorCode: 'TEST' };
+  const first = writeErrorReport(root, payload);
+  const firstBytes = fs.readFileSync(first.filePath);
+  const second = writeErrorReport(root, { ...payload, message: '第二份' });
+  assert.notEqual(second.filePath, first.filePath);
+  assert.match(second.fileName, /-2\.txt$/);
+  assert.match(fs.readFileSync(second.filePath, 'utf8'), /第二份/);
+  assert.deepEqual(fs.readFileSync(first.filePath), firstBytes, '上一份报告不被覆盖');
+
+  const writeFileSync = fs.writeFileSync;
+  fs.writeFileSync = (target, ...rest) => {
+    if (typeof target === 'number') {
+      writeFileSync(target, '半份');
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    }
+    return writeFileSync(target, ...rest);
+  };
+  t.after(() => { fs.writeFileSync = writeFileSync; });
+  const before = fs.readdirSync(path.dirname(first.filePath)).sort();
+  assert.throws(() => writeErrorReport(root, { ...payload, message: '第三份' }), { code: 'ENOSPC' });
+  fs.writeFileSync = writeFileSync;
+  assert.deepEqual(fs.readdirSync(path.dirname(first.filePath)).sort(), before, '不留下写了一半的新报告');
+  assert.deepEqual(fs.readFileSync(first.filePath), firstBytes);
+});
+
+// v3.2.22 B45（Codex 第六轮）：关闭时才报告的延迟写入错误同样按写入失败处理：删掉新文件，同一描述符只关闭一次
+test('writeErrorReport：关闭报告文件失败时删掉本次新建的文件，不重复关闭', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const closeSync = fs.closeSync;
+  const closed = [];
+  fs.closeSync = (fd) => {
+    closed.push(fd);
+    closeSync(fd);
+    throw Object.assign(new Error('EIO: i/o error, close'), { code: 'EIO' });
+  };
+  t.after(() => { fs.closeSync = closeSync; });
+  assert.throws(() => writeErrorReport(root, { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' }), { code: 'EIO' });
+  fs.closeSync = closeSync;
+  assert.equal(closed.length, 1, '同一描述符只关闭一次');
+  const reportFiles = fs.readdirSync(root, { recursive: true }).filter((name) => String(name).endsWith('.txt'));
+  assert.deepEqual(reportFiles, [], '不留下内容不完整的新报告');
+});
+
+// v3.2.22 B45（Codex 第十一轮）：按字节限制文件名的卷（上限 255 个 UTF-8 字节）上，正式名恰在上限时照常写出，临时名不随之超长。
+//   macOS 与 Windows 按字符计，这里模拟按字节计的卷
+test('writeErrorReport：正式名恰在文件名长度上限（255 字节）时照常写出', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const originals = {};
+  for (const method of ['openSync', 'linkSync', 'renameSync']) {
+    originals[method] = fs[method];
+    fs[method] = (...args) => {
+      for (const arg of method === 'openSync' ? [args[0]] : [args[1]]) {
+        if (Buffer.byteLength(path.basename(String(arg))) > 255) {
+          throw Object.assign(new Error(`ENAMETOOLONG: name too long, ${method}`), { code: 'ENAMETOOLONG' });
+        }
+      }
+      return originals[method](...args);
+    };
+  }
+  t.after(() => Object.assign(fs, originals));
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 24, 9, 30, 0).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { global.Date = RealDate; });
+  const payload = { step: '导入网银明细文件', templateName: '账'.repeat(70), errorCode: 'TEST' };
+  const report = writeErrorReport(root, { ...payload, message: '第一份' });
+  // 同一秒同名的第二份：追加 -2 后基本名按字节缩短，仍可写出、不覆盖第一份（Codex 第十二轮）
+  const second = writeErrorReport(root, { ...payload, message: '第二份' });
+  Object.assign(fs, originals);
+  global.Date = RealDate;
+  assert.equal(Buffer.byteLength(report.fileName), 255);
+  assert.ok(Buffer.byteLength(second.fileName) <= 255 && /-2\.txt$/.test(second.fileName), second.fileName);
+  assert.deepEqual(fs.readdirSync(path.dirname(report.filePath)).sort(), [report.fileName, second.fileName].sort());
+  assert.match(fs.readFileSync(report.filePath, 'utf8'), /第一份/);
+  assert.match(fs.readFileSync(second.filePath, 'utf8'), /第二份/);
+});
+
+// v3.2.22 B45（Codex 第十轮）：写到一半失败、删除又因占用失败时，留下的只是不带 .txt 的临时文件，不是外观正常的残缺报告
+test('writeErrorReport：写入失败且删除失败时不留下正式名称的残缺报告；成功时不留临时文件', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const payload = { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' };
+  // 固定时钟：两份报告跨过午夜时落到不同日期的目录（Codex 第十七轮）
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 24, 10, 0, 0).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { global.Date = RealDate; });
+  const ok = writeErrorReport(root, payload);
+  assert.deepEqual(fs.readdirSync(path.dirname(ok.filePath)), [ok.fileName], '成功时只有正式报告');
+  fs.rmSync(ok.filePath);
+
+  const writeFileSync = fs.writeFileSync;
+  const rmSync = fs.rmSync;
+  fs.writeFileSync = (target, ...rest) => {
+    if (typeof target === 'number') {
+      writeFileSync(target, '半份');
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    }
+    return writeFileSync(target, ...rest);
+  };
+  fs.rmSync = (target, ...rest) => {
+    if (String(target).startsWith(root)) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    return rmSync(target, ...rest);
+  };
+  t.after(() => { fs.writeFileSync = writeFileSync; fs.rmSync = rmSync; });
+  assert.throws(() => writeErrorReport(root, payload), { code: 'ENOSPC' });
+  fs.writeFileSync = writeFileSync;
+  fs.rmSync = rmSync;
+  const names = fs.readdirSync(path.dirname(ok.filePath));
+  assert.deepEqual(names.filter((name) => name.endsWith('.txt')), [], '不留下正式名称的残缺报告');
+  assert.equal(names.length, 1, '只留下删不掉的临时文件');
+});
+
+// v3.2.22 B45（Codex 第十三轮）：硬链接发布后，临时名与正式报告指向同一份完整内容：删除临时名短暂占用时重试；
+//   重试后仍删不掉时报告照常发布、写告警日志，下次写报错文件时再删
+test('writeErrorReport：发布后删除临时名遇到短暂占用时重试，仍失败时记为待清理并在下次写报告时删除', (t) => {
+  const { writeErrorReport, getLogFilePath } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 只适用于硬链接发布：临时卷不支持硬链接时按设计改名发布，不留临时名（改名分支见下一例，Codex 第十四轮）
+  try {
+    fs.writeFileSync(path.join(root, 'probe'), '');
+    fs.linkSync(path.join(root, 'probe'), path.join(root, 'probe-link'));
+    fs.rmSync(path.join(root, 'probe'));
+    fs.rmSync(path.join(root, 'probe-link'));
+  } catch (_error) {
+    t.skip('临时目录所在的卷不支持硬链接');
+    return;
+  }
+  // 固定时钟：删除重试有真实等待，跨过午夜时报告与日志会落到不同日期的目录（Codex 第十六轮）
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 24, 10, 0, 0).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { global.Date = RealDate; });
+  const payload = { step: '生成网银账单', templateName: '模板A', message: '报告', errorCode: 'TEST' };
+  const rmSync = fs.rmSync;
+  let failures = 0;
+  let busyPartials = 0;
+  fs.rmSync = (target, ...rest) => {
+    if (path.basename(String(target)).endsWith('.partial') && busyPartials < failures) {
+      busyPartials += 1;
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    }
+    return rmSync(target, ...rest);
+  };
+  t.after(() => { fs.rmSync = rmSync; });
+
+  failures = 1;
+  const first = writeErrorReport(root, payload);
+  const dir = path.dirname(first.filePath);
+  assert.deepEqual(fs.readdirSync(dir), [first.fileName], '第一次删除被占用：重试后只留正式报告');
+  assert.equal(first.pendingCleanupFiles, undefined);
+
+  busyPartials = 0;
+  failures = 100;
+  const second = writeErrorReport(root, { ...payload, message: '第二份' });
+  const leftover = fs.readdirSync(dir).filter((name) => name.endsWith('.partial'));
+  assert.equal(leftover.length, 1, '重试后仍删不掉：留下临时名');
+  assert.match(fs.readFileSync(second.filePath, 'utf8'), /第二份/, '报告照常发布');
+  assert.deepEqual(second.pendingCleanupFiles, [path.join(dir, leftover[0])]);
+  const warnings = fs.readFileSync(getLogFilePath(root, 'warning', new Date()), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(warnings.at(-1).details, [path.relative(root, path.join(dir, leftover[0]))], '告警日志记下待清理位置');
+
+  failures = 0;
+  const third = writeErrorReport(root, { ...payload, message: '第三份' });
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.endsWith('.partial')), [], '下次写报告时删除待清理的临时名');
+  assert.equal(third.pendingCleanupFiles, undefined);
+});
+
+// v3.2.22 B45（Codex 第十四轮）：不支持硬链接的卷按改名发布：同一秒同名的第二份报告不覆盖第一份，不留临时名、不产生待清理记录
+test('writeErrorReport：不支持硬链接时改名发布，同秒同名的报告互不覆盖、不留待清理的临时名', (t) => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const linkSync = fs.linkSync;
+  fs.linkSync = () => { throw Object.assign(new Error('ENOTSUP: operation not supported'), { code: 'ENOTSUP' }); };
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 24, 10, 0, 0).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { fs.linkSync = linkSync; global.Date = RealDate; });
+  const payload = { step: '生成网银账单', templateName: '模板A', errorCode: 'TEST' };
+  const first = writeErrorReport(root, { ...payload, message: '第一份' });
+  const second = writeErrorReport(root, { ...payload, message: '第二份' });
+  fs.linkSync = linkSync;
+  global.Date = RealDate;
+  assert.notEqual(first.filePath, second.filePath);
+  assert.match(second.fileName, /-2\.txt$/);
+  assert.deepEqual(fs.readdirSync(path.dirname(first.filePath)).sort(), [first.fileName, second.fileName].sort(), '不留临时名');
+  assert.match(fs.readFileSync(first.filePath, 'utf8'), /第一份/);
+  assert.match(fs.readFileSync(second.filePath, 'utf8'), /第二份/);
+  assert.equal(first.pendingCleanupFiles, undefined);
+  assert.equal(second.pendingCleanupFiles, undefined);
+});
