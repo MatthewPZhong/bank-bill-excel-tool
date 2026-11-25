@@ -221,6 +221,21 @@ describe('buildLinkedImportSummary — 行为（v3.0.7 需求2d）', () => {
     assert.strictEqual(r, '已存入链接表 1 个:\n网关.xlsx → 网关对账单表库（7 行）');
   });
 
+  test('v3.2.22：中台调拨订单派生提醒（如账户号转义歧义）随文件行显示；派生失败或无提醒时不显示', () => {
+    const warning = '调拨对账单有 2 行的账户号含 Excel 转义写法（_xHHHH_），请人工核对账户号与账户映射。';
+    const r = buildLinkedImportSummary([
+      { status: 'ok', outcome: 'linked', tableKey: 'mid-allocation', fileName: '调拨.xlsx', rowCount: 8,
+        fundTransferReconDerive: { created: true, total: 16, ambiguousMappedAccountCount: 2, warning } },
+      { status: 'ok', outcome: 'linked', tableKey: 'mid-allocation', fileName: '调拨2.xlsx', rowCount: 1,
+        fundTransferReconDerive: { created: false, error: 'x', warning: '不应显示' } },
+      { status: 'ok', outcome: 'linked', tableKey: 'gateway-bill', fileName: '网关.xlsx', rowCount: 3,
+        fundTransferReconDerive: { created: true, warning: '不应显示' } }
+    ]);
+    assert.strictEqual(r, `已存入链接表 3 个:\n调拨.xlsx → 中台调拨订单表库（8 行）\n调拨对账单提醒: ${warning}\n` +
+      '调拨2.xlsx → 中台调拨订单表库（1 行）\n网关.xlsx → 网关对账单表库（3 行）');
+    assert.ok(!r.includes('：'), '不含全角冒号（状态框按全角冒号强制换行）');
+  });
+
   test('未知 tableKey 回落到 tableKey 字面；rowCount 非数字回落 0', () => {
     const r = buildLinkedImportSummary([
       { status: 'ok', outcome: 'linked', tableKey: 'unknown-table', fileName: 'U.xlsx' }

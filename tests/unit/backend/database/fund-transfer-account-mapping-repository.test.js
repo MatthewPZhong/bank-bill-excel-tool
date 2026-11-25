@@ -198,3 +198,29 @@ test.describe('getMappingMap', () => {
     assert.equal(map.get('REAL'), 'REAL-CLR');
   });
 });
+
+test.describe('v3.2.22 按数据库文本编码无损读回（含 NUL）', () => {
+  for (const encoding of ['UTF-8', 'UTF-16le', 'UTF-16be']) {
+    test(`${encoding} 库：保存后列表与 Map 读回原值`, () => {
+      const encodedDb = new DatabaseSync(path.join(tmpDir, `${encoding}.sqlite`));
+      try {
+        encodedDb.exec(`PRAGMA encoding = '${encoding}'`);
+        ensureFundTransferAccountMappingSupport(encodedDb);
+        assert.equal(encodedDb.prepare('PRAGMA encoding').get().encoding, encoding);
+        repo.saveMappings(encodedDb, [
+          { midAccountId: 'ALIAS', clearingAccountId: 'CLR' },
+          { midAccountId: 'K\u0000EY', clearingAccountId: '账号\u0000二' }
+        ]);
+        assert.deepEqual(
+          repo.listMappings(encodedDb).map((r) => [r.midAccountId, r.clearingAccountId]),
+          [['ALIAS', 'CLR'], ['K\u0000EY', '账号\u0000二']]
+        );
+        const map = repo.getMappingMap(encodedDb);
+        assert.equal(map.get('ALIAS'), 'CLR');
+        assert.equal(map.get('K\u0000EY'), '账号\u0000二');
+      } finally {
+        encodedDb.close();
+      }
+    });
+  }
+});

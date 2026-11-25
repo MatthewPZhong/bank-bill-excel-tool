@@ -31,6 +31,12 @@
 
 'use strict';
 
+const {
+  AMBIGUOUS_ACCOUNT_REASON,
+  checkFundTransferReconRowsAgainstMapping,
+  createFundTransferReconAmbiguityWarning
+} = require('./fund-transfer-recon-builder');
+
 // ============================================================================
 // 1) rebuildAdmDerivation —— ADM 银行对账单链接表派生（bank-deposit / mid-allocation 共享）
 // ============================================================================
@@ -280,13 +286,15 @@ function rebuildFxBocDerivation(deps, ctx = {}) {
 //   ② mid-allocation 导入入口 main.js:11861），两链皆经此 → 单点注入即两链统一生效，结构上不存在「漏一条链」。
 //   （映射表为空＝空 Map＝全 passthrough＝字节级零变化；与 plan §2.4「派生处统一＝单一真值源」一致。）
 //
-// deps = { database, buildFundTransferReconRows }（均为 main.js 现有 require，原样透传）。
+// deps = { database, buildFundTransferReconRows, accountMappingMap? }（均为 main.js 现有 require，原样透传）。
+//   v3.2.22：run 入口先受保护地读一次映射，以 deps.accountMappingMap 注入，使派生与 R5s2 网关 / 检测器共用同一份 Map；
+//   未注入（mid-allocation 导入入口）时仍在本函数内实时取。
 //
 // 返回 { fundTransferReconDerive }，仿 admDerive 形态：
 //   成功 → { created:true, total }（total = 派生行数 = 付款成功 mid 行数×2）
 //   失败 → { created:false, error }
 function rebuildFundTransferReconDerivation(deps) {
-  const { database, buildFundTransferReconRows } = deps;
+  const { database, buildFundTransferReconRows, accountMappingMap: injectedAccountMappingMap } = deps;
   let fundTransferReconDerive;
   try {
     // mid-allocation 整行（中文真实表头）；builder 内部按 FT_RECON_FIELD_MAP.mid 常量取列（禁手敲全角括号）。
@@ -295,14 +303,16 @@ function rebuildFundTransferReconDerivation(deps) {
     //   传入 builder 在 big_account 派生处统一套用。本函数是 buildFundTransferReconRows 唯一生产调用处，run / 导入两链皆经此。
     //   防御：facade 缺失（旧 mock database 单测）→ 退空 Map（全 passthrough，不抛）；映射表空 → 空 Map → 字节级零变化。
     //   置于 try 内：facade 取数若抛错 → 与派生其它步骤同语义降级（created:false），绝不阻断 run / 导入。
-    const accountMappingMap =
-      typeof database.getFundTransferAccountMappingMap === 'function'
+    const accountMappingMap = injectedAccountMappingMap instanceof Map
+      ? injectedAccountMappingMap
+      : (typeof database.getFundTransferAccountMappingMap === 'function'
         ? (database.getFundTransferAccountMappingMap() || new Map())
-        : new Map();
+        : new Map());
     const {
       rows,
       sourceTotal = 0,
-      skippedStatusCount = 0
+      skippedStatusCount = 0,
+      ambiguousMappedAccountCount = 0
     } = buildFundTransferReconRows(midRows, { accountMappingMap });
     database.replaceFundTransferReconRows(rows);
     fundTransferReconDerive = {
@@ -317,6 +327,13 @@ function rebuildFundTransferReconDerivation(deps) {
       fundTransferReconDerive.warning =
         `中台调拨订单共 ${sourceTotal} 行，但没有「调拨状态=付款成功」的数据，未生成调拨对账单。请确认中台导出状态字段。`;
     }
+    // v3.2.22（🔴 资金红线·可观测）：账号无法确定真实值（转义写法 / 可能已被舍入、按数值对得上映射键的长数字）的派生行 big_account 留空，不参与匹配。
+    if (ambiguousMappedAccountCount > 0) {
+      fundTransferReconDerive.ambiguousMappedAccountCount = ambiguousMappedAccountCount;
+      fundTransferReconDerive.warning =
+        `调拨对账单有 ${ambiguousMappedAccountCount} 行${AMBIGUOUS_ACCOUNT_REASON}，无法确定真实账户号，` +
+        '这些行不参与调拨回填与 DBS-Charge 校验，请人工核对账户号与账户映射。';
+    }
   } catch (ftrErr) {
     // 派生失败不阻断 mid-allocation 导入本身（已落库成功）；记 created:false 供前端提示。
     fundTransferReconDerive = {
@@ -327,9 +344,146 @@ function rebuildFundTransferReconDerivation(deps) {
   return { fundTransferReconDerive };
 }
 
+// ============================================================================
+// 5) prepareRunFundTransferReconDerivation —— bank-statement:run 入口：账户映射只读一次 + 按消费方实时重派生调拨对账单
+// ============================================================================
+//
+// v3.2.22（🔴 资金红线）：抽自 main.js bank-statement:run（行为不变，便于故障注入测试）。
+//   1) 账户映射（链接表账户号 → 清结算系统银行账号）整轮只读一次，同一份 Map 供下方调拨对账单重派生（big_account）、
+//      R5s2 网关来源与多对多检测器网关侧补跑共用，避免两次读取口径不一。本轮没有映射消费方（调拨来源 / DBS-Charge /
+//      网关来源均关闭）时不读；facade 缺失（旧 mock）→ 空 Map；读库失败 → 抛 'fund-transfer-account-mapping-read-failed'，
+//      不按空表或旧派生表继续（防静默少回填 / 新旧口径混用）。映射保存会清 processingResult，导出前必重跑。
+//   2) v3.0.6 codex-pr74-fix P2：读调拨对账单前，从当前 mid-allocation 实时重派生刷新持久表（升级用户无需重导、永不读空 /
+//      陈旧表）。仅当下游真会读派生表（调拨来源 reconSourceMidEnabled 或 DBS-Charge dbsChargeScenarioEnabled）时重派生。
+//      Payment 开启时派生表是唯一数据源，失败必须阻断（'payment-offline-recon-derive-failed' 或原异常）；
+//      v3.2.22 网关来源开启时重派生只因 DBS-Charge 触发，失败若降级读旧持久表，R3.5 用旧映射的 big_account、R5s2 网关用本轮
+//      映射 → 同一结果混用两版映射，也阻断（'fund-transfer-recon-derive-failed-account-mapping' 或原异常）；
+//      其余情形保留历史降级：记 warning 日志后继续读现有持久表；v3.2.22 降级前先用每行原始收付款账号按本轮映射重算
+//      big_account（checkFundTransferReconRowsAgainstMapping），任一行与落库值不同（旧版本派生时没有转义歧义护栏，或映射
+//      改过但表没重建）即阻断（'fund-transfer-recon-derive-failed-account-mapping-stale'），不让 R5s2-recon / DBS-Charge
+//      按旧映射匹配。
+//   3) v3.2.22（🔴 资金红线·可观测）：本轮调拨对账单（新派生或降级沿用）有账户号转义歧义、big_account 留空的行时，返回
+//      结构化告警 runWarnings（调用方并入运行结果错误报告），让用户区分「没有匹配」与「因账号歧义未参与匹配」。
+//   抛错即整轮失败：调用方不得再读取派生表或运行对账。
+//
+// deps = { database, buildFundTransferReconRows, appendActivityLogEntry }
+// flags = { reconSourceMidEnabled, dbsChargeScenarioEnabled, r5s2GatewaySourceEnabled, paymentOfflineEnabled }
+// 返回 { accountMappingMap, runWarnings }
+function prepareRunFundTransferReconDerivation(deps, flags = {}) {
+  const { database, buildFundTransferReconRows, appendActivityLogEntry } = deps;
+  const reconSourceMidEnabled = Boolean(flags.reconSourceMidEnabled);
+  const dbsChargeScenarioEnabled = Boolean(flags.dbsChargeScenarioEnabled);
+  const r5s2GatewaySourceEnabled = Boolean(flags.r5s2GatewaySourceEnabled);
+  const paymentOfflineEnabled = Boolean(flags.paymentOfflineEnabled);
+  const log = typeof appendActivityLogEntry === 'function' ? appendActivityLogEntry : () => {};
+
+  const accountMappingConsumersEnabled = reconSourceMidEnabled || dbsChargeScenarioEnabled || r5s2GatewaySourceEnabled;
+  let accountMappingMap = new Map();
+  if (accountMappingConsumersEnabled && typeof database.getFundTransferAccountMappingMap === 'function') {
+    try {
+      accountMappingMap = database.getFundTransferAccountMappingMap() || new Map();
+    } catch (mappingError) {
+      const readError = new Error(
+        `读取账户映射失败：${mappingError && mappingError.message ? mappingError.message : String(mappingError)}`
+      );
+      readError.code = 'fund-transfer-account-mapping-read-failed';
+      throw readError;
+    }
+  }
+
+  const runWarnings = [];
+  const pushAmbiguousWarning = (count) => {
+    runWarnings.push(createFundTransferReconAmbiguityWarning(count));
+  };
+  let fallbackToPersisted = false;
+  if (reconSourceMidEnabled || dbsChargeScenarioEnabled) {
+    try {
+      const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({
+        database,
+        buildFundTransferReconRows,
+        accountMappingMap
+      });
+      if (fundTransferReconDerive && fundTransferReconDerive.ambiguousMappedAccountCount > 0) {
+        log({
+          level: 'warning',
+          source: 'main',
+          domain: 'fund-transfer-recon-derive',
+          message: '[调拨对账单] 部分账户号含 Excel 转义写法，无法确定真实账户号，已不参与匹配',
+          details: [String(fundTransferReconDerive.warning || '')]
+        });
+        if (fundTransferReconDerive.created !== false) pushAmbiguousWarning(fundTransferReconDerive.ambiguousMappedAccountCount);
+      }
+      if (fundTransferReconDerive && fundTransferReconDerive.created === false) {
+        if (paymentOfflineEnabled) {
+          const deriveError = new Error(
+            `Payment线下调拨运行前生成调拨对账单失败：${String(fundTransferReconDerive.error || '未知错误')}`
+          );
+          deriveError.code = 'payment-offline-recon-derive-failed';
+          throw deriveError;
+        }
+        if (r5s2GatewaySourceEnabled) {
+          const mixedMappingError = new Error(
+            `调拨对账单重新生成失败，本次同时运行网关来源调拨回填与 DBS-Charge资金校验，为避免两处使用不同版本的账户映射已停止运行：${String(fundTransferReconDerive.error || '未知错误')}`
+          );
+          mixedMappingError.code = 'fund-transfer-recon-derive-failed-account-mapping';
+          throw mixedMappingError;
+        }
+        log({
+          level: 'warning',
+          source: 'main',
+          domain: 'fund-transfer-recon-derive',
+          message: '[调拨对账单] run 入口实时重派生失败，降级继续（读现有持久表）',
+          details: [String(fundTransferReconDerive.error || '')]
+        });
+        fallbackToPersisted = true;
+      }
+    } catch (ftrRunErr) {
+      log({
+        level: 'warning',
+        source: 'main',
+        domain: 'fund-transfer-recon-derive',
+        message: paymentOfflineEnabled
+          ? '[调拨对账单] run 入口实时重派生异常，Payment运行已阻断'
+          : (r5s2GatewaySourceEnabled
+            ? '[调拨对账单] run 入口实时重派生异常，网关来源调拨回填与 DBS-Charge 须共用本轮账户映射，运行已阻断'
+            : '[调拨对账单] run 入口实时重派生异常，降级继续（读现有持久表）'),
+        details: [ftrRunErr && ftrRunErr.message ? ftrRunErr.message : String(ftrRunErr)]
+      });
+      if (paymentOfflineEnabled) throw ftrRunErr;
+      if (r5s2GatewaySourceEnabled) throw ftrRunErr;
+      fallbackToPersisted = true;
+    }
+  }
+  // 降级沿用现有持久表前核对其 big_account 与本轮映射一致（在 try 之外：核对失败须阻断，不能被上面的降级 catch 吞掉）。
+  //   facade 缺失（旧 mock）时不核对；读表抛错照常上抛（调用方本就要读这张表）。
+  if (fallbackToPersisted && typeof database.readFundTransferReconRows === 'function') {
+    const { staleCount, ambiguousMappedAccountCount } = checkFundTransferReconRowsAgainstMapping(
+      database.readFundTransferReconRows(),
+      accountMappingMap
+    );
+    if (staleCount > 0) {
+      log({
+        level: 'warning',
+        source: 'main',
+        domain: 'fund-transfer-recon-derive',
+        message: '[调拨对账单] 现有持久表的大账号与本轮账户映射不一致，不能降级沿用，运行已阻断',
+        details: [`不一致行数：${staleCount}`]
+      });
+      const staleError = new Error(
+        `调拨对账单重新生成失败，现有调拨对账单有 ${staleCount} 行的大账号与本轮账户映射不一致，为避免按旧映射回填已停止运行，请重试或重新导入中台调拨订单`
+      );
+      staleError.code = 'fund-transfer-recon-derive-failed-account-mapping-stale';
+      throw staleError;
+    }
+    if (ambiguousMappedAccountCount > 0) pushAmbiguousWarning(ambiguousMappedAccountCount);
+  }
+  return { accountMappingMap, runWarnings };
+}
+
 module.exports = {
   rebuildAdmDerivation,
   rebuildBankDepositBocDerivation,
   rebuildFxBocDerivation,
-  rebuildFundTransferReconDerivation
+  rebuildFundTransferReconDerivation,
+  prepareRunFundTransferReconDerivation
 };

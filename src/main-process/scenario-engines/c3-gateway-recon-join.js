@@ -13,9 +13,11 @@
 //   5. 写入前若 bankRow[assign.bankField] 原值非空 → warn（仍执行覆盖）
 
 const {
+  createEscapeSameValueWarning,
   ensureRowId,
   evaluateCondition,
   isEmptyValue,
+  isEscapeAmbiguousSameValue,
   makeModificationCollector,
   makeWarningCollector,
   normalizeCellValue,
@@ -219,6 +221,16 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     if (oldValue !== newValue) {
       bankRow[assign.bankField] = newValue;
       modCollector.record(rowId, assign.bankField, oldValue, newValue);
+    } else if (!isCustom && isEscapeAmbiguousSameValue(oldValue, newValue)) {
+      // v3.2.22（🔴 资金红线·可观测）：网关字段值含 `_xHHHH_` 写法、与银行当前值文字相同，无法确认是否同一个值
+      //   （自定义值是用户在配置里填的文字，不涉及转义写法）。
+      warningCollector.push(createEscapeSameValueWarning({
+        rowId,
+        engine: 'c3-gateway-recon-join',
+        column: assign.bankField,
+        value: newValue,
+        source: `C3 网关字段「${assign.gwField}」`
+      }));
     }
     // 注：去掉了原 oldValue===newValue 的 early-return —— 即使 assign 无需改值，
     //   Extra Fee 段仍要执行，且收尾的 lock + 消费 gw 必须照常发生。

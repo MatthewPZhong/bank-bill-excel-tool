@@ -1,21 +1,51 @@
-// v3.0.12 功能2（批A）：账户映射管理仓储 —— 全局对照表「中台调拨单账户号 → 清结算系统银行账号」。
+// v3.0.12 功能2（批A）：账户映射管理仓储 —— 全局对照表「链接表账户号（中台调拨单 / 网关对账单共用）→ 清结算系统银行账号」。
 //   表：fund_transfer_account_mappings（migrations.ensureFundTransferAccountMappingSupport 建表，UNIQUE(mid_account_id)）。
 //   归一化口径：账号统一走引擎 normalizeCellValue（trim + String 化），与调拨派生 / 对账引擎单一真相对齐
 //   —— 批B 派生 buildFundTransferReconRows 时用 getMappingMap 快查替换 big_account，键值口径必须与本仓写入一致。
 //   保存语义：事务内全删 + 重插（整表覆盖），与 settings-repository.saveAccountMappings 同范式。
 const { normalizeCellValue } = require('../../main-process/scenario-engines/engine-utils');
 
-// 按 row_index 升序返回 [{ midAccountId, clearingAccountId }]（UI 回填 / 列表展示用，保留用户编辑顺序）。
-function listMappings(db) {
+// v3.2.22（🔴 资金红线）：账号按 BLOB 读出再按数据库文本编码解码，无损还原。Electron 36 自带的 node:sqlite
+//   （Node 22.19）读 TEXT 时遇到 NUL 会截断（库里存 `A\0B`，读回 `A`），截断后的映射目标会把网关对账ID 回填到另一个
+//   银行账号。`CAST(TEXT AS BLOB)` 给出的是库内编码的字节（`PRAGMA encoding`：UTF-8 / UTF-16le / UTF-16be），
+//   按该编码解码才与存入一致；编码只在建库时确定，按连接缓存。未知编码时抛错（fail-closed，不按错误编码读出映射）。
+const TEXT_DECODERS_BY_SQLITE_ENCODING = new Map([
+  ['utf-8', new TextDecoder('utf-8')],
+  ['utf-16le', new TextDecoder('utf-16le')],
+  ['utf-16be', new TextDecoder('utf-16be')]
+]);
+const decoderByDb = new WeakMap();
+function accountTextDecoderFor(db) {
+  if (decoderByDb.has(db)) return decoderByDb.get(db);
+  const row = db.prepare('PRAGMA encoding').get();
+  const encoding = String(row && row.encoding).toLowerCase();
+  const decoder = TEXT_DECODERS_BY_SQLITE_ENCODING.get(encoding);
+  if (!decoder) throw new Error(`账户映射表所在数据库的文本编码无法识别：${row && row.encoding}`);
+  decoderByDb.set(db, decoder);
+  return decoder;
+}
+const ACCOUNT_COLUMNS_SQL = `
+        CAST(mid_account_id AS BLOB) AS midAccountId,
+        CAST(clearing_account_id AS BLOB) AS clearingAccountId`;
+function readAccountRows(db) {
+  const decoder = accountTextDecoderFor(db);
+  const decodeAccountText = (value) => (value instanceof Uint8Array ? decoder.decode(value) : value);
   return db
     .prepare(`
-      SELECT
-        mid_account_id AS midAccountId,
-        clearing_account_id AS clearingAccountId
+      SELECT${ACCOUNT_COLUMNS_SQL}
       FROM fund_transfer_account_mappings
       ORDER BY row_index ASC, id ASC
     `)
-    .all();
+    .all()
+    .map((row) => ({
+      midAccountId: decodeAccountText(row.midAccountId),
+      clearingAccountId: decodeAccountText(row.clearingAccountId)
+    }));
+}
+
+// 按 row_index 升序返回 [{ midAccountId, clearingAccountId }]（UI 回填 / 列表展示用，保留用户编辑顺序）。
+function listMappings(db) {
+  return readAccountRows(db);
 }
 
 // 整表覆盖保存：先归一化 + 校验（校验失败不动 DB），再事务内全删重插。
@@ -36,7 +66,7 @@ function saveMappings(db, mappings) {
       return; // 空行跳过
     }
     if (midAccountId === '' || clearingAccountId === '') {
-      throw new Error('账户映射存在未填写完整的行（中台调拨单账户号 / 清结算系统银行账号 必须同时填写）');
+      throw new Error('账户映射存在未填写完整的行（链接表账户号 / 清结算系统银行账号 必须同时填写）');
     }
     cleaned.push({ midAccountId, clearingAccountId });
   });
@@ -65,15 +95,7 @@ function saveMappings(db, mappings) {
 // 返回归一化 Map<midAccountId, clearingAccountId>（供批B派生快查；键值再归一化一遍幂等托底）。
 //   🔴 空键护栏：归一化后键为空的行不进 Map（与引擎 big_account 非空护栏同理，防空账号误命中）。
 function getMappingMap(db) {
-  const rows = db
-    .prepare(`
-      SELECT
-        mid_account_id AS midAccountId,
-        clearing_account_id AS clearingAccountId
-      FROM fund_transfer_account_mappings
-      ORDER BY row_index ASC, id ASC
-    `)
-    .all();
+  const rows = readAccountRows(db);
 
   const map = new Map();
   rows.forEach((row) => {

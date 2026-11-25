@@ -187,7 +187,7 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>中台调拨单账户号</th>
+                <th>链接表账户号</th>
                 <th>清结算系统银行账号</th>
                 <th>执行操作</th>
               </tr>
@@ -944,7 +944,7 @@
           <div class="linked-table-footer-spacer" style="flex: 1 1 auto;"></div>
           <button class="secondary-btn small" type="button" data-action="delete-range">删除</button>
           <button class="primary-btn small" type="button" data-action="import">导入</button>
-          <button class="secondary-btn small" type="button" data-action="exit">退出</button>
+          <button class="secondary-btn small" type="button" data-action="exit">返回</button>
         </div>
       `;
       const tbody = dialog.querySelector('tbody');

@@ -312,7 +312,8 @@ const {
   rebuildAdmDerivation,
   rebuildBankDepositBocDerivation,
   rebuildFxBocDerivation,
-  rebuildFundTransferReconDerivation
+  rebuildFundTransferReconDerivation,
+  prepareRunFundTransferReconDerivation
 } = require('./main-process/linked-derive-rebuild');
 // v3.0.6 需求1（T3）：调拨对账单派生纯函数（mid-allocation 导入触发 → in/out 两行落 linked_fund_transfer_recon）。
 const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
@@ -375,6 +376,10 @@ const {
 const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
 // v3.0.0 需求3：退款候选预检只读 helper（统计银行侧 FundType=Ach Return 候选行，与 countC3BankCandidates 对称）
 const { countRefundBankCandidates } = require('./main-process/scenario-engines/r5-refund-order-backfill');
+const {
+  buildR5ChannelMissingDiagnosticPrefilter,
+  createR5ChannelMissingDiagnosticSource
+} = require('./main-process/scenario-engines/r5-fund-transfer-backfill');
 // v3.0.5 OPEN-7（T5b-2）：跨期重复命中提醒纯函数（export 阶段判定 + 注入回填行「匹配命中详情」；引擎不读库，库读在 main 侧）
 //   独立 require 语句（与上行单标识符 require 分开，保留既有「main.js 接线 countRefundBankCandidates」断言正则不破）。
 const {
@@ -405,6 +410,7 @@ const {
   readGatewayRecon,
   writeBankStatementMainOutput,
   writeErrorReportOutputToPath,
+  cleanupInterruptedErrorReportTemporaryFiles,
   buildMainOutputFileName,
   buildTimestamp,
   buildTimestampMinuteUnderscore,
@@ -1924,6 +1930,11 @@ function ensureStorageRoot() {
   const storageRoot = getStorageRoot();
   fs.mkdirSync(storageRoot, { recursive: true });
   return storageRoot;
+}
+
+// v3.2.22：错误报告临时文件归属登记目录（应用私有，见 exceljs-writer cleanupInterruptedErrorReportTemporaryFiles）。
+function getErrorReportTemporaryMarkerDir() {
+  return path.join(app.getPath('userData'), 'error-report-temporary-files');
 }
 
 function getBackgroundAssetsDir() {
@@ -7013,26 +7024,11 @@ function registerAppHandlers() {
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
       const workingBankRows = structuredClone(bankStatementSession.rows);
-      // v3.0.11 需求3（批2）：银行行深拷已完成（原子 clone 后的步骤边界，非 clone 内部）→ 让出一次，再读大网关表。
-      await yieldRun('prepare-clone-bank');
-      // v2.1.16-beta.2 T1：网关行数据源从「资金对账不平 gatewayReconSession」切到链接表 linked_gateway_bill。
-      //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）。
-      // v3.0.7 需求6 修复（🔴 资金红线）：网关账单表（可达数百万行）改「按 Channel 过滤读」根治内存尖峰
-      //   （旧 readLinkedTableRows('gateway-bill') 全量读 + structuredClone 深拷，实测 65.7万行 ~1.2GB 尖峰先例）。
-      //   业务不变量（已确认）：对账永远同 Channel → 只读本批银行单出现过的 Channel 子集，绝不漏合法匹配
-      //   （任一银行行 B 的合法网关对手 G 必有 G.Channel===B.Channel∈bankChannels → 必在子集内）。
-      //   仓储一次 SQL 生成 exactRows + c3Rows：前者保持旧大小写敏感口径，后者仅供 C3 trim+NOCASE 预筛。
-      //   ⚠️ 删 structuredClone：gwRows 全程只读（R1/R2/R3.5/R5s2/R5s3 仅建索引/比对，modifications 只写 bankRows）
-      //     + 每次新解析 → 深拷无保护意义；银行行 structuredClone(bankStatementSession.rows)（上方 workingBankRows）
-      //     必须保留（常驻 session、引擎原地改它）。
-      const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
-      const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(bankChannels);
-      const workingGwRows = gatewayRowPools.exactRows;
-      const workingC3GwRows = gatewayRowPools.c3Rows;
-      // v3.0.11 需求3（批2）：网关账单大表读完（步骤边界）→ 让出一次，再读入金/调拨等链接表。
+      // v3.0.11 需求3（批2）：银行行深拷已完成（原子 clone 后的步骤边界，非 clone 内部）→ 让出一次，再读入金/退款等链接表。
       //   🔴 原子性前提（codex-P2 → 补强）：linked-table:import / delete-by-date-range 已纳入 bankStatementOperationLock，
-      //   run 全程持锁 → 此让出窗口内并发链接表改动被锁挡住（返回「正在处理中…」）→ gw 与后续 deposit/mid/recon 仍是一致快照。
-      await yieldRun('prepare-gw');
+      //   run 全程持锁 → 各让出窗口内并发链接表改动被锁挡住（返回「正在处理中…」）→ deposit/mid/recon/gw 是一致快照。
+      // v3.2.22：网关大表改在读账户映射之后读（见下方 prepare-gw），以便同一次扫描收集 R5s2 缺渠道诊断候选。
+      await yieldRun('prepare-clone-bank');
       // v2.1.16-beta.4 R5 场景4（中台退款订单回填）安全接线：
       //   入金表（链接表 tableKey='bank-deposit'，beta.3② 合法 tableKey）—— JPM-US 子链路用；无数据返回 []。
       //   refund order —— v2.1.16-beta.6 需求C 退款导入已开通：refundOrderSession 非 null 时注入真实退款行；未导入退款表时注入 []（引擎 no-op）。
@@ -7063,8 +7059,8 @@ function registerAppHandlers() {
         && r5s2Scenario.config.paymentOfflineBackfill
         && r5s2Scenario.config.paymentOfflineBackfill.enabled === true
       );
-      // v3.0.11 需求3（批2）：入金/退款/调拨链接表深拷群已完成（步骤边界）→ 让出一次，再做调拨对账单重派生+读取等剩余重活。
-      //   🔴 原子性前提同上（见 prepare-gw 处）：linked-table 写入已纳入 op-lock，run 持锁期间并发改表被挡 → 快照一致。
+      // v3.0.11 需求3（批2）：入金/退款链接表深拷群已完成（步骤边界）→ 让出一次，再做调拨对账单重派生、读网关大表等剩余重活。
+      //   🔴 原子性前提同上（见 prepare-clone-bank 处）：linked-table 写入已纳入 op-lock，run 持锁期间并发改表被挡 → 快照一致。
       await yieldRun('prepare-linked');
       // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
       //   默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
@@ -7076,56 +7072,53 @@ function registerAppHandlers() {
       );
       // v3.1.7：Payment 开启时强制使用派生调拨对账单。保留原配置值不落库改写，编排器据此输出兼容提示。
       const reconSourceMidEnabled = paymentOfflineEnabled || configuredReconSourceMidEnabled;
+      // v3.2.22（🔴 资金红线）：R5s2 走网关来源（取消勾选且未被 Payment 强制改走派生表）时，网关回填按本轮账户映射匹配。
+      const r5s2GatewaySourceEnabled = !!r5s2Scenario && !reconSourceMidEnabled;
       // v3.0.6 codex-pr74-fix P2（细化，🔴 资金红线）：需求3 DBS-Charge 资金校验（R3.5）是否启用 ——
       //   dispatchScenarios 已是 enabled 过滤后集合（见上方注释「无须再判 enabled」），存在 funcCategory='dbs-charge-fund-check'
       //   场景即下游会消费调拨对账单派生表（DBS-Charge seed 默认 enabled）。供重派生门控 + workingDispatchReconRows 门控共用。
       const dbsChargeScenarioEnabled = dispatchScenarios.some(
         (s) => s && s.config && s.config.funcCategory === 'dbs-charge-fund-check'
       );
-      // v3.0.6 codex-pr74-fix P2（🔴 资金红线）：读调拨对账单（readFundTransferReconRows）前，从当前 mid-allocation 实时重派生刷新持久表。
-      //   背景：建表迁移 ensureFundTransferReconSupport 仅 CREATE TABLE linked_fund_transfer_recon，不从既有 mid-allocation 回填；
-      //   且派生 rebuildFundTransferReconDerivation 原仅在「导入 mid-allocation」时触发。两者叠加 → v3.0.5 升级用户
-      //   （已有 mid-allocation 但未重导）隐藏表恒空 → R5s2 勾选路读空表 → 静默不回填（真实回归）。
-      //   故在此 run 入口、读取之前实时重派生覆盖持久表，再往下读：升级用户无需重导、永不读空/陈旧表、链接表管理显示同步。
-      //   范式照搬导入侧（src/main.js mid-allocation 落库后调用 + 函数内部 try/catch 隔离记 created:false）；
-      //   此处再加一层 try/catch + warn 日志。Payment 关闭时保留历史降级；Payment 开启时派生表是唯一数据源，
-      //   失败必须阻断，禁止读取陈旧派生表继续写 ReconciliationId。
-      //   ⚠️ 消费方门控（仿上方 paymentOfflineEnabled「防整表无谓载入」范式）：仅当下游真会读派生表
-      //   （需求2 勾选 reconSourceMidEnabled，或 需求3 dbsChargeScenarioEnabled）时才重派生；两者皆否 = 无消费方 → 跳过重派生，
-      //   不为大 mid-allocation 表白付全量读 + 2× 写。两门控默认均 true（R5s2 默认勾选 + DBS-Charge seed 默认 enabled），
-      //   故默认仍重派生 —— 升级回归修复不被削弱。
-      if (reconSourceMidEnabled || dbsChargeScenarioEnabled) {
-        try {
-          const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
-          if (fundTransferReconDerive && fundTransferReconDerive.created === false) {
-            if (paymentOfflineEnabled) {
-              const deriveError = new Error(
-                `Payment线下调拨运行前生成调拨对账单失败：${String(fundTransferReconDerive.error || '未知错误')}`
-              );
-              deriveError.code = 'payment-offline-recon-derive-failed';
-              throw deriveError;
-            }
-            appendActivityLogEntry({
-              level: 'warning',
-              source: 'main',
-              domain: 'fund-transfer-recon-derive',
-              message: '[调拨对账单] run 入口实时重派生失败，降级继续（读现有持久表）',
-              details: [String(fundTransferReconDerive.error || '')]
-            });
-          }
-        } catch (ftrRunErr) {
-          appendActivityLogEntry({
-            level: 'warning',
-            source: 'main',
-            domain: 'fund-transfer-recon-derive',
-            message: paymentOfflineEnabled
-              ? '[调拨对账单] run 入口实时重派生异常，Payment运行已阻断'
-              : '[调拨对账单] run 入口实时重派生异常，降级继续（读现有持久表）',
-            details: [ftrRunErr && ftrRunErr.message ? ftrRunErr.message : String(ftrRunErr)]
-          });
-          if (paymentOfflineEnabled) throw ftrRunErr;
-        }
-      }
+      // v3.2.22（🔴 资金红线）：账户映射整轮只读一次（派生、R5s2 网关来源与多对多检测器共用），并按消费方从当前
+      //   mid-allocation 实时重派生调拨对账单（v3.0.6 codex-pr74-fix P2 升级回归修复）。读映射失败、Payment 或网关来源开启时
+      //   重派生失败都会抛错，整轮失败，不读取下方派生表、不运行对账；其余重派生失败按历史降级读现有持久表。
+      //   详见 linked-derive-rebuild.js prepareRunFundTransferReconDerivation。
+      const {
+        accountMappingMap: fundTransferAccountMappingMap,
+        runWarnings: fundTransferDerivationWarnings
+      } = prepareRunFundTransferReconDerivation(
+        { database, buildFundTransferReconRows, appendActivityLogEntry },
+        { reconSourceMidEnabled, dbsChargeScenarioEnabled, r5s2GatewaySourceEnabled, paymentOfflineEnabled }
+      );
+      // v3.2.22：调拨对账单重派生完成（步骤边界）→ 让出一次，再读网关大表。
+      await yieldRun('prepare-linked');
+      // v2.1.16-beta.2 T1：网关行数据源从「资金对账不平 gatewayReconSession」切到链接表 linked_gateway_bill。
+      //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）。
+      // v3.0.7 需求6 修复（🔴 资金红线）：网关账单表（可达数百万行）改「按 Channel 过滤读」根治内存尖峰
+      //   （旧 readLinkedTableRows('gateway-bill') 全量读 + structuredClone 深拷，实测 65.7万行 ~1.2GB 尖峰先例）。
+      //   业务不变量（已确认）：对账永远同 Channel → 只读本批银行单出现过的 Channel 子集，绝不漏合法匹配
+      //   （任一银行行 B 的合法网关对手 G 必有 G.Channel===B.Channel∈bankChannels → 必在子集内）。
+      //   仓储一次 SQL 生成 exactRows + c3Rows：前者保持旧大小写敏感口径，后者仅供 C3 trim+NOCASE 预筛。
+      //   ⚠️ 删 structuredClone：gwRows 全程只读（R1/R2/R3.5/R5s2/R5s3 仅建索引/比对，modifications 只写 bankRows）
+      //     + 每次新解析 → 深拷无保护意义；银行行 structuredClone(bankStatementSession.rows)（上方 workingBankRows）
+      //     必须保留（常驻 session、引擎原地改它）。
+      const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
+      // v3.2.22（🔴 资金红线·可观测）：R5s2 走网关来源且账户映射非空时，读池的同一次扫描另暂存池外（exactRows 补集）
+      //   调拨方向、对账ID 非空、原账号属映射键或映射值的网关行：只存 id、诊断键摘要与渠道为空位（类型化数组），不保留
+      //   网关记录，R5 运行时不再二次全扫网关表。这些行不并入 workingGwRows / workingC3GwRows，任何轮次都不拿它匹配
+      //   （见下方 r5ChannelMissingDiagnosticSource）。
+      const r5ChannelMissingDiagnosticPrefilter = r5s2GatewaySourceEnabled
+        ? buildR5ChannelMissingDiagnosticPrefilter(fundTransferAccountMappingMap)
+        : null;
+      const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(
+        bankChannels,
+        r5ChannelMissingDiagnosticPrefilter ? { outOfPoolDiagnostic: r5ChannelMissingDiagnosticPrefilter } : undefined
+      );
+      const workingGwRows = gatewayRowPools.exactRows;
+      const workingC3GwRows = gatewayRowPools.c3Rows;
+      // v3.0.11 需求3（批2）：网关账单大表读完（步骤边界）→ 让出一次，再读调拨对账单派生表（原子性前提见 prepare-clone-bank 处）。
+      await yieldRun('prepare-gw');
       const workingReconRows = reconSourceMidEnabled
         ? structuredClone(database.readFundTransferReconRows() || [])
         : [];
@@ -7145,6 +7138,18 @@ function registerAppHandlers() {
       const workingFundTransferAuditReconRows = dbsChargeScenarioEnabled
         ? workingDispatchReconRows
         : workingReconRows;
+      // v3.2.22（🔴 资金红线·可观测）：R5s2 走网关来源时，由 R5s2 引擎在方向配置通过校验后，以当时的银行行算出键摘要，
+      //   只按 id 回读读池时暂存的、摘要对得上的池外候选，再按完整键与按方向收集的映射目标账号精确裁决，只做账户映射
+      //   缺渠道告警。run 全程持 op-lock（原子性前提见 prepare-clone-bank 处），回读与读池是同一份网关表。没有可对上的
+      //   调拨银行行时不回读；只保留方向、账号、币种、金额能对上银行行且无法确认同渠道的记录。
+      const r5ChannelMissingDiagnosticSource = r5ChannelMissingDiagnosticPrefilter
+        ? createR5ChannelMissingDiagnosticSource({
+          accountMappingMap: fundTransferAccountMappingMap,
+          bankChannels,
+          prefilter: r5ChannelMissingDiagnosticPrefilter,
+          readRowsByIds: (ids, onRow) => database.readGatewayBillRowsByIds(ids, onRow)
+        })
+        : null;
       // v3.0.8 需求3：进入 R1-R5 编排前让出一次（大表读已完成，下面是 CPU 密集的多轮对账）。
       await yieldRun('reconcile');
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
@@ -7166,9 +7171,14 @@ function registerAppHandlers() {
         // v3.1.1 self-review：调拨多对多只读审计入参独立于 R5 写入 gating。
         // R5 关闭但 R3.5 开启时仍注入 R3.5 已使用的调拨副本；编排器不得把它交给 R5。
         fundTransferAuditContext: { reconRows: workingFundTransferAuditReconRows },
+        // v3.2.22：R5s2 网关来源与 M2M 网关侧共用账户映射（调拨来源已在派生时映射）。
+        fundTransferAccountMappingMap,
+        // v3.2.22：池外空渠道网关调拨行的读取器，只供 R5s2 网关来源缺渠道告警。
+        fundTransferChannelMissingDiagnosticSource: r5ChannelMissingDiagnosticSource,
         // v3.1.1：R3.5、R5s2 两来源和 M2M 审计共享同一不可变日期策略；配置告警排在引擎告警之前。
         fundTransferDatePolicy,
-        initialWarnings: fundTransferPolicyResolution.warnings,
+        // v3.2.22：调拨对账单账户号转义歧义（大账号留空、不参与匹配）的结构化告警排在配置告警之后。
+        initialWarnings: [...fundTransferPolicyResolution.warnings, ...(fundTransferDerivationWarnings || [])],
         // v3.0.8 需求3：轮次边界进度上报（编排器在 R1→R2→R3.5→R4→R5 各轮完成后调；只读不写 processingResult）。
         onProgress
       });
@@ -7415,7 +7425,9 @@ function registerAppHandlers() {
           bankRows: [
             ...processingResult.modifiedRows,
             ...(Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : [])
-          ]
+          ],
+          // v3.2.22：登记临时文件归属，进程中断后由下次启动按登记回收。
+          writerOptions: { temporaryFileMarkerDir: getErrorReportTemporaryMarkerDir() }
         });
       }
 
@@ -8704,7 +8716,7 @@ function registerAccountMappingHandlers() {
 
 // v3.0.12 功能2（批A）：账户映射管理保存前校验（仿 validateAccountMappings，无币种 / 无模板维度）。
 //   - 两列皆空 → 跳过（空行不保存）；仅一列为空 → 报错。
-//   - 中台调拨单账户号去重（DB UNIQUE(mid_account_id) 兜底，这里先给友好提示）。
+//   - 链接表账户号（中台调拨单 / 网关对账单共用）去重（DB UNIQUE(mid_account_id) 兜底，这里先给友好提示）。
 //   - 长度护栏（≤128，防异常脏数据；不强加字符集正则，账号格式跨系统不一）。
 //   归一化（trim + String）由仓储 saveMappings 统一执行；本函数仅做完整性 / 唯一性 / 长度校验。
 function validateFundTransferAccountMappings(mappings) {
@@ -8742,7 +8754,7 @@ function validateFundTransferAccountMappings(mappings) {
     if (midAccountSeen.has(midAccountId)) {
       return {
         status: 'error',
-        message: '中台调拨单账户号不可重复，请重新确认'
+        message: '链接表账户号不可重复，请重新确认'
       };
     }
 
@@ -8788,7 +8800,8 @@ function registerFundTransferAccountMappingHandlers() {
 
       database.saveFundTransferAccountMappings(validationResult.mappings);
       // 🔴 资金红线：账户映射改写调拨对账派生的 big_account（批B buildFundTransferReconRows 用 getMappingMap 替换），
-      //   影响「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 → 失效已缓存对账结果，强制用户重跑后才能导出。
+      //   影响「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5；v3.2.22 起 R5s2 网关来源与多对多检测器网关侧也按此映射
+      //   → 失效已缓存对账结果，强制用户重跑后才能导出。
       //   （同 linked-table 变更范式：bank-statement:export 守卫只校验 scenariosSnapshot、不认账户映射变更，须在此清缓存兜底。）
       processingResult = null;
       clearLastErrorReport();
@@ -24364,6 +24377,30 @@ function runStartupPostSetup() {
           domain: 'backup-retention',
           message: '旧备份保留策略执行失败',
           details: [String(err && err.stack ? err.stack : err)]
+        });
+      }
+    }));
+
+    // v3.2.22：按归属登记回收上次被中断的银行对账导出遗留的错误报告临时文件（只处理本 userData 登记过、
+    //   非本进程的临时文件，见 cleanupInterruptedErrorReportTemporaryFiles）。后台异步，失败只记日志。
+    setImmediate(observeBackgroundMemoryActivity(async () => {
+      const { removed, failures } = await cleanupInterruptedErrorReportTemporaryFiles(getErrorReportTemporaryMarkerDir());
+      if (removed.length > 0) {
+        appendActivityLogEntry({
+          level: 'info',
+          source: 'main',
+          domain: 'error-report-cleanup',
+          message: `已清理中断导出遗留的错误报告临时文件 ${removed.length} 个`,
+          details: removed.map((filePath) => path.basename(filePath))
+        });
+      }
+      if (failures.length > 0) {
+        appendActivityLogEntry({
+          level: 'warning',
+          source: 'main',
+          domain: 'error-report-cleanup',
+          message: `中断导出遗留的错误报告临时文件有 ${failures.length} 项未能清理，可在错误报告目录手动删除`,
+          details: failures.map((failure) => `${path.basename(failure.path)}（${failure.code || '未知错误'}）`)
         });
       }
     }));

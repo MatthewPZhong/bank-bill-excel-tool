@@ -43,6 +43,7 @@ const {
 const { runDbsChargeFundCheck } = require('./scenario-engines/dbs-charge-fund-check');
 // v3.0.12 功能1：多对多异常说明检测器（🔴 资金红线·纯只读 —— 不改回填/字段/行数守恒）
 const { detectFundTransferManyToMany } = require('./scenario-engines/many-to-many-detector');
+const { scenarioWritesDecodedValues } = require('./scenario-engines');
 const {
   buildRowMatchedChannelMap,
   filterRowsByApplicableChannels,
@@ -229,7 +230,7 @@ function hasActualFieldChanges(modColsByRowId, row) {
   return !!(columns && columns.size > 0);
 }
 
-function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
+function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId, decodedColsByRowId = new Map()) {
   // v3.0.14：导出判定只认至少一个字段实际变化；空 Set、锁定 no-op、仅异常说明均不算命中。
   const hasChangedColumns = (r) => hasActualFieldChanges(modColsByRowId, r);
 
@@ -248,6 +249,9 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
       }
       // 跨轮合并后的标黄列：必须是 Set（exceljs-writer 标黄依赖 .size / .has；与 dispatcher 产出一致）。
       out._modifiedColumns = new Set(modColsByRowId.get(r._rowId) || []);
+      // v3.2.22：改写列里当前值为已解码文本的列（见 decodedColsByRowId）；为空时不加，导出按「改写过 = 链接表原文」处理。
+      const decodedColumns = decodedColsByRowId.get(r._rowId);
+      if (decodedColumns && decodedColumns.size > 0) out._decodedModifiedColumns = new Set(decodedColumns);
       return out;
     });
 
@@ -275,6 +279,14 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  *   （{ dispatchReconRows }）；数据源同为调拨对账单派生表（linked_fund_transfer_recon），但语义独立于需求2 —
  *   DBS-Charge 总需调拨对账单，**不受**需求2 reconSourceMid 开关控制，故 bank-statement:run 单独 structuredClone
  *   注入。gating = dbsChargeFundCheck 桶非空（场景 enabled）。缺省 / 空 → R3.5 no-op（不抛、不改行）。
+ * @param {Map<string,string>} [params.fundTransferAccountMappingMap] v3.2.22 账户映射（链接表账户号 → 清结算系统银行账号）。
+ *   只传给 R5s2 网关来源，以及 R5s2 走网关来源时多对多检测器的网关侧补跑（调拨来源在派生 big_account 时已映射）；
+ *   缺省 / 非 Map = 不映射。
+ * @param {(context: { bankRows: Array<Object>, targetAccountsByTradeType: Map<string, Set<string>> }) => Array<Object>}
+ *   [params.fundTransferChannelMissingDiagnosticSource] v3.2.22 读取按渠道读池时被滤掉的网关调拨行（调用方用
+ *   r5-fund-transfer-backfill.readR5MappedChannelDiagnosticRows 包装）。只原样交给 R5s2 网关来源引擎，由引擎在方向配置
+ *   通过校验后以当时的银行行（前序轮次可能改写银行行字段）与按方向收集的映射目标账号调用一次；结果只做缺渠道告警，
+ *   不进 gwRows / c3GwRows，任何轮次都不拿它匹配或改写；缺省 = 不读。
  * @returns {{
  *   modifiedRows: Array<Object>,
  *   unmatchedRows: Array<Object>,
@@ -301,6 +313,8 @@ async function runReconciliation({
   fundTransferReconContext,
   fundTransferAuditContext,
   dispatchReconContext,
+  fundTransferAccountMappingMap,
+  fundTransferChannelMissingDiagnosticSource,
   fundTransferDatePolicy,
   initialWarnings,
   onProgress
@@ -309,6 +323,10 @@ async function runReconciliation({
     throw new Error('runReconciliation: bankRows 必须是数组');
   }
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
+  // v3.2.22：账户映射缺省 / 非 Map → 空 Map（不映射，与改动前口径一致）。
+  const safeAccountMappingMap = fundTransferAccountMappingMap instanceof Map
+    ? fundTransferAccountMappingMap
+    : new Map();
   // v3.0.23：仅 R2/C3 使用 trim+NOCASE 的候选预筛池；旧调用缺省时保持原 gwRows 行为。
   const safeC3GwRows = Array.isArray(c3GwRows) ? c3GwRows : safeGwRows;
   // v3.0.8 需求3：轮次边界让出 + 进度上报。onProgress 异常吞掉（绝不影响对账结果）；
@@ -356,12 +374,29 @@ async function runReconciliation({
 
   // ===== 跨轮累积器 =====
   const modColsByRowId = new Map(); // rowId -> Set<column>（标黄来源，跨 5 轮合并）
-  const mergeMods = (mods) => {
+  // v3.2.22（🔴 资金红线·导出保真）：rowId -> 当前值为已解码文本的改写列（场景写入的值来自银行行字段或用户配置，见
+  //   scenario-engines.scenarioWritesDecodedValues），按同一行同一列最后一次改写判断。改写过、不在其中的列，当前值来自
+  //   链接表单元格原文（可能保留 `_xHHHH_` 转义原文）：导出按原文编码，R5s2 映射回填据此判断银行账号能否确认。
+  const decodedColsByRowId = new Map();
+  const mergeMods = (mods, isDecoded = null) => {
     for (const m of mods || []) {
       if (!m || m.rowId === undefined || m.rowId === null) continue;
       if (!modColsByRowId.has(m.rowId)) modColsByRowId.set(m.rowId, new Set());
       modColsByRowId.get(m.rowId).add(m.column);
+      if (typeof isDecoded === 'function' && isDecoded(m)) {
+        if (!decodedColsByRowId.has(m.rowId)) decodedColsByRowId.set(m.rowId, new Set());
+        decodedColsByRowId.get(m.rowId).add(m.column);
+      } else if (decodedColsByRowId.has(m.rowId)) {
+        decodedColsByRowId.get(m.rowId).delete(m.column);
+      }
     }
+  };
+  const isRawRewrittenBankValue = (row, column) => {
+    const rowId = row && row._rowId;
+    const columns = modColsByRowId.get(rowId);
+    if (!(columns && columns.has(column))) return false;
+    const decoded = decodedColsByRowId.get(rowId);
+    return !(decoded && decoded.has(column));
   };
   const warningIdentity = (warning) => [
     warning && warning.scenarioId,
@@ -381,6 +416,10 @@ async function runReconciliation({
   // 汇总 errorReport；配置 resolver 告警必须排在各引擎告警之前。只去除配置告警自身及其与
   // 引擎结果的精确重复，不改变既有引擎之间的 warning 数量/顺序（R4 golden 契约）。
   const allWarnings = [...normalizedInitialWarnings];
+  // 逐条追加（不用展开运算符）：各轮告警可能随行数线性增长（如逐行的转义同值告警），大批量时展开会超出函数参数上限。
+  const appendWarnings = (warnings) => {
+    for (const warning of warnings || []) allWarnings.push(warning);
+  };
   const allMods = [];     // 汇总 modifications（带 _round 标记便于审计）
 
   // v3.2.15：自带写死场景的「适用银行渠道」对独立分桶的 R4、退款回填同样生效，与 R2 dispatcher 同口径
@@ -397,7 +436,7 @@ async function runReconciliation({
 
   // ===== R1：reconid 1v1 匹配（不改字段，仅得 matchedGwRows）=====
   const r1 = runRound1ReconIdMatch(bankRows, safeGwRows);
-  allWarnings.push(...(r1.warnings || [])); // r1.modifications 恒空，不并入 allMods
+  appendWarnings(r1.warnings); // r1.modifications 恒空，不并入 allMods
   await yieldTick('R1'); // 轮次边界让出（R1 已完成，进 R2 前）
 
   // ===== R2：现有 dispatcher（原地改 bankRows）=====
@@ -406,9 +445,14 @@ async function runReconciliation({
   if (r2Bucket.length) {
     r2 = runAllScenarios(bankRows, safeC3GwRows, r2Bucket, deps);
   }
-  mergeMods(r2.modifications);
-  allWarnings.push(...(r2.errorReport || []));
-  for (const m of r2.modifications || []) allMods.push({ ...m, _round: 'R2' });
+  const decodedR2ScenarioIds = new Set(r2Bucket.filter(scenarioWritesDecodedValues).map((scenario) => scenario.id));
+  const isDecodedR2Modification = (m) => decodedR2ScenarioIds.has(m.scenarioId);
+  mergeMods(r2.modifications, isDecodedR2Modification);
+  appendWarnings(r2.errorReport);
+  // v3.2.22：值为已解码文本的改写标 _valueDecoded（命中明细、Payment 核对页按来源编码）。
+  for (const m of r2.modifications || []) {
+    allMods.push(isDecodedR2Modification(m) ? { ...m, _round: 'R2', _valueDecoded: true } : { ...m, _round: 'R2' });
+  }
   // 留 R2 命中元数据：rowId -> dispatcher 浅拷贝行（含 _hitScenarioId / _hitScenarioName / _modifiedColumns 等）
   const r2HitByRowId = new Map((r2.modifiedRows || []).map((r) => [r._rowId, r]));
   await yieldTick('R2'); // 轮次边界让出（R2 dispatcher 已完成，进 R3.5 前）
@@ -430,7 +474,7 @@ async function runReconciliation({
       fundTransferDatePolicy: resolvedFundTransferDatePolicy
     });
     mergeMods(r35.modifications);
-    allWarnings.push(...(r35.warnings || []));
+    appendWarnings(r35.warnings);
     for (const m of r35.modifications || []) allMods.push({ ...m, _round: 'R3.5' });
     dbsChargeChangedCount = (r35.modifications || []).length;
   }
@@ -453,7 +497,7 @@ async function runReconciliation({
     // v3.0.23：R4 自己按固定 TradeType + 账号/币种/金额/方向筛选，不再受 R1 仅 ReconID 预配对结果限制。
     const r4 = runRound4FundNatureCheck(safeGwRows, bankRows, r4Bucket, { applicableBankRowsBySubCategory });
     mergeMods(r4.modifications);
-    allWarnings.push(...(r4.warnings || []));
+    appendWarnings(r4.warnings);
     for (const m of r4.modifications || []) allMods.push({ ...m, _round: 'R4' });
     r4ChangedCount = (r4.modifications || []).length;
     r4MatchedPairs = Array.isArray(r4.matchedPairs) ? r4.matchedPairs : [];
@@ -491,8 +535,17 @@ async function runReconciliation({
         region: paymentOptions.region
       }
     );
+    // v3.2.22（🔴 资金红线·导出保真）：在并入 Payment 自己的改写前，为每个配对记下其银行行此前已被改写的列（列名数组，
+    //   可序列化）。核对页「银行行-原始」与原对账ID 是 Payment 写入前的快照：这些列的值来自前序场景（按原文写出），
+    //   其余列是银行账单原值（按已解码文本写出），见 exceljs-writer.js paymentOfflineCellEncoders。
+    for (const pair of paymentResult.matchedPairs || []) {
+      const rowId = pair && pair.bankRow ? pair.bankRow._rowId : undefined;
+      pair.modifiedColumnsBeforePayment = Array.from(modColsByRowId.get(rowId) || []);
+      // 其中当前值为已解码文本的列（C1 / C2 / C3 自定义值等写入），同样按银行原值口径编码。
+      pair.decodedColumnsBeforePayment = Array.from(decodedColsByRowId.get(rowId) || []);
+    }
     mergeMods(paymentResult.modifications);
-    allWarnings.push(...(paymentResult.warnings || []));
+    appendWarnings(paymentResult.warnings);
     for (const modification of paymentResult.modifications || []) {
       allMods.push({ ...modification, _round: 'R5s2b' });
     }
@@ -507,6 +560,8 @@ async function runReconciliation({
 
   // ===== R5 场景2：Payment 之后运行普通调拨回填 =====
   let r5s2BackfilledCount = 0;
+  // v3.2.22：仅 R5s2 实际走网关来源且方向配置有效时，多对多检测器才按映射后账号补跑网关侧（其余轮次按原 merchantid，不受映射影响）。
+  let detectorGatewayAccountMappingMap = null;
   if (r5s2Bucket.length) {
     const useMidReconTable = paymentOfflineEnabled || r5s2Options.reconSourceMid !== false;
     if (useMidReconTable) {
@@ -516,7 +571,7 @@ async function runReconciliation({
         excludeBankRowIds: paymentConsumedBankRowIds
       });
       mergeMods(r5ReconResult.modifications);
-      allWarnings.push(...(r5ReconResult.warnings || []));
+      appendWarnings(r5ReconResult.warnings);
       for (const modification of r5ReconResult.modifications || []) {
         allMods.push({ ...modification, _round: 'R5s2-recon' });
       }
@@ -524,10 +579,20 @@ async function runReconciliation({
     } else {
       const r5GatewayResult = runRound5FundTransferBackfill(safeGwRows, bankRows, {
         directions: r5s2Options.directions,
-        fundTransferDatePolicy: resolvedFundTransferDatePolicy
+        fundTransferDatePolicy: resolvedFundTransferDatePolicy,
+        // v3.2.22（🔴 资金红线）：网关来源与调拨来源共用账户映射，网关 merchantid 先映射再匹配。
+        accountMappingMap: safeAccountMappingMap,
+        // 只读诊断：池外网关调拨行由引擎在方向配置通过校验后按 R5 当时的银行行惰性读取，只产生缺渠道告警，不参与匹配。
+        channelMissingDiagnosticSource: typeof fundTransferChannelMissingDiagnosticSource === 'function'
+          ? fundTransferChannelMissingDiagnosticSource
+          : undefined,
+        // 前序场景按链接表原文改写的银行账号含 `_xHHHH_` 写法时无法确认真实账号，不按映射目标匹配（见引擎）。
+        isRawRewrittenBankValue
       });
+      // 方向配置非法时引擎整轮跳过（未建池），检测器不按映射补跑；原账号审计照常。
+      if (r5GatewayResult.directionsValid === true) detectorGatewayAccountMappingMap = safeAccountMappingMap;
       mergeMods(r5GatewayResult.modifications);
-      allWarnings.push(...(r5GatewayResult.warnings || []));
+      appendWarnings(r5GatewayResult.warnings);
       for (const modification of r5GatewayResult.modifications || []) {
         allMods.push({ ...modification, _round: 'R5s2' });
       }
@@ -545,7 +610,7 @@ async function runReconciliation({
       excludeFundType: opt.excludeFundType
     });
     mergeMods(r5b.modifications); // 恒空，保留对称性
-    allWarnings.push(...(r5b.warnings || []));
+    appendWarnings(r5b.warnings);
     for (const m of r5b.modifications || []) allMods.push({ ...m, _round: 'R5s3' });
     platformCleanupRows = r5b.cleanupRows || [];
   }
@@ -582,7 +647,7 @@ async function runReconciliation({
         bankPaymentSerialFuzzyMatchEnabled: refundScenarioConfig.bankPaymentSerialFuzzyMatchEnabled === true
       }
     );
-    allWarnings.push(...(r5d.warnings || [])); // 不 mergeMods（场景4 不改 bankRows，modifications 恒空）
+    appendWarnings(r5d.warnings); // 不 mergeMods（场景4 不改 bankRows，modifications 恒空）
     refundBackfillRows = r5d.backfillRows || [];
     refundUnmatchedRows = r5d.unmatchedRows || [];
     refundHitDepositBizIds = r5d.hitDepositBizIds || []; // OPEN-7（T5b-1）透传
@@ -612,7 +677,10 @@ async function runReconciliation({
   const manyToManyReviewRows = detectFundTransferManyToMany(actuallyModifiedBankRows, safeGwRows, detectorReconRows, {
     dateMatchEnabled: resolvedFundTransferDatePolicy.enabled,
     dateToleranceDays: resolvedFundTransferDatePolicy.toleranceDays,
-    fundTransferDatePolicy: resolvedFundTransferDatePolicy
+    fundTransferDatePolicy: resolvedFundTransferDatePolicy,
+    // v3.2.22：网关侧先按原 merchantid 检测；R5s2 走网关来源时再按映射后账号补跑 R5s2 网关池（调拨侧 big_account 派生时已映射）。
+    accountMappingMap: detectorGatewayAccountMappingMap,
+    isRawRewrittenBankValue
   }).reviewRows;
   await yieldTick('M2M'); // 轮次边界让出（M2M 异常说明检测已完成，进 buildOutputRows 前；上游 R5s4+detector 不再挤成同步块）
 
@@ -620,7 +688,8 @@ async function runReconciliation({
   const { modifiedRows, unmatchedRows } = buildOutputRows(
     bankRows,
     modColsByRowId,
-    r2HitByRowId
+    r2HitByRowId,
+    decodedColsByRowId
   );
 
   // v3.0.7 需求1a：按「渠道-地区」聚合命中行（行数 + 去重场景名），供 renderer 状态框「已处理」分支展示。

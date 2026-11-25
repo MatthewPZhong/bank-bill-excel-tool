@@ -33,7 +33,8 @@ const FUND_OUT = FT_RECON_FIELD_MAP.FUND_TYPE_OUT;
 
 let rowCounter = 0;
 
-// 银行行（驼峰；金额 = |Credit-Debit| + signed Extra Fee，默认 Credit=amount / Debit=0 / fee 空）
+// 银行行（驼峰；金额 = |Credit-Debit| + signed Extra Fee，默认 Credit=amount / Debit=0 / fee 空）。默认带渠道 JPM：
+//   R5s2 映射补跑剔除空渠道银行行（映射目标账号上要求同渠道，见 isR5MappedBankRowUnverifiable）；原口径不看渠道。
 function bankRow({
   merchantId = 'M1',
   currency = 'USD',
@@ -41,6 +42,7 @@ function bankRow({
   extraFee = '',
   billDate = '2026-06-07',
   fundType = 'FundTransfer-out',
+  channel = 'JPM',
   rowId
 } = {}) {
   rowCounter += 1;
@@ -52,6 +54,7 @@ function bankRow({
     'Extra Fee': extraFee,
     BillDate: billDate,
     FundType: fundType,
+    Channel: channel,
     ReconciliationId: '',
     _rowId: rowId || `b${rowCounter}`
   };
@@ -376,6 +379,12 @@ test('门控短路：无任何 banks≥2 键 → 直接 []，且 cpRows 完全�
   );
   const { reviewRows } = detectFundTransferManyToMany(banks, [tripwire, tripwire], []);
   assert.equal(reviewRows.length, 0, '无 banks≥2 键 → 命中为空');
+
+  // v3.2.22：账户映射非空时，映射补跑同样先过银行门控，不预先扫描网关池。
+  const mapped = detectFundTransferManyToMany(banks, [tripwire, tripwire], [], {
+    accountMappingMap: new Map([['ALIAS', 'M1']])
+  });
+  assert.equal(mapped.reviewRows.length, 0, '映射补跑门控短路 → 命中为空、对手行未被触碰');
 });
 
 // ---- ⑪ 性能·大组封顶：nb×nc 超阈值 → 整组银行行命中、note 含「规模过大」-----
@@ -397,4 +406,321 @@ test('大组封顶：nb×nc 超 MAX_BIPARTITE_EDGES → 不建图、整组银行
   assert.equal(reviewRows.length, N, '封顶路径：该组所有银行行全部命中（宁可过报，绝不漏报）');
   assert.ok(reviewRows.every((r) => /规模过大/.test(r.note)), 'note 含「规模过大」（区别于普通命中文案）');
   assert.ok(reviewRows.every((r) => /银行 448 × 对手 448/.test(r.note)), 'note 含 银行N×对手M 规模');
+});
+
+// ---- v3.2.22：网关侧原账号检测 + R5s2 网关池按映射后账号补跑 -----------------
+
+// R5s2 网关池行（FundTransfer-in/out 且 reconciliationid 非空），映射补跑只看这类行。映射目标账号上的行 R5s2 要求渠道
+//   非空且相同，默认带渠道 JPM（空渠道行 R5s2 一定不回填，补跑剔除，见下方专项用例）。
+function r5GwRow(overrides = {}) {
+  return { ...gwRow(overrides), reconciliationid: overrides.reconciliationid || 'GW-RECON', Channel: overrides.Channel ?? 'JPM' };
+}
+
+test('v3.2.22：R5s2 网关池经账户映射后与银行 MerchantId 成组 → NvM 命中（note 标映射后）；不传映射则不成组', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', merchantId: 'CLR-1' }),
+    bankRow({ rowId: 'b2', merchantId: 'CLR-1' })
+  ];
+  const gws = [r5GwRow({ merchantid: 'GW-1' }), r5GwRow({ merchantid: ' GW-1 ' })];
+  const before = structuredClone(banks);
+
+  assert.equal(detectFundTransferManyToMany(banks, gws, []).reviewRows.length, 0, '未映射：账号不同不成组');
+
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, [], {
+    accountMappingMap: new Map([['GW-1', 'CLR-1']])
+  });
+  assert.deepEqual(hitRowIds({ reviewRows }), ['b1', 'b2']);
+  assert.ok(reviewRows.every((r) => /^银行↔网关（账户映射后）多对多：账号 CLR-1 /.test(r.note)), 'note 标映射后、账号为清结算账号');
+  assert.deepEqual(banks, before, '🔴 纯只读：映射只影响分组键，不改银行行');
+  assert.equal(gws[0].merchantid, 'GW-1', '网关行不被改写');
+});
+
+test('v3.2.22：转义歧义的网关账号（映射后为空）不进映射补跑分组，与 R5 不参与匹配一致', () => {
+  const map = new Map([['A_x0000_B', 'CLR-LIT'], ['A\u0000B', 'CLR-NUL']]);
+  for (const target of ['CLR-LIT', 'CLR-NUL']) {
+    const banks = [bankRow({ rowId: 'b1', merchantId: target }), bankRow({ rowId: 'b2', merchantId: target })];
+    const gws = [r5GwRow({ merchantid: 'A_x0000_B' }), r5GwRow({ merchantid: 'A_x0000_B' })];
+    assert.equal(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map }).reviewRows.length, 0, target);
+  }
+});
+
+test('v3.2.22：需同渠道校验而渠道含转义写法的网关行 R5s2 不参与匹配，映射补跑同口径剔除、不报「自动回填仅取其一」', () => {
+  const map = new Map([['GW-1', 'CLR-1']]);
+  const banks = [bankRow({ rowId: 'b1', merchantId: 'CLR-1' }), bankRow({ rowId: 'b2', merchantId: 'CLR-1' })];
+  const escaped = [
+    { ...r5GwRow({ merchantid: 'GW-1' }), Channel: 'BANK_x000D_US' },
+    { ...r5GwRow({ merchantid: 'GW-1' }), Channel: 'BANK_x000D_US' }
+  ];
+  assert.equal(detectFundTransferManyToMany(banks, escaped, [], { accountMappingMap: map }).reviewRows.length, 0,
+    '两条都被 R5s2 排除：没有实际可回填的候选');
+  // 原账号恰为映射目标、与映射命中行争用同一目标账号的行同样需同渠道校验，渠道含转义写法时同样剔除。
+  const contender = [
+    { ...r5GwRow({ merchantid: 'GW-1' }), Channel: 'JPM' },
+    { ...r5GwRow({ merchantid: 'CLR-1' }), Channel: 'JPM_x0041_' }
+  ];
+  assert.equal(detectFundTransferManyToMany(banks, contender, [], { accountMappingMap: map }).reviewRows.length, 0,
+    '只剩一条可参与的网关行：2×1 不构成多对多');
+  // 目标集合按方向收集：争用行在另一方向（该方向没有映射命中行）时不需同渠道校验，渠道含转义写法也照常计入。
+  const otherDirection = [
+    { ...r5GwRow({ merchantid: 'GW-1' }), Channel: 'JPM' },
+    { ...r5GwRow({ merchantid: 'CLR-1', tradeType: 'FundTransfer-in' }), Channel: 'JPM_x0041_' }
+  ];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(banks, otherDirection, [], { accountMappingMap: map })), ['b1', 'b2']);
+  const plain = [
+    { ...r5GwRow({ merchantid: 'GW-1' }), Channel: 'JPM' },
+    { ...r5GwRow({ merchantid: 'GW-1' }), Channel: 'JPM' }
+  ];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(banks, plain, [], { accountMappingMap: map })), ['b1', 'b2'],
+    '渠道不含转义写法时照常报告');
+});
+
+test('v3.2.22：需同渠道校验而渠道为空的网关行 R5s2 一定不回填，映射补跑剔除；原账号检测不变', () => {
+  const map = new Map([['GW-1', 'CLR-1']]);
+  const banks = [bankRow({ rowId: 'b1', merchantId: 'CLR-1' }), bankRow({ rowId: 'b2', merchantId: 'CLR-1' })];
+  const blank = [r5GwRow({ merchantid: 'GW-1', Channel: '' }), r5GwRow({ merchantid: 'GW-1', Channel: '  ' })];
+  assert.equal(detectFundTransferManyToMany(banks, blank, [], { accountMappingMap: map }).reviewRows.length, 0,
+    '两条都缺渠道：R5s2 一条也不回填，不报「自动回填仅取其一」');
+  const rawSide = [r5GwRow({ merchantid: 'CLR-1', Channel: '' }), r5GwRow({ merchantid: 'CLR-1', Channel: '' })];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(banks, rawSide, [])), ['b1', 'b2'], '不传映射：原账号检测照常（不看渠道）');
+});
+
+test('v3.2.22：银行 MerchantId 按数值读入、可能已被舍入且按数值与映射目标账号相同 → R5s2 不用于映射回填，补跑剔除', () => {
+  // 银行源单元格 <v>9007199254740993</v> 读入为 9007199254740992，字符串与映射目标账号 9007199254740992 相同。
+  const map = new Map([['GW-1', '9007199254740992']]);
+  const banks = [
+    { ...bankRow({ rowId: 'b1' }), MerchantId: 9007199254740993 },
+    { ...bankRow({ rowId: 'b2' }), MerchantId: 9007199254740993 }
+  ];
+  const gws = [r5GwRow({ merchantid: 'GW-1' }), r5GwRow({ merchantid: 'GW-1' })];
+  assert.equal(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map }).reviewRows.length, 0);
+  const textBanks = [bankRow({ rowId: 't1', merchantId: '9007199254740992' }), bankRow({ rowId: 't2', merchantId: '9007199254740992' })];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(textBanks, gws, [], { accountMappingMap: map })), ['t1', 't2'],
+    '文本单元格的同形账号照常成组');
+});
+
+test('v3.2.22：按原账号匹配的轮次（如 R4 AchReturn）多对多不被映射覆盖', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', merchantId: 'ALIAS', fundType: 'AchReturn' }),
+    bankRow({ rowId: 'b2', merchantId: 'ALIAS', fundType: 'AchReturn' })
+  ];
+  const gws = [gwRow({ merchantid: 'ALIAS', tradeType: 'AchReturn' }), gwRow({ merchantid: 'ALIAS', tradeType: 'AchReturn' })];
+  const map = new Map([['ALIAS', 'CLR']]);
+  const baseline = detectFundTransferManyToMany(banks, gws, []);
+  const withMap = detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map });
+  assert.deepEqual(hitRowIds(withMap), ['b1', 'b2']);
+  assert.deepEqual(withMap, baseline, '原账号检测结果与不传映射逐项一致');
+
+  // 非 R5s2 网关池行即使映射后能与银行成组，也不补跑（R4 等不按映射匹配）
+  const clrBanks = [
+    bankRow({ rowId: 'c1', merchantId: 'CLR', fundType: 'AchReturn' }),
+    bankRow({ rowId: 'c2', merchantId: 'CLR', fundType: 'AchReturn' })
+  ];
+  assert.equal(detectFundTransferManyToMany(clrBanks, gws, [], { accountMappingMap: map }).reviewRows.length, 0);
+});
+
+test('v3.2.22：映射补跑只报告含映射命中行的分量，未受映射影响的组不重复出说明', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', merchantId: 'CLR' }),
+    bankRow({ rowId: 'b2', merchantId: 'CLR' })
+  ];
+  const map = new Map([['ALIAS', 'CLR']]);
+
+  // 两条原账号即 CLR 的网关行：原口径命中一次，补跑不重复
+  const rawOnly = detectFundTransferManyToMany(banks, [r5GwRow({ merchantid: 'CLR' }), r5GwRow({ merchantid: 'CLR' })], [], {
+    accountMappingMap: map
+  });
+  assert.deepEqual(hitRowIds(rawOnly), ['b1', 'b2']);
+  assert.ok(rawOnly.reviewRows.every((r) => /^银行↔网关多对多/.test(r.note) && !/账户映射后/.test(r.note)));
+
+  // 一条映射命中 + 一条原账号：原口径 Nv1 不报，补跑成 2×2 报出
+  const mixed = detectFundTransferManyToMany(banks, [r5GwRow({ merchantid: 'ALIAS' }), r5GwRow({ merchantid: 'CLR' })], [], {
+    accountMappingMap: map
+  });
+  assert.deepEqual(hitRowIds(mixed), ['b1', 'b2']);
+  assert.ok(mixed.reviewRows.every((r) => /^银行↔网关（账户映射后）多对多/.test(r.note) && /银行 2 行 × 网关（账户映射后） 2 行/.test(r.note)));
+
+  // 空 reconciliationid 的网关行不进 R5s2 网关池，补跑不计入
+  const blankRecon = detectFundTransferManyToMany(banks, [{ ...gwRow({ merchantid: 'ALIAS' }), reconciliationid: '' }, r5GwRow({ merchantid: 'CLR' })], [], {
+    accountMappingMap: map
+  });
+  assert.equal(blankRecon.reviewRows.length, 0);
+});
+
+test('v3.2.22：映射命中判据与 R5s2 一致——同值映射 `C → C` 也算命中、转义写法账号不算，补跑的 R5s2 网关池结论与原口径并列报告', () => {
+  const banks = [bankRow({ rowId: 'b1', merchantId: 'C' }), bankRow({ rowId: 'b2', merchantId: 'C' })];
+  const gws = [r5GwRow({ merchantid: 'C' }), r5GwRow({ merchantid: 'C' }), { ...gwRow({ merchantid: 'C', tradeType: 'Other' }), reconciliationid: 'G3' }];
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: new Map([['C', 'C']]) });
+  assert.deepEqual(hitRowIds({ reviewRows }), ['b1', 'b2']);
+  for (const row of reviewRows) {
+    assert.match(row.note, /银行↔网关多对多：账号 C .*银行 2 行 × 网关 3 行/, '原口径含非调拨交易类型的网关行');
+    assert.match(row.note, /银行↔网关（账户映射后）多对多：账号 C .*银行 2 行 × 网关（账户映射后） 2 行/, '补跑只看 R5s2 网关池');
+  }
+  // 映射非空时含 `_xHHHH_` 写法的账号不算命中映射（R5s2 不参与匹配），只按原口径报告，不补跑。
+  const decoded = detectFundTransferManyToMany(
+    [bankRow({ rowId: 'd1', merchantId: 'A_x0000_B' }), bankRow({ rowId: 'd2', merchantId: 'A_x0000_B' })],
+    [r5GwRow({ merchantid: 'A_x0000_B' }), r5GwRow({ merchantid: 'A_x0000_B' }),
+      { ...gwRow({ merchantid: 'A_x0000_B', tradeType: 'Other' }), reconciliationid: 'G9' }],
+    [],
+    { accountMappingMap: new Map([['A\u0000B', 'A_x0000_B']]) }
+  );
+  assert.deepEqual(hitRowIds(decoded), ['d1', 'd2']);
+  assert.ok(decoded.reviewRows.every((r) => /银行 2 行 × 网关 3 行/.test(r.note) && !/账户映射后/.test(r.note)),
+    '转义写法的账号不按映射补跑');
+});
+
+test('v3.2.22：调拨侧不受网关映射影响（big_account 已在派生时映射）', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', merchantId: 'GW-1' }),
+    bankRow({ rowId: 'b2', merchantId: 'GW-1' })
+  ];
+  const recons = [reconRow({ bigAccount: 'GW-1' }), reconRow({ bigAccount: 'GW-1' })];
+  const { reviewRows } = detectFundTransferManyToMany(banks, [], recons, {
+    accountMappingMap: new Map([['GW-1', 'CLR-1']])
+  });
+  assert.deepEqual(hitRowIds({ reviewRows }), ['b1', 'b2']);
+  assert.ok(reviewRows.every((r) => /调拨/.test(r.note)));
+});
+
+test('v3.2.22：分组键区分账号与币种边界，映射后 (A B, USD) 与 (A, B USD) 不并成一组', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', merchantId: 'A B', currency: 'USD' }),
+    bankRow({ rowId: 'b2', merchantId: 'A', currency: 'B USD' })
+  ];
+  const gws = [
+    r5GwRow({ merchantid: 'X1', currency: 'USD', reconciliationid: 'R1' }),
+    r5GwRow({ merchantid: 'X2', currency: 'B USD', reconciliationid: 'R2' })
+  ];
+  const result = detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: new Map([['X1', 'A B'], ['X2', 'A']]) });
+  assert.deepEqual(result.reviewRows, []);
+});
+
+test('v3.2.22：金额乘 100 后溢出的行不形成金额分组', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', amount: 1, extraFee: -1e307 }),
+    bankRow({ rowId: 'b2', amount: 1, extraFee: -1e307 })
+  ];
+  const gws = [gwRow({ amount: 1e307 }), gwRow({ amount: 1e307 })];
+  assert.deepEqual(detectFundTransferManyToMany(banks, gws, []).reviewRows, []);
+});
+
+test('v3.2.22：正向溢出 2×2 时 R5 两条写入路径与审计一致：都不回填、不出说明', () => {
+  const { runRound5FundTransferBackfill } = require('../../../../src/main-process/scenario-engines/r5-fund-transfer-backfill');
+  const { runRound5FundTransferReconBackfill } = require('../../../../src/main-process/scenario-engines/r5-fund-transfer-recon-backfill');
+  const banks = () => [
+    { ...bankRow({ rowId: 'b1', amount: 0 }), 'Debit Amount': 1e307 },
+    { ...bankRow({ rowId: 'b2', amount: 0 }), 'Debit Amount': 1e307 }
+  ];
+  const gws = [
+    { ...gwRow({ amount: 2e307 }), reconciliationid: 'G1' },
+    { ...gwRow({ amount: 2e307 }), reconciliationid: 'G2' }
+  ];
+  const gatewayBanks = banks();
+  const gateway = runRound5FundTransferBackfill(gws, gatewayBanks);
+  assert.deepEqual(gateway.modifications, [], '网关来源不回填');
+  const recons = [
+    { ...reconRow({ amount: 2e307 }), [RECON.reconId]: 'R1' },
+    { ...reconRow({ amount: 2e307 }), [RECON.reconId]: 'R2' }
+  ];
+  const recon = runRound5FundTransferReconBackfill(recons, banks());
+  assert.deepEqual(recon.modifications, [], '调拨来源不回填');
+  assert.deepEqual(detectFundTransferManyToMany(banks(), gws, recons).reviewRows, [], '审计不出说明');
+});
+
+test('v3.2.22：映射补跑剔除空渠道银行行（映射目标账号上 R5s2 要求同渠道，空渠道银行行一定不回填）；原口径不看渠道', () => {
+  const map = new Map([['GW-1', 'CLR-1']]);
+  const banks = [bankRow({ rowId: 'b1', merchantId: 'CLR-1', channel: '' }), bankRow({ rowId: 'b2', merchantId: 'CLR-1', channel: ' ' })];
+  const gws = [r5GwRow({ merchantid: 'GW-1' }), r5GwRow({ merchantid: 'GW-1' })];
+  assert.equal(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map }).reviewRows.length, 0);
+  const plainGws = [r5GwRow({ merchantid: 'CLR-1' }), r5GwRow({ merchantid: 'CLR-1' })];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(banks, plainGws, [])), ['b1', 'b2'], '原账号检测照常');
+});
+
+test('v3.2.22：Excel 15 位截断的数值银行账号（第 16 位起为 0）补跑剔除；文本单元格同形账号照常成组', () => {
+  const map = new Map([['GW-1', '1234567890123450']]);
+  const gws = [r5GwRow({ merchantid: 'GW-1' }), r5GwRow({ merchantid: 'GW-1' })];
+  const numericBanks = [{ ...bankRow({ rowId: 'b1' }), MerchantId: 1234567890123450 }, { ...bankRow({ rowId: 'b2' }), MerchantId: 1234567890123450 }];
+  assert.equal(detectFundTransferManyToMany(numericBanks, gws, [], { accountMappingMap: map }).reviewRows.length, 0);
+  const textBanks = [bankRow({ rowId: 't1', merchantId: '1234567890123450' }), bankRow({ rowId: 't2', merchantId: '1234567890123450' })];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(textBanks, gws, [], { accountMappingMap: map })), ['t1', 't2']);
+});
+
+test('v3.2.22：被前序场景按链接表原文改写、含转义写法的银行账号补跑剔除（与 R5s2 同一判据）', () => {
+  const map = new Map([['GW-1', 'A_x0041_B']]);
+  const gws = [r5GwRow({ merchantid: 'GW-1' }), r5GwRow({ merchantid: 'GW-1' })];
+  const banks = [bankRow({ rowId: 'b1', merchantId: 'A_x0041_B' }), bankRow({ rowId: 'b2', merchantId: 'A_x0041_B' })];
+  const rawRewritten = (row, column) => column === 'MerchantId';
+  assert.equal(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map, isRawRewrittenBankValue: rawRewritten }).reviewRows.length, 0);
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map })), ['b1', 'b2'], '银行原值照常');
+});
+
+test('v3.2.22：前导 0——数值银行账号与带前导 0 的映射值同值时补跑剔除（与 R5s2 同一判据）；文本照常', () => {
+  const map = new Map([['GW-A', '00123'], ['GW-B', '123']]);
+  const gws = [r5GwRow({ merchantid: 'GW-B' }), r5GwRow({ merchantid: 'GW-B' })];
+  const numericBanks = [{ ...bankRow({ rowId: 'b1' }), MerchantId: 123 }, { ...bankRow({ rowId: 'b2' }), MerchantId: 123 }];
+  assert.equal(detectFundTransferManyToMany(numericBanks, gws, [], { accountMappingMap: map }).reviewRows.length, 0);
+  const textBanks = [bankRow({ rowId: 't1', merchantId: '123' }), bankRow({ rowId: 't2', merchantId: '123' })];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(textBanks, gws, [], { accountMappingMap: map })), ['t1', 't2']);
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(numericBanks, gws, [], { accountMappingMap: new Map([['GW-B', '123']]) })),
+    ['b1', 'b2'], '没有带前导 0 的映射值：数值 123 没有歧义');
+});
+
+test('v3.2.22：未命中映射、原值按数值读入且与映射目标对得上的网关行，R5s2 不参与匹配，补跑同口径剔除', () => {
+  const map = new Map([['G', '9007199254740992']]);
+  const banks = [bankRow({ rowId: 'b1', merchantId: '9007199254740992' }), bankRow({ rowId: 'b2', merchantId: '9007199254740992' })];
+  const gws = [r5GwRow({ merchantid: 'G' }), r5GwRow({ merchantid: '9007199254740992' })];
+  assert.equal(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map }).reviewRows.length, 0);
+  const textGws = [r5GwRow({ merchantid: 'G' }), r5GwRow({ merchantid: '9007199254740992' })];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(banks, textGws, [], { accountMappingMap: new Map([['G', '9007199254740992X']]) })),
+    [], '目标不同：不成组');
+  const plain = [r5GwRow({ merchantid: 'G' }), r5GwRow({ merchantid: 'CLR' })];
+  const clrBanks = [bankRow({ rowId: 'c1', merchantId: 'CLR' }), bankRow({ rowId: 'c2', merchantId: 'CLR' })];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(clrBanks, plain, [], { accountMappingMap: new Map([['G', 'CLR']]) })),
+    ['c1', 'c2'], '原账号文本即目标：照常计入');
+});
+
+test('v3.2.22：命中映射键、原值按数值读入且与本方向另一映射目标对得上的网关行，R5s2 不按映射回填，补跑同口径剔除', () => {
+  const map = new Map([['123', 'CLR-A'], ['G', '00123']]);
+  const banks = [bankRow({ rowId: 'b1', merchantId: 'CLR-A' }), bankRow({ rowId: 'b2', merchantId: 'CLR-A' })];
+  const gws = [r5GwRow({ merchantid: '123' }), r5GwRow({ merchantid: '123' }), r5GwRow({ merchantid: 'G' })];
+  assert.equal(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map }).reviewRows.length, 0);
+  const noTarget = [r5GwRow({ merchantid: '123' }), r5GwRow({ merchantid: '123' })];
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(banks, noTarget, [], { accountMappingMap: map })), ['b1', 'b2'],
+    '本批没有 G 行：`00123` 不是映射目标，照常计入');
+});
+
+test('v3.2.22：被前序场景按链接表原文改写成数值写法、与映射值对得上的银行账号补跑剔除', () => {
+  const map = new Map([['GW-1', '9007199254740992']]);
+  const gws = [r5GwRow({ merchantid: 'GW-1' }), r5GwRow({ merchantid: 'GW-1' })];
+  const banks = [bankRow({ rowId: 'b1', merchantId: '9007199254740992' }), bankRow({ rowId: 'b2', merchantId: '9007199254740992' })];
+  const rawRewritten = (row, column) => column === 'MerchantId';
+  assert.equal(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map, isRawRewrittenBankValue: rawRewritten }).reviewRows.length, 0);
+  assert.deepEqual(hitRowIds(detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: map })), ['b1', 'b2'], '银行原值照常');
+});
+
+test('v3.2.22：映射补跑剔除银行行按行判断，不为此遍历网关池（银行门控短路时对手行不被触碰）', () => {
+  const tripwire = new Proxy({}, {
+    get(_t, prop) {
+      throw new Error(`门控短路失效：cpRow 被触碰（访问了属性 ${String(prop)}）`);
+    }
+  });
+  const banks = [
+    { ...bankRow({ rowId: 'b1' }), MerchantId: 9007199254740993 },
+    { ...bankRow({ rowId: 'b2', merchantId: 'M2' }), Channel: '' }
+  ];
+  const { reviewRows } = detectFundTransferManyToMany(banks, [tripwire, tripwire], [], { accountMappingMap: new Map([['ALIAS', 'M2']]) });
+  assert.equal(reviewRows.length, 0);
+});
+
+test('v3.2.22：说明分段 noteParts 与 note 逐字一致，账号、币种段标明取自哪一列', () => {
+  const banks = [bankRow({ rowId: 'b1', merchantId: 'CLR-1' }), bankRow({ rowId: 'b2', merchantId: 'CLR-1' })];
+  const gws = [r5GwRow({ merchantid: 'GW-1' }), r5GwRow({ merchantid: 'GW-1' })];
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, [], { accountMappingMap: new Map([['GW-1', 'CLR-1']]) });
+  assert.equal(reviewRows.length, 2);
+  assert.equal(reviewRows[0].noteParts, reviewRows[1].noteParts, '同组各行共用同一分段，不按行复制');
+  assert.equal(reviewRows[0].note, reviewRows[1].note);
+  for (const r of reviewRows) {
+    assert.equal(r.noteParts.map((part) => (typeof part === 'string' ? part : part.value)).join(''), r.note);
+    assert.deepEqual(r.noteParts.filter((part) => typeof part !== 'string'),
+      [{ column: 'MerchantId', value: 'CLR-1' }, { column: 'Currency', value: 'USD' }]);
+  }
 });

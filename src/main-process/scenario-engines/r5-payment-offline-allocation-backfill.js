@@ -2,6 +2,8 @@
 // 输入改为调拨对账单派生行；Payment 先消费 FundTransfer-in，R5s2-recon 再消费剩余派生行。
 
 const {
+  createEscapeSameValueWarning,
+  isEscapeAmbiguousSameValue,
   makeModificationCollector,
   makeWarningCollector,
   normalizeCellValue,
@@ -359,6 +361,15 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, reconRows, options 
     if (oldValue !== newValue) {
       bankRow[F.bank.reconciliationId] = newValue;
       modCollector.record(bankRow._rowId, F.bank.reconciliationId, oldValue, newValue);
+    } else if (isEscapeAmbiguousSameValue(oldValue, newValue)) {
+      // v3.2.22（🔴 资金红线·可观测）：调拨对账单 ReconID 含 `_xHHHH_` 写法、与银行当前值文字相同，无法确认是否同一个值。
+      warningCollector.push(createEscapeSameValueWarning({
+        rowId: bankRow._rowId,
+        engine: 'r5-payment-offline-allocation-backfill',
+        column: F.bank.reconciliationId,
+        value: newValue,
+        source: 'Payment线下调拨：调拨对账单 ReconID'
+      }));
     }
     matchedPairs.push({
       bankRow,

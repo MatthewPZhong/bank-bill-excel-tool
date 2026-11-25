@@ -20,7 +20,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildFundTransferReconRows } = require('../../../src/main-process/fund-transfer-recon-builder');
+const {
+  buildFundTransferReconRows,
+  checkFundTransferReconRowsAgainstMapping
+} = require('../../../src/main-process/fund-transfer-recon-builder');
 const {
   FT_RECON_FIELD_MAP,
   MID_ALLOCATION_SUCCESS_STATUS,
@@ -214,14 +217,16 @@ test.describe('buildFundTransferReconRows - 空 / 非对象行跳过 + 多行守
   });
 
   test('入参非数组（null / undefined / 对象）→ 防御为空，不崩', () => {
-    const empty = { rows: [], total: 0, sourceTotal: 0, skippedStatusCount: 0 };
+    const empty = { rows: [], total: 0, sourceTotal: 0, skippedStatusCount: 0, ambiguousMappedAccountCount: 0 };
     assert.deepEqual(buildFundTransferReconRows(null), empty);
     assert.deepEqual(buildFundTransferReconRows(undefined), empty);
     assert.deepEqual(buildFundTransferReconRows({}), empty);
   });
 
   test('空数组 → 空结果', () => {
-    assert.deepEqual(buildFundTransferReconRows([]), { rows: [], total: 0, sourceTotal: 0, skippedStatusCount: 0 });
+    assert.deepEqual(buildFundTransferReconRows([]), {
+      rows: [], total: 0, sourceTotal: 0, skippedStatusCount: 0, ambiguousMappedAccountCount: 0
+    });
   });
 
   test('⑥ 多行输入：total = 行数 × 2', () => {
@@ -386,5 +391,66 @@ test.describe('buildFundTransferReconRows - 账户映射应用（big_account 映
     assert.equal(outs.length, 2);
     for (const r of ins) assert.equal(r[R.bigAccount], 'CLR-RECV-999');
     for (const r of outs) assert.equal(r[R.bigAccount], 'CLR-PAY-888');
+  });
+
+  test('⑦ v3.2.22 转义歧义：账号含 `_xHHHH_`、原样与解码后映射结果不同 → big_account 留空并计数；不歧义的照常映射', () => {
+    const map = new Map([['A_x0000_B', 'CLR-LIT'], ['A\u0000B', 'CLR-NUL'], ['PAY-CARD-1', 'CLR-PAY-888']]);
+    const out = buildFundTransferReconRows(
+      [midRow({ [M.payeeCard]: 'A_x0000_B' }), midRow({ [M.payeeCard]: 'A\u0000B', [M.payCard]: 'A_x0000_B' })],
+      { accountMappingMap: map }
+    );
+    const ins = out.rows.filter((r) => r[R.fundType] === FT_RECON_FIELD_MAP.FUND_TYPE_IN);
+    const outs = out.rows.filter((r) => r[R.fundType] === FT_RECON_FIELD_MAP.FUND_TYPE_OUT);
+    assert.deepEqual(ins.map((r) => r[R.bigAccount]), ['', 'CLR-NUL'], '🔴 歧义行留空、不参与匹配；含真实 NUL 的账号照常映射');
+    assert.deepEqual(outs.map((r) => r[R.bigAccount]), ['CLR-PAY-888', '']);
+    assert.equal(out.ambiguousMappedAccountCount, 2);
+    assert.equal(ins[0][R.payeeAccount], 'A_x0000_B', '展示字段保持原值，便于人工核对');
+    assert.equal(buildFundTransferReconRows([midRow()], { accountMappingMap: map }).ambiguousMappedAccountCount, 0);
+    assert.equal(buildFundTransferReconRows([midRow({ [M.payeeCard]: 'A_x0000_B' })]).ambiguousMappedAccountCount, 0,
+      '映射为空时不判歧义（与改动前一致）');
+  });
+
+  test('⑦b v3.2.22 舍入歧义：中台卡号按数值读入、舍入值正好是映射键 → big_account 留空并计数', () => {
+    const map = new Map([['9007199254740992', 'CLR-B'], ['PAY-CARD-1', 'CLR-PAY-888']]);
+    const out = buildFundTransferReconRows([midRow({ [M.payeeCard]: 9007199254740993 })], { accountMappingMap: map });
+    const inRow = out.rows.find((r) => r[R.fundType] === FT_RECON_FIELD_MAP.FUND_TYPE_IN);
+    assert.equal(inRow[R.bigAccount], '', '🔴 不按舍入值换成清结算账号');
+    assert.equal(out.ambiguousMappedAccountCount, 1);
+    assert.deepEqual(checkFundTransferReconRowsAgainstMapping(out.rows, map), { staleCount: 0, ambiguousMappedAccountCount: 1 });
+    const legacy = out.rows.map((r) => (r === inRow ? { ...r, [R.bigAccount]: 'CLR-B' } : r));
+    assert.equal(checkFundTransferReconRowsAgainstMapping(legacy, map).staleCount, 1, '旧派生按舍入值换出的大账号视为不一致');
+  });
+
+  test('⑦c v3.2.22 前导 0：中台账号按数值读入为 123、映射里有 `00123` → big_account 留空并计数；`00123` 原文照常', () => {
+    const map = new Map([['00123', 'CLR-A'], ['123', 'CLR-B'], ['PAY-CARD-1', 'CLR-PAY-888']]);
+    for (const value of [123, '123']) {
+      const out = buildFundTransferReconRows([midRow({ [M.payeeCard]: value })], { accountMappingMap: map });
+      const inRow = out.rows.find((r) => r[R.fundType] === FT_RECON_FIELD_MAP.FUND_TYPE_IN);
+      assert.equal(inRow[R.bigAccount], '', `🔴 ${typeof value}：可能是丢了前导 0 的 00123，不换成 CLR-B`);
+      assert.equal(out.ambiguousMappedAccountCount, 1);
+    }
+    const text = buildFundTransferReconRows([midRow({ [M.payeeCard]: '00123' })], { accountMappingMap: map });
+    assert.equal(text.rows.find((r) => r[R.fundType] === FT_RECON_FIELD_MAP.FUND_TYPE_IN)[R.bigAccount], 'CLR-A');
+    assert.equal(text.ambiguousMappedAccountCount, 0);
+  });
+
+  test('⑧ v3.2.22 checkFundTransferReconRowsAgainstMapping：按方向取原始收付款账号以本轮映射重算 big_account 逐行核对', () => {
+    const map = new Map([['A_x0000_B', 'CLR-LIT'], ['A\u0000B', 'CLR-NUL'], ['PAY-CARD-1', 'CLR-PAY-888']]);
+    const fresh = buildFundTransferReconRows([midRow({ [M.payeeCard]: 'A_x0000_B' })], { accountMappingMap: map }).rows;
+    assert.deepEqual(checkFundTransferReconRowsAgainstMapping(fresh, map), { staleCount: 0, ambiguousMappedAccountCount: 1 },
+      '本轮映射派生的行一致；歧义行（大账号已留空）照计数');
+    // 旧版本派生（没有转义歧义护栏）：歧义账号的大账号非空 → 不一致。
+    const legacy = fresh.map((row) => (row[R.fundType] === FT_RECON_FIELD_MAP.FUND_TYPE_IN ? { ...row, [R.bigAccount]: 'CLR-LIT' } : row));
+    assert.deepEqual(checkFundTransferReconRowsAgainstMapping(legacy, map), { staleCount: 1, ambiguousMappedAccountCount: 1 });
+    // 映射改过但表没重建：按旧映射换出的大账号与本轮不一致；映射清空后旧的映射结果同样不一致。
+    const oldMapped = buildFundTransferReconRows([midRow()], { accountMappingMap: new Map([['PAY-CARD-1', 'CLR-OLD']]) }).rows;
+    assert.equal(checkFundTransferReconRowsAgainstMapping(oldMapped, map).staleCount, 1, 'out 行按付款账号核对');
+    assert.equal(checkFundTransferReconRowsAgainstMapping(oldMapped, new Map()).staleCount, 1);
+    assert.equal(checkFundTransferReconRowsAgainstMapping(buildFundTransferReconRows([midRow()]).rows, new Map()).staleCount, 0);
+    assert.deepEqual(
+      checkFundTransferReconRowsAgainstMapping([null, { [R.fundType]: 'Other', [R.bigAccount]: 'X' }], map),
+      { staleCount: 0, ambiguousMappedAccountCount: 0 },
+      '方向标记不是 in / out 的行不核对'
+    );
   });
 });

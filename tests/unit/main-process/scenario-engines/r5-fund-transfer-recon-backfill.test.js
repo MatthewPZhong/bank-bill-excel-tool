@@ -919,3 +919,25 @@ test.describe('R5场景2(调拨对账单) v3.1.7 — 与 Payment 共享消费状
     assert.deepEqual([...sameResult.usedBankRowIds], ['same']);
   });
 });
+
+test.describe('R5场景2(调拨对账单) — v3.2.22 含转义写法的同值告警', () => {
+  test('ReconID 与银行当前值文字相同且含 _xHHHH_ 写法 → 不改写，告警人工核对；不含写法的同值不告警', () => {
+    const recons = [reconRow({ reconId: 'RID_x000D_X', amount: 100, billDate: '2026-06-07' })];
+    const banks = [bankRow({ rowId: 'b-esc', debit: 100, billDate: '2026-06-07', reconId: 'RID_x000D_X' })];
+    const { modifications, warnings } = runRound5FundTransferReconBackfill(recons, banks);
+    assert.deepEqual(modifications, []);
+    assert.equal(banks[0].ReconciliationId, 'RID_x000D_X');
+    const escape = warnings.filter((w) => w.code === 'linked-value-escape-same-value-ambiguous');
+    assert.equal(escape.length, 1);
+    assert.equal(escape[0].rowId, 'b-esc');
+    assert.equal(escape[0].engine, 'r5-fund-transfer-recon-backfill');
+    assert.match(escape[0].message, /ReconID（尾号「0D_X」，共 11 个字符，含 Excel 转义写法：⟨U\+000D⟩）与银行行/);
+    assert.ok(!escape[0].message.includes('RID'), '告警不写完整值');
+
+    const plainRecons = [reconRow({ reconId: 'RID-PLAIN', amount: 100, billDate: '2026-06-07' })];
+    const plainBanks = [bankRow({ rowId: 'b-plain', debit: 100, billDate: '2026-06-07', reconId: 'RID-PLAIN' })];
+    const plain = runRound5FundTransferReconBackfill(plainRecons, plainBanks);
+    assert.deepEqual(plain.modifications, []);
+    assert.equal(plain.warnings.some((w) => w.code === 'linked-value-escape-same-value-ambiguous'), false);
+  });
+});
