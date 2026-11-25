@@ -974,7 +974,7 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
       const lastGeneratedExports = { detail: { filePath: '/tmp/detail.xlsx' }, balance: null };
       const capture = (reason) => (items, pendingFiles) => {
         calls.results.push({ reason, items, pendingFiles });
-        return { status: 'manual-balance-required', manualBalancePrompt: { reason, [kind.itemsField]: items } };
+        return { status: 'manual-balance-required', message: '请确认', manualBalancePrompt: { reason, [kind.itemsField]: items } };
       };
       const execute = loadSaveBalanceSeedExecute({
         FILENAME_MAPPING_TEMPLATE_ID,
@@ -982,7 +982,10 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
         isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
         ...seedSaveGroupingDeps(),
         // v3.2.19：补录后重算的提示附去重行数，按会话条目统计（真实生成辅助函数）
-        statementGenerationHelpers: createStatementGenerationHelpers({}),
+        statementGenerationHelpers: createStatementGenerationHelpers({
+          appendActivityLogEntry: (entry) => calls.logs.push(entry),
+          buildImportWarningDetailLines: (warnings) => warnings.map((warning) => `第${warning.rowNumber}行`)
+        }),
         rememberAcknowledgedBalanceGaps: (input) => {
           calls.remembered.push(input.gapKeys);
           return true;
@@ -993,7 +996,12 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
         formatBalanceSeedReplaceLine: (item) => `替换 ${item.merchantId} ${item.billDate}`,
         regenerateVirtualTemplateBalanceFromSession: () => (regenOutcome === 'success'
           ? { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: [] } }
-          : { needsSeed: true, [kind.itemsField]: [{ ...kind.item, billDate: '2026-09-02' }], warnings: [] }),
+          : {
+            needsSeed: true,
+            [kind.itemsField]: [{ ...kind.item, billDate: '2026-09-02' }],
+            // v3.2.21：其他模板组的「跨 Sheet 回填」跳过行，后续提示同样带上
+            warnings: [{ type: 'cross-sheet-backfill-skipped', rowNumber: 7 }]
+          }),
         buildBalanceGapConfirmResult: () => {
           throw new Error('不应进入断档确认');
         },
@@ -1028,6 +1036,9 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
         assert.equal(result.manualBalancePrompt.reason, kind.reason, label);
         assert.equal(calls.results[0].reason, kind.reason, label);
         assert.equal(calls.results[0].items[0].billDate, '2026-09-02', label);
+        assert.match(result.message, /^请确认；「跨 Sheet 回填」1行未配上，已跳过、未写入明细/, label);
+        assert.equal(result.crossSheetBackfillSkippedRowCount, 1, label);
+        assert.deepEqual(calls.logs.at(-1).details, ['第7行'], label);
       }
     }
   }
@@ -1779,6 +1790,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
         }
         return result;
       },
+      isAllTransactionsSkippedByBackfill: loadMainFunction('isAllTransactionsSkippedByBackfill', ['hasDetailExportRow'], [require('../../../src/backend/file-service').hasDetailExportRow]),
       parseRequiredBillDates,
       buildDateRangeLabel,
       getToday: () => '2026-10-29',
@@ -2380,6 +2392,8 @@ test('主进程：导入多组生成与补录重算中，其他组错误不遮�
         if (writableFailures[preparedBatch.tid]) throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
       },
       buildChannelBalancePlanningError,
+      // 跨 Sheet 回填：本用例的组都不是被回填跳过全部交易的组
+      isAllTransactionsSkippedByBackfill: () => false,
       assertGenerationOutputNameUnique: () => {},
       findGenerationGroupOutputPathConflicts: () => null,
       removeStatementSessionEntriesByFilePath: () => {},
@@ -2536,7 +2550,12 @@ test('主进程：导出另存为确认后复检遇到渠道余额错误时在�
       },
       createPreflightErrorResult: (payload) => ({ status: 'error', ...payload }),
       dialog: { showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/out.xlsx' }) },
-      mainWindow: null
+      mainWindow: null,
+      // 跨 Sheet 回填：导出余额不附带回填后的原始账单
+      path,
+      collectCrossSheetBackfillExportItems: () => [],
+      isCrossSheetBackfillSourceUnchanged: () => true,
+      allocateCrossSheetBackfillOutputPaths: () => []
     };
     return loadNestedMainDeclaration('prepareStatementExport', deps);
   };
@@ -2791,4 +2810,105 @@ test('generateStatementFiles：明细与余额结果的 billDates 只有首末�
   const preparedBatch = generation.buildPreparedStatementBatchFromEntries({ config, fileEntries: [entry] });
   const result = generation.generateStatementFiles({ config, preparedBatch, scope: 'current' });
   assert.deepEqual([result.detail.billDates, result.balance.billDates], [['2026-09-01', '2026-09-02'], ['2026-09-01', '2026-09-02']]);
+});
+
+test('v3.2.21 跨 Sheet 回填：等待余额处理（补录 / 断档）的结果同样提示回填跳过的笔数并另记活动日志，明细仍可导出', () => {
+  const logs = [];
+  const helpers = createStatementGenerationHelpers({
+    appendActivityLogEntry: (entry) => logs.push(entry),
+    buildImportWarningDetailLines: (warnings, options = {}) => warnings.map((warning) => (
+      `第${warning.rowNumber}行${options.forLog ? '' : `="${warning.matchValue}"`}`
+    )),
+    buildManualBalanceRequiredResult: () => ({ status: 'manual-balance-required', message: '请补录上一账单日余额', detailReady: true }),
+    buildBalanceGapConfirmResult: () => ({ status: 'manual-balance-required', message: '请确认断档', detailReady: true }),
+    normalizeInputFilePaths: (value) => [].concat(value || [])
+  });
+  const skipped = { type: 'cross-sheet-backfill-skipped', rowNumber: 7, matchValue: 'ACC-SECRET' };
+  const manual = helpers.buildImportResultFromGeneratedFiles({
+    generatedFiles: { detail: {}, warnings: [{ type: 'balance-seed-required', prompt: {} }, skipped] },
+    templateName: 'T'
+  });
+  assert.equal(manual.detailReady, true);
+  assert.equal(manual.crossSheetBackfillSkippedRowCount, 1);
+  assert.match(manual.message, /^请补录上一账单日余额；「跨 Sheet 回填」1行未配上，已跳过、未写入明细/);
+  assert.deepEqual(logs.map((entry) => [entry.message, entry.details]), [['跨 Sheet 回填：部分行未配上，已跳过', ['第7行']]]);
+
+  const gap = helpers.buildImportResultFromGeneratedFiles({
+    generatedFiles: { detail: {}, warnings: [{ type: 'balance-gap-confirm', gaps: [{}] }, skipped] },
+    templateName: 'T'
+  });
+  assert.match(gap.message, /^请确认断档；「跨 Sheet 回填」1行未配上/);
+
+  const plain = helpers.buildImportResultFromGeneratedFiles({
+    generatedFiles: { detail: {}, warnings: [{ type: 'balance-seed-required', prompt: {} }] },
+    templateName: 'T'
+  });
+  assert.equal(plain.message, '请补录上一账单日余额');
+});
+
+// ---- v3.2.21 审查回归（第十六轮）----
+
+test('v3.2.21 跨 Sheet 回填：明细没有可导出的交易、只剩带日期且收支为空的期初余额行时，生成在写出文件之前报错并逐行列出跳过原因；没有回填跳过时沿用原行为', () => {
+  const { FileValidationError } = require('../../../src/backend/file-service');
+  const { cloneRowsWithMetadata } = require('../../../src/main-process/statement-session');
+  const outputs = [];
+  const helpers = createStatementGenerationHelpers({
+    buildDetailExportRows,
+    cloneRowsWithMetadata,
+    FileValidationError,
+    buildImportWarningDetailLines: (warnings, options = {}) => warnings.map((warning) => (
+      `第${warning.rowNumber}行${options.forLog ? '' : `="${warning.matchValue}"`}`
+    )),
+    parseRequiredBillDates: () => { outputs.push('parse-bill-dates'); return ['2026-09-01']; },
+    buildStatementOutputFilePath: () => { outputs.push('output-path'); return { outputFilePath: '/tmp/x.xlsx', fileName: 'x.xlsx' }; },
+    writeWorkbookRows: () => { outputs.push('write'); }
+  });
+  const detailRows = [['BillDate', 'Credit Amount', 'Debit Amount'], ['2026-09-01', '', '']];
+  const skipped = { type: 'cross-sheet-backfill-skipped', rowNumber: 3, matchValue: 'ACC-SECRET' };
+  assert.throws(() => helpers.generateStatementFiles({
+    config: { template: { name: 'T' } },
+    preparedBatch: { detailRows, warnings: [skipped], inputFilePaths: ['/private/a.xlsx'] }
+  }), (error) => {
+    assert.ok(error instanceof FileValidationError);
+    assert.match(error.message, /^导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行/);
+    assert.ok(error.detailLines.some((line) => line.includes('ACC-SECRET')));
+    assert.ok(error.logDetailLines.every((line) => !line.includes('ACC-SECRET')));
+    return true;
+  });
+  assert.deepEqual(outputs, [], '没有取账单日期、没有写出');
+  // 收、支同时有值的行仍按原有校验报错（行号来自该行），不当成交易全部被跳过
+  const conflictRows = cloneRowsWithMetadata([['BillDate', 'Credit Amount', 'Debit Amount'], ['2026-09-01', '30', '10']]);
+  conflictRows.rowMetas = [{ sourceRowNumber: 5 }];
+  assert.throws(() => helpers.generateStatementFiles({
+    config: { template: { name: 'T' } },
+    preparedBatch: { detailRows: conflictRows, warnings: [skipped], inputFilePaths: ['/private/a.xlsx'] }
+  }), /Credit Amount 与 Debit Amount 同时有值/);
+});
+
+test('v3.2.21 跨 Sheet 回填：判定交易是否全部被跳过时，收、支同时有值的行不算跳过（留给生成阶段报出原有校验错误）', () => {
+  const { hasDetailExportRow } = require('../../../src/backend/file-service');
+  const isAllSkipped = loadMainFunction('isAllTransactionsSkippedByBackfill', ['hasDetailExportRow'], [hasDetailExportRow]);
+  const entry = (rows) => ({ detailRows: Object.assign(rows, { issues: [{ type: 'cross-sheet-backfill-skipped', rowNumber: 3 }] }) });
+  const header = ['BillDate', 'Credit Amount', 'Debit Amount'];
+  assert.equal(isAllSkipped([entry([header, ['2026-09-01', '', '']])]), true, '只剩期初余额行');
+  assert.equal(isAllSkipped([entry([header, ['2026-09-01', '30', '10']])]), false, '收支同时有值');
+  assert.equal(isAllSkipped([entry([header, ['2026-09-01', '30', '']])]), false, '有交易');
+});
+
+// ---- v3.2.21 审查回归（第十七轮）----
+
+test('v3.2.21 跨 Sheet 回填：已配上但来源值为空、未填入的行，报错文件逐行列出两边行号与空字段，导入结果提示条数', () => {
+  const buildLines = loadMainFunction(
+    'buildImportWarningDetailLines',
+    ['formatBalanceGapLine', 'formatBalanceMismatchLine', 'formatBalanceSeedReplaceLine'],
+    [String, String, String]
+  );
+  const warning = { type: 'cross-sheet-backfill-matched-empty', rowNumber: 3, sourceRowNumber: 2, sourceSheetName: 'USD', emptyFields: ['Channel OrderNo'], sourceFileName: 'a.xlsx' };
+  assert.deepEqual(buildLines([warning]), [
+    '以下行「跨 Sheet 回填」已配上来源行，但来源行中要回填的字段都为空，未填入任何值（该来源行已被占用；该行是否写入明细仍按「过滤账单」等后续处理）：',
+    '「a.xlsx」第3行，来源 Sheet「USD」第2行，为空的字段：Channel OrderNo'
+  ]);
+  const buildImportWarningMessage = loadMainFunction('buildImportWarningMessage');
+  assert.match(buildImportWarningMessage({ warnings: [warning], balanceReady: true, balanceRequested: true }),
+    /跨 Sheet 回填：1行已配上但来源值为空，未填入，请核对/);
 });

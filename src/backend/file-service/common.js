@@ -22,6 +22,8 @@ class FileValidationError extends Error {
     this.name = 'FileValidationError';
     this.code = code;
     this.detailLines = Array.isArray(options.detailLines) ? options.detailLines.slice() : [];
+    // v3.2.21：写入活动日志的明细（不给时同 detailLines）；报错文件保留核对所需原值，日志可只记行号与原因
+    if (Array.isArray(options.logDetailLines)) this.logDetailLines = options.logDetailLines.slice();
     this.context = options.context && typeof options.context === 'object' ? { ...options.context } : {};
   }
 }

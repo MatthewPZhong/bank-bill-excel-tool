@@ -316,6 +316,7 @@ function createEnvironment(dir, label) {
 
   const removedSessionPaths = [];
   const mainDeps = {
+    hasDetailExportRow: require('../../src/backend/file-service').hasDetailExportRow,
     database,
     getTemplateMappingConfig,
     getStatementSessionEntries,
@@ -454,6 +455,7 @@ function createEnvironment(dir, label) {
     'generateMultiTemplateGroupFiles',
     'assertStatementBatchWritable',
     'assertStatementEntriesWritable',
+    'isAllTransactionsSkippedByBackfill',
     'planVirtualTemplateBalanceRegeneration',
     'assertVirtualTemplateBalanceOutputPaths',
     'regenerateVirtualTemplateBalanceFromSession',

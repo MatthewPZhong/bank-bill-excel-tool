@@ -351,6 +351,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
   const imported = [];
   const step6TemplateConfig = (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] });
   const generateGroups = loadMainFunction('generateMultiTemplateGroupFiles', {
+    isAllTransactionsSkippedByBackfill: loadMainFunction('isAllTransactionsSkippedByBackfill', { hasDetailExportRow: require('../../src/backend/file-service').hasDetailExportRow }),
     groupStatementEntriesForGeneration: loadGroupingFunction(step6TemplateConfig),
     ...loadOutputNameConflictFunctions(templates),
     getEntryTemplateConfig: ({ entry }) => ({

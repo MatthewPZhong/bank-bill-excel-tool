@@ -598,6 +598,7 @@ const {
   buildDetailExportRows,
   buildExpectedHeaderCandidates,
   buildMappedRows,
+  hasDetailExportRow,
   buildCurrencyBigAccountUnmappedError,
   compileRegexLiteral,
   FileValidationError,
@@ -625,6 +626,7 @@ const {
   validateCrossSheetBackfillRule,
   allocateCrossSheetBackfillOutputPaths,
   computeFileFingerprint,
+  readFingerprintedFile,
   writeCrossSheetBackfillWorkbook,
   buildFeatureFilterToken,
   buildLogicValueToken,
@@ -3080,15 +3082,24 @@ function applyBigAccountRecognitionSourceText(rawRows, headerRowNumbers) {
 function buildBigAccountRecognitionBasis({
   rawRows,
   expectedSourceHeaders,
-  accountMappingByBankId = {}
+  accountMappingByBankId = {},
+  matchedHeaderRowNumbers = []
 }) {
   const rows = Array.isArray(rawRows) ? rawRows : [];
-  const headerRowNumbers = findHeaderRowNumbersInRawRows(rows, expectedSourceHeaders);
   // v3.2.21 B112：表头按读取库的值定位（同上），窗口内各行的长整数换成文件原文（rawRows.sourceText，见 readers.js）
   const sourceText = rows.sourceText instanceof Map ? rows.sourceText : null;
   // v3.2.19：工作表有效范围不从第 1 行开始时，rows 下标与物理行号差一个偏移；记录的行号与
   //   readRowsWithMetadata 的源行号同为物理行号（finalizeBigAccountRecognitionBasis 按行号比较两者）。
   const rowNumberOffset = Number(rows.firstRowNumber) > 1 ? Number(rows.firstRowNumber) - 1 : 0;
+  // v3.2.21 第三十一、三十二轮审查：识别窗口取正式映射命中的各分段表头（物理行号），与正式映射的分段一一对应（分段按
+  //   fileBlockOrdinal 对应识别窗口）。按读取库原值另找表头可能只命中其中几段（表头含原生日期，正式映射按原文换算后的值或
+  //   原值定位），分段错位会把一段的账户用于另一段。调用方没有提供时按原值查找
+  const formalHeaderRowNumbers = (Array.isArray(matchedHeaderRowNumbers) ? matchedHeaderRowNumbers : [])
+    .map((rowNumber) => Number(rowNumber) - rowNumberOffset)
+    .filter((rowNumber) => Number.isInteger(rowNumber) && rowNumber >= 1);
+  const headerRowNumbers = formalHeaderRowNumbers.length
+    ? formalHeaderRowNumbers
+    : findHeaderRowNumbersInRawRows(rows, expectedSourceHeaders);
   const bridgeMappings = Object.entries(accountMappingByBankId || {})
     .map(([bankId, mapping]) => ({
       bankId: normalizeCell(bankId),
@@ -3137,7 +3148,9 @@ function buildBigAccountRecognitionBasis({
       headerRowNumber: headerRowNumber + rowNumberOffset,
       candidateRows: Object.freeze(candidateRowsWithSource.map(
         (candidateRow) => Object.freeze(candidateRow.cells)
-      ))
+      )),
+      // v3.2.21：各候选行的物理行号（与 candidateRows 同序），定稿时按上一段被过滤 / 跳过的交易行收窄直接匹配窗口
+      candidateSourceRows: Object.freeze(candidateRowsWithSource.map((candidateRow) => candidateRow.sourceRow))
     });
   });
   return Object.freeze({
@@ -3158,13 +3171,37 @@ function finalizeBigAccountRecognitionBasis(basis, mappedRows) {
     ? mappedRows.rowMetas
     : [];
   const preprocessStats = mappedRows && mappedRows.preprocessRowFilterStats;
-  const droppedTransactionRowNumbers = preprocessStats && Array.isArray(preprocessStats.droppedTransactionRowNumbers)
-    ? preprocessStats.droppedTransactionRowNumbers
-    : [];
+  // v3.2.21：跨 Sheet 回填跳过的交易行与「过滤账单」过滤掉的交易行同样仍属于上一段
+  const crossSheetBackfillStats = mappedRows && mappedRows.crossSheetBackfillStats;
+  const droppedTransactionRowNumbers = []
+    .concat(preprocessStats && Array.isArray(preprocessStats.droppedTransactionRowNumbers)
+      ? preprocessStats.droppedTransactionRowNumbers
+      : [])
+    .concat(crossSheetBackfillStats && Array.isArray(crossSheetBackfillStats.skippedTransactionRowNumbers)
+      ? crossSheetBackfillStats.skippedTransactionRowNumbers
+      : []);
+  // v3.2.21：直接匹配窗口只以带发生额的交易行为界（被过滤的说明行如带账期日期和下一段账号、收支为空，不截断窗口）
+  const droppedAmountRowNumbers = []
+    .concat(preprocessStats && Array.isArray(preprocessStats.droppedAmountRowNumbers)
+      ? preprocessStats.droppedAmountRowNumbers
+      : [])
+    .concat(crossSheetBackfillStats && Array.isArray(crossSheetBackfillStats.skippedTransactionRowNumbers)
+      ? crossSheetBackfillStats.skippedTransactionRowNumbers
+      : []);
   const blocks = identifyAccountBlocks(mappedRows || [], { includeEmptyBlocks: true });
   const blockByOrdinal = new Map(
     blocks.map((block) => [Number(block.blockOrdinal), block])
   );
+  // 上一段表头与本段表头之间、被过滤 / 跳过的最后一笔交易行（没有时为 0）：它及之前的行属于上一段
+  const lastDroppedTransactionRowBefore = (blockOrdinal, rowNumbers = droppedTransactionRowNumbers) => {
+    if (blockOrdinal <= 0) return 0;
+    const previousHeaderRow = Number(headerWindows[blockOrdinal - 1]?.headerRowNumber);
+    const currentHeaderRow = Number(headerWindows[blockOrdinal]?.headerRowNumber);
+    if (!Number.isInteger(previousHeaderRow) || !Number.isInteger(currentHeaderRow)) return 0;
+    return rowNumbers.reduce((last, rowNumber) => (
+      rowNumber > previousHeaderRow && rowNumber < currentHeaderRow && rowNumber > last ? rowNumber : last
+    ), 0);
+  };
 
   const bridgeClearingIdsByBlock = headerWindows.map((window, blockOrdinal) => {
     const currentHeaderRow = Number(window && window.headerRowNumber);
@@ -3190,12 +3227,9 @@ function finalizeBigAccountRecognitionBasis(basis, mappedRows) {
       }
     }
 
-    // v3.2.19：原始账单预处理过滤掉的交易行仍属于上一段：界线不早于其中最后一行，避免把其中的账号当成本段账号。
-    if (blockOrdinal > 0) {
-      droppedTransactionRowNumbers.forEach((rowNumber) => {
-        if (rowNumber > lowerExclusive && rowNumber < currentHeaderRow) lowerExclusive = rowNumber;
-      });
-    }
+    // v3.2.19：原始账单预处理过滤掉（v3.2.21 起含跨 Sheet 回填跳过）的交易行仍属于上一段：界线不早于其中最后一行，
+    //   避免把其中的账号当成本段账号。
+    lowerExclusive = Math.max(lowerExclusive, lastDroppedTransactionRowBefore(blockOrdinal));
 
     const candidates = Array.isArray(bridgeCandidatesByBlock[blockOrdinal])
       ? bridgeCandidatesByBlock[blockOrdinal]
@@ -3209,9 +3243,23 @@ function finalizeBigAccountRecognitionBasis(basis, mappedRows) {
     return normalizeCell(ownedCandidate && ownedCandidate.clearingAccountId);
   });
 
+  // v3.2.21：直接匹配窗口同样不含上一段被过滤 / 跳过的交易行及其之前的行，其中的账号不当成本段账号；只以带发生额的
+  //   交易行为界（不带发生额的说明行仍可作为本段账号的候选）。没有这类行时窗口不变（不带行号的旧窗口也不变）。
+  const directWindows = headerWindows.map((window, blockOrdinal) => {
+    const boundary = lastDroppedTransactionRowBefore(blockOrdinal, droppedAmountRowNumbers);
+    const sourceRows = window && Array.isArray(window.candidateSourceRows) ? window.candidateSourceRows : null;
+    if (!boundary || !sourceRows || !Array.isArray(window.candidateRows)) return window;
+    const keep = sourceRows.map((sourceRow) => Number(sourceRow) > boundary);
+    return Object.freeze({
+      ...window,
+      candidateRows: Object.freeze(window.candidateRows.filter((_row, index) => keep[index])),
+      candidateSourceRows: Object.freeze(sourceRows.filter((_row, index) => keep[index]))
+    });
+  });
+
   return Object.freeze({
     version: 1,
-    headerWindows,
+    headerWindows: Object.freeze(directWindows),
     bridgeClearingIdsByBlock: Object.freeze(bridgeClearingIdsByBlock)
   });
 }
@@ -3655,6 +3703,71 @@ function createErrorReport(payload) {
   return report;
 }
 
+// v3.2.21：「导入文件中没有账号存在交易数据」的出口。交易行全部因「跨 Sheet 回填」未配上而被移除时，与生成阶段的
+//   失败报告一样附上逐行跳过原因（报错文件保留配对值，活动日志不写，见 buildImportWarningDetailLines 的 forLog）。
+//   导入预检（prepare）阶段不生成报错文件：结果带 detailLines，由界面弹窗逐行列出，并可点击状态框再次查看
+//   （statement 控制器 applyStatementResult；离页期间返回的不弹窗，回到页面后点击状态框查看）。
+// v3.2.21：跨 Sheet 回填把全部交易都跳过（各文件没有会写入明细的行：只剩表头，或只剩收支都为空 / 0 的期初余额等说明行，
+//   与明细导出同一判定 hasDetailExportRow；收、支同时有值的行不算跳过，留给生成阶段报出原有的校验错误）时，大账号预检不再
+//   按「一个空分段」要求选择账户，直接按没有交易数据返回逐行跳过原因
+function isAllTransactionsSkippedByBackfill(fileEntries) {
+  const entries = Array.isArray(fileEntries) ? fileEntries : [];
+  return entries.length > 0
+    && entries.every((entry) => !(entry && Array.isArray(entry.detailRows) && hasDetailExportRow(entry.detailRows, { includeBothAmounts: true })))
+    && entries.some((entry) => Array.isArray(entry && entry.detailRows && entry.detailRows.issues)
+      && entry.detailRows.issues.some((issue) => issue && issue.type === 'cross-sheet-backfill-skipped'));
+}
+
+// v3.2.21：按文件名映射一次导入多个模板时，任一模板组的交易全部被「跨 Sheet 回填」跳过（组内各文件只剩表头）则整批取消
+//   （用户决定，2026-11-22：整组交易都配不上多半是规则或文件有误，修正后重新导入；不只跳过该组，避免空组参与大账号聚合、
+//   混合模式判定，以及余额补录后丢失其逐行原因）。逐行列出这些组的回填跳过（报错文件带配对值；活动日志只记行号与原因）
+function createBackfillEmptiedGroupsErrorResult(emptiedGroups, templateName) {
+  const fileEntries = (Array.isArray(emptiedGroups) ? emptiedGroups : []).flatMap((group) => (
+    Array.isArray(group && group.entries) ? group.entries : []
+  ));
+  const backfillWarnings = collectCrossSheetBackfillWarnings(fileEntries);
+  return createErrorResult({
+    step: '导入网银明细文件',
+    message: buildBackfillEmptiedGroupsMessage(fileEntries, backfillWarnings),
+    errorCode: 'NO_TRANSACTION_DATA',
+    detailLines: buildImportWarningDetailLines(backfillWarnings),
+    logDetailLines: buildImportWarningDetailLines(backfillWarnings, { forLog: true }),
+    templateName
+  });
+}
+
+function buildBackfillEmptiedGroupsMessage(fileEntries, backfillWarnings) {
+  const skippedCount = backfillWarnings.filter((warning) => warning && warning.type === 'cross-sheet-backfill-skipped').length;
+  const fileNames = (Array.isArray(fileEntries) ? fileEntries : []).map((entry) => path.basename(String((entry && entry.filePath) || '')));
+  const operationContext = archiveOperationContext.getStore();
+  const reviewHint = operationContext && operationContext.phase === 'prepare' ? '请点击状态框查看逐行原因' : '请点击状态框导出报错文件核对';
+  return `以下文件的交易全部被「跨 Sheet 回填」跳过（共${skippedCount}行），已取消本次导入，请核对规则或文件后重新导入（${reviewHint}）：${fileNames.join('、')}`;
+}
+
+function collectCrossSheetBackfillWarnings(fileEntries) {
+  return (Array.isArray(fileEntries) ? fileEntries : []).flatMap((entry) => {
+    const issues = entry && entry.detailRows && Array.isArray(entry.detailRows.issues) ? entry.detailRows.issues : [];
+    return issues.filter((issue) => issue && String(issue.type || '').startsWith('cross-sheet-backfill-'));
+  });
+}
+
+function createNoTransactionDataErrorResult(fileEntries, templateName) {
+  const backfillWarnings = collectCrossSheetBackfillWarnings(fileEntries);
+  const skippedCount = backfillWarnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped').length;
+  const operationContext = archiveOperationContext.getStore();
+  const reviewHint = operationContext && operationContext.phase === 'prepare' ? '请点击状态框查看逐行原因' : '请点击状态框导出报错文件核对';
+  return createErrorResult({
+    step: '导入网银明细文件',
+    message: skippedCount
+      ? `导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了${skippedCount}行，${reviewHint}）`
+      : '导入文件中没有账号存在交易数据',
+    errorCode: 'NO_TRANSACTION_DATA',
+    detailLines: backfillWarnings.length ? buildImportWarningDetailLines(backfillWarnings) : [],
+    logDetailLines: backfillWarnings.length ? buildImportWarningDetailLines(backfillWarnings, { forLog: true }) : null,
+    templateName
+  });
+}
+
 // persistedDetailLines：写入错误报告与活动日志的明细，默认同 detailLines。展示明细含账号等不宜落盘的内容时另给
 //   （v3.2.21：渠道余额方式冲突的错误对象带 persistedDetailLines，只记渠道、账户数与子模板）。
 // logMaskValues：落盘时须整体脱敏的已知账号（如渠道余额冲突的实际 MerchantId，含不是纯数字的账号）；不给时取 originalError 上的。
@@ -3666,6 +3779,8 @@ function createErrorResult({
   detailLines = [],
   persistedDetailLines = null,
   logMaskValues = null,
+  // v3.2.21：写入活动日志的明细（不传时取 originalError.logDetailLines，再没有时同 detailLines）
+  logDetailLines = null,
   context = {},
   templateName = '',
   originalError = null
@@ -3723,7 +3838,9 @@ function createErrorResult({
       `模板名：${recordedTemplateName || recordedContext.templateName || recordedContext.moduleName || 'N/A'}`,
       `错误摘要：${recordedMessage}`,
       `错误代码：${errorCode}`,
-      ...recordedDetailLines
+      ...(Array.isArray(logDetailLines)
+        ? logDetailLines
+        : (originalError && Array.isArray(originalError.logDetailLines) ? originalError.logDetailLines : recordedDetailLines))
     ]
   });
 
@@ -3780,6 +3897,8 @@ function createWarningResult({
   detailReady = false,
   balanceReady = false,
   detailLines = [],
+  // v3.2.21：写入活动日志的明细（不传时同 detailLines）；报错文件保留核对所需原值，日志可只记行号与原因
+  logDetailLines = null,
   context = {},
   errorCode = 'BUSINESS_WARNING',
   errorType = '业务校验错误',
@@ -3800,7 +3919,7 @@ function createWarningResult({
     details: [
       `模板名：${templateName || context.templateName || context.moduleName || 'N/A'}`,
       `告警摘要：${message}`,
-      ...detailLines
+      ...(Array.isArray(logDetailLines) ? logDetailLines : detailLines)
     ]
   });
 
@@ -4194,7 +4313,7 @@ function readTemplateBundleFile(filePath) {
     featureFilters: upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : item.featureFilter),
     // v3.2.19（v8）：原始账单预处理的过滤规则（只规范化；开关在 mappings 中，生成前再校验）
     preprocessRowFilterRules: normalizeRowFilterRules(item.preprocessRowFilterRules),
-    // v3.2.21（v9）：原始账单预处理「跨 Sheet 回填」规则（只规范化；开关在 mappings 中，生成前再校验）
+    // 跨 Sheet 回填（v10）：原始账单预处理「跨 Sheet 回填」规则（只规范化；开关在 mappings 中，生成前再校验）
     crossSheetBackfillRule: normalizeCrossSheetBackfillRule(item.crossSheetBackfillRule),
     // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
     channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
@@ -4488,7 +4607,8 @@ function getBalanceTemplatePath() {
   return path.join(appRoot, 'assets', '余额账单模版.xlsx');
 }
 
-function buildImportWarningDetailLines(warnings) {
+// forLog：写入活动日志的版本——跨 Sheet 回填的配对值（可能是账号、订单号或含客户信息的描述）不写入，只记行号与原因
+function buildImportWarningDetailLines(warnings, { forLog = false } = {}) {
   const detailLines = [];
   const currencyWarnings = warnings.filter((warning) => warning.type === 'currency-unmapped');
   const skippedDetailWarnings = warnings.filter((warning) => warning.type === 'detail-row-skipped');
@@ -4516,25 +4636,74 @@ function buildImportWarningDetailLines(warnings) {
   // v3.2.21：原始账单预处理「跨 Sheet 回填」——未能回填而跳过的行、回填日期不在相邻交易日期之间的行
   const crossSheetBackfillSkippedWarnings = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped');
   const crossSheetBackfillDateWarnings = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-date-out-of-range');
+  const crossSheetBackfillMatchedEmptyWarnings = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-matched-empty');
+  // 各行前标明所属文件（行号是各文件自己的物理行号；一批多个文件、或会话中先后导入的文件，都能据此找到要核对的账单）。
+  //   forLog 只去掉配对值（可能是含客户信息的描述、订单号、对方账号）；文件名与 Sheet 名与活动日志其他条目同一口径保留
+  //   （导入成功记源文件路径、补录余额记银行账号），用于定位要核对的账单
+  //   同名文件（不同目录下的 Statement.xlsx）按路径末尾足以区分的几级标明（如「九月/Statement.xlsx」），不写完整路径（第三十轮审查）
+  const crossSheetBackfillFilePaths = [...new Set([
+    ...crossSheetBackfillSkippedWarnings, ...crossSheetBackfillMatchedEmptyWarnings, ...crossSheetBackfillDateWarnings
+  ].map((warning) => warning.sourceFilePath).filter(Boolean))];
+  // 按文件预先算好（与告警行数无关）：只有文件名相同的才需要比较更上层的目录
+  const crossSheetBackfillLabelByPath = new Map();
+  {
+    const tail = (items, depth) => items.slice(-depth).join('/');
+    const segmentsByName = new Map();
+    crossSheetBackfillFilePaths.forEach((filePath) => {
+      const segments = String(filePath).split(/[\\/]+/).filter(Boolean);
+      const name = segments[segments.length - 1] || '';
+      if (!segmentsByName.has(name)) segmentsByName.set(name, []);
+      segmentsByName.get(name).push({ filePath, segments });
+    });
+    segmentsByName.forEach((group) => {
+      group.forEach(({ filePath, segments }) => {
+        let depth = 1;
+        while (depth < segments.length && group.some((other) => other.filePath !== filePath
+          && tail(other.segments, depth) === tail(segments, depth))) {
+          depth += 1;
+        }
+        crossSheetBackfillLabelByPath.set(filePath, tail(segments, depth));
+      });
+    });
+  }
+  const crossSheetBackfillFileLabel = (warning) => (warning.sourceFilePath
+    ? crossSheetBackfillLabelByPath.get(warning.sourceFilePath) || ''
+    : warning.sourceFileName || '');
+  const crossSheetBackfillRowLabel = (warning) => {
+    const label = crossSheetBackfillFileLabel(warning);
+    return label ? `「${label}」第${warning.rowNumber}行` : `第${warning.rowNumber}行`;
+  };
   if (crossSheetBackfillSkippedWarnings.length) {
     detailLines.push('以下行命中「跨 Sheet 回填」的待回填行条件但未能回填，已跳过，未写入导出的明细账单：');
     crossSheetBackfillSkippedWarnings.forEach((warning) => {
       let detail = '';
       if (warning.reason === 'no-source-row') {
-        detail = `（来源 Sheet「${warning.sourceSheetName}」中没有「${warning.sourceMatchField}」为 ${warning.matchKey} 且未被使用的行）`;
+        detail = forLog
+          ? `（来源 Sheet「${warning.sourceSheetName}」中没有可配对且未被使用的行）`
+          : `（来源 Sheet「${warning.sourceSheetName}」中没有「${warning.sourceMatchField}」为 ${warning.matchKey} 且未被使用的行）`;
       } else if (warning.sourceRowNumber) {
         detail = `（来源 Sheet「${warning.sourceSheetName}」第${warning.sourceRowNumber}行）`;
       }
+      const matchText = forLog ? '' : `，${warning.matchField}="${warning.matchValue || '(空)'}"`;
       detailLines.push(
-        `第${warning.rowNumber}行，${warning.matchField}="${warning.matchValue || '(空)'}"，原因：${warning.reasonText || warning.reason}${detail}`
+        `${crossSheetBackfillRowLabel(warning)}${matchText}，原因：${warning.reasonText || warning.reason}${detail}`
+      );
+    });
+  }
+  if (crossSheetBackfillMatchedEmptyWarnings.length) {
+    detailLines.push('以下行「跨 Sheet 回填」已配上来源行，但来源行中要回填的字段都为空，未填入任何值（该来源行已被占用；该行是否写入明细仍按「过滤账单」等后续处理）：');
+    crossSheetBackfillMatchedEmptyWarnings.forEach((warning) => {
+      const fields = Array.isArray(warning.emptyFields) && warning.emptyFields.length ? `，为空的字段：${warning.emptyFields.join('、')}` : '';
+      detailLines.push(
+        `${crossSheetBackfillRowLabel(warning)}，来源 Sheet「${warning.sourceSheetName}」第${warning.sourceRowNumber}行${fields}`
       );
     });
   }
   if (crossSheetBackfillDateWarnings.length) {
-    detailLines.push('以下行「跨 Sheet 回填」的账单日期不在前后相邻交易的日期之间，已照常输出，请人工核对配对是否正确：');
+    detailLines.push('以下行「跨 Sheet 回填」的账单日期不在前后相邻交易的日期之间，未因此拦截（是否写入明细仍按「过滤账单」等后续处理），请人工核对配对是否正确：');
     crossSheetBackfillDateWarnings.forEach((warning) => {
       detailLines.push(
-        `第${warning.rowNumber}行，回填日期 ${warning.date}，前一笔 ${warning.prevDate || '(无)'}，后一笔 ${warning.nextDate || '(无)'}`
+        `${crossSheetBackfillRowLabel(warning)}，回填日期 ${warning.date}，前一笔 ${warning.prevDate || '(无)'}，后一笔 ${warning.nextDate || '(无)'}`
       );
     });
   }
@@ -4657,6 +4826,10 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
   }
   if (crossSheetBackfillDateCount > 0) {
     warningParts.push(`跨 Sheet 回填：${crossSheetBackfillDateCount}行回填日期不在相邻交易日期之间，请核对`);
+  }
+  const crossSheetBackfillMatchedEmptyCount = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-matched-empty').length;
+  if (crossSheetBackfillMatchedEmptyCount > 0) {
+    warningParts.push(`跨 Sheet 回填：${crossSheetBackfillMatchedEmptyCount}行已配上但来源值为空，未填入，请核对`);
   }
 
   if (skippedDetailCount > 0) {
@@ -9511,19 +9684,59 @@ function validateTemplateConfiguration({
   };
 }
 
-// v3.2.21：跨 Sheet 回填不能回填的本表字段——映射给 Credit Amount、Debit Amount、Balance、Currency、MerchantId 与「按正负号取发生额」
-//   的源列（只取模板表头中的字段，固定值与选项标记自然排除）。保存时校验用；生成时 buildMappedRows 按实际生效映射再校验。
-function collectCrossSheetBackfillExcludedTargets(mappings, headers) {
+// v3.2.21：跨 Sheet 回填不能回填的本表字段（保存时校验）——与生成时 buildMappedRows 同口径：映射给 Credit Amount、
+//   Debit Amount、Balance、Currency、MerchantId 与「按正负号取发生额」的源列（主映射与生效中的拆分映射），按字段区分发生额
+//   的条件与金额字段，拆分行的币种 / 收支 / 金额列，拆分的按正负号与按字段区分发生额，费用账单公式字段，以及这些映射所选
+//   「字段筛选特征值」的筛选字段。只取启用中的配置、模板表头中的字段；主映射取本次保存的，拆分、按字段区分发生额与特征值
+//   取已保存的配置（它们在各自的弹窗中保存）。
+const CROSS_SHEET_BACKFILL_PROTECTED_MAPPING_TARGETS = new Set([
+  'Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId', SIGNED_AMOUNT_MAPPING_FIELD
+]);
+const CROSS_SHEET_BACKFILL_PROTECTED_AREAS = new Set([
+  'amount-split', 'bill-split-row', 'bill-split-amount', 'bill-split-signed', 'bill-split-fee-formula'
+]);
+function collectCrossSheetBackfillExcludedTargets(templateId, mappings, headers) {
   const headerSet = new Set((Array.isArray(headers) ? headers : []).map((header) => normalizeCell(header)).filter(Boolean));
-  const targetFields = new Set(['Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId', SIGNED_AMOUNT_MAPPING_FIELD]);
-  const excluded = new Set();
-  (Array.isArray(mappings) ? mappings : []).forEach((mapping) => {
-    if (!mapping || !targetFields.has(normalizeCell(mapping.templateField))) return;
-    [mapping.mappedField].concat(Array.isArray(mapping.mappedFields) ? mapping.mappedFields : [])
-      .map((value) => normalizeCell(value))
-      .filter((value) => headerSet.has(value))
-      .forEach((value) => excluded.add(value));
+  const billSplitMeta = database.getBillSplitMeta(templateId) || {};
+  const references = templateHeaderUpdateTools.collectTemplateFieldReferences({
+    mappings: Array.isArray(mappings) ? mappings : [],
+    amountSplitRules: database.getAmountSplitRules(templateId) || [],
+    billSplitMappings: database.getBillSplitMappings(templateId) || [],
+    billSplitRows: database.getBillSplitRows(templateId) || [],
+    billSplitAmountRules: database.getBillSplitAmountRules(templateId) || [],
+    billSplitSignedAmountSourceField: normalizeCell(billSplitMeta.signedAmountSourceField),
+    billSplitFeeAmountFormula: Array.isArray(billSplitMeta.feeAmountFormula) ? billSplitMeta.feeAmountFormula : [],
+    billSplitFeeAmountFormulaEnabled: Boolean(billSplitMeta.feeAmountFormulaEnabled)
   });
+  const excluded = new Set();
+  references.forEach((reference) => {
+    if (!reference.active || !headerSet.has(reference.field)) return;
+    const protectedMapping = (reference.area === 'mapping' || reference.area === 'bill-split-mapping')
+      && CROSS_SHEET_BACKFILL_PROTECTED_MAPPING_TARGETS.has(reference.target);
+    if (protectedMapping || CROSS_SHEET_BACKFILL_PROTECTED_AREAS.has(reference.area)) {
+      excluded.add(reference.field);
+    }
+  });
+  // 受保护的目标字段选了「字段筛选特征值」时，实际读取的是该特征值的筛选字段（与生成时同口径：主映射始终生效，
+  //   拆分映射在启用拆分且不复用模块映射时生效）
+  const mappingList = Array.isArray(mappings) ? mappings : [];
+  const switchValue = (field) => normalizeCell((mappingList.find((mapping) => (
+    normalizeCell(mapping && mapping.templateField) === field
+  )) || {}).mappedField);
+  const billSplitMappingActive = switchValue(BILL_SPLIT_MERGE_MAPPING_FIELD) === BILL_SPLIT_MERGE_ENABLED_OPTION
+    && switchValue(REUSE_MODULE_MAPPING_FIELD) === '否';
+  const template = database.getTemplate(templateId);
+  const featureFilterById = new Map((template && Array.isArray(template.featureFilters) ? template.featureFilters : [])
+    .map((featureFilter) => [normalizeCell(featureFilter && featureFilter.id), featureFilter]));
+  mappingList
+    .concat(billSplitMappingActive ? database.getBillSplitMappings(templateId) || [] : [])
+    .forEach((mapping) => {
+      if (normalizeCell(mapping && mapping.mappedField) !== FEATURE_FILTER_MAPPING_FIELD) return;
+      if (!CROSS_SHEET_BACKFILL_PROTECTED_MAPPING_TARGETS.has(normalizeCell(mapping.templateField))) return;
+      const featureFilter = featureFilterById.get(normalizeCell(getFeatureFilterRef(mapping)));
+      const field = normalizeCell(featureFilter && featureFilter.sourceField);
+      if (field && headerSet.has(field)) excluded.add(field);
+    });
   return Array.from(excluded);
 }
 
@@ -9659,7 +9872,7 @@ function createStatementChannelErrorResult(step, error, context = {}) {
 // v3.2.15【导入子模板】（spec §4.4，D9）：表头规则同【导入模板】；模板名按渠道编号自动生成，总是新建，不占用失败的编号。
 function importStatementChildTemplate(channelId, selectedPath) {
   try {
-    const headers = extractHeaders(selectedPath);
+    const headers = extractStatementTemplateHeaders(selectedPath);
     const conflict = findConflictingTemplateByHeaders(headers, null);
     if (conflict) {
       return createErrorResult({
@@ -9749,7 +9962,7 @@ function createTemplateHeadersDuplicateResult(conflict) {
 // 预检：表头能读出且与所有已有模板都不相同，才算新模板并登记待命名；表头重复沿用原报错，不弹命名框。
 function prepareOrdinaryTemplateImport(ownerId, selectedPath) {
   try {
-    const headers = extractHeaders(selectedPath);
+    const headers = extractStatementTemplateHeaders(selectedPath);
     const conflict = findConflictingTemplateByHeaders(headers, null);
     if (conflict) {
       return createTemplateHeadersDuplicateResult(conflict);
@@ -9822,7 +10035,7 @@ function importOrdinaryTemplate(event, options = {}, selectedPath) {
   const { templateName, bankName, region } = checked.name;
   pendingTemplateImports.consume(importToken, ownerId);
   try {
-    const headers = extractHeaders(selectedPath);
+    const headers = extractStatementTemplateHeaders(selectedPath);
     if (JSON.stringify(headers) !== JSON.stringify(pending.headers)) {
       return createErrorResult({
         step: '导入模板文件',
@@ -10345,7 +10558,7 @@ function registerTemplateHandlers() {
       // v3.2.21：原始账单预处理「跨 Sheet 回填」规则同口径：勾选时须设置完整、本表字段在模板表头中、回填字段不能是
       //   发生额 / 余额 / 币种所用的源列；未勾选时只规范化保存（保留草稿）。
       const crossSheetBackfillOptions = {
-        excludedTargetFields: collectCrossSheetBackfillExcludedTargets(templateConfiguration.mappings, template.headers)
+        excludedTargetFields: collectCrossSheetBackfillExcludedTargets(payload.templateId, templateConfiguration.mappings, template.headers)
       };
       let crossSheetBackfillRule = null;
       if (payload.crossSheetBackfillRule && typeof payload.crossSheetBackfillRule === 'object') {
@@ -12148,6 +12361,13 @@ function buildStatementGenerationConfig({
   const billSplitMergeConfig = buildBillSplitMergeConfig(template, selectedMappings, { exportTargetFields: orderedTargetFields });
 
   let currencyMappings = [];
+  const readCurrencyMappingTable = () => {
+    const mappings = currencyMappingCache && Array.isArray(currencyMappingCache.mappings)
+      ? currencyMappingCache.mappings
+      : loadCurrencyMappings(getCurrencyMappingTablePath());
+    if (currencyMappingCache) currencyMappingCache.mappings = mappings;
+    return mappings;
+  };
   // v3.2.19：根据字段值过滤账单时命中行拆分出的币种也按币种映射表规范化（buildMappedRows），按实际下发的规则加载映射表
   const usesBillSplitRowFilter = Boolean(billSplitMergeConfig.enabled
     && Array.isArray(billSplitMergeConfig.rowFilterRules)
@@ -12158,16 +12378,10 @@ function buildStatementGenerationConfig({
     !selectedCurrency &&
     !currencyMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)
   )) {
-    const currencyMappingTablePath = getCurrencyMappingTablePath();
-
-    if (!fs.existsSync(currencyMappingTablePath)) {
+    if (!fs.existsSync(getCurrencyMappingTablePath())) {
       throw new FileValidationError('FILE_READ', '未找到币种映射表，请确认文件已放入 assets 目录');
     }
-
-    currencyMappings = currencyMappingCache && Array.isArray(currencyMappingCache.mappings)
-      ? currencyMappingCache.mappings
-      : loadCurrencyMappings(currencyMappingTablePath);
-    if (currencyMappingCache) currencyMappingCache.mappings = currencyMappings;
+    currencyMappings = readCurrencyMappingTable();
   }
   // v3.2.18：模板【更新】后映射仍引用已删除的字段时拒绝生成（否则该列静默输出空值），在读取文件与写出之前拦截。
   templateHeaderUpdateTools.assertTemplateFieldReferencesAvailable(template, {
@@ -12190,6 +12404,17 @@ function buildStatementGenerationConfig({
   });
   const preprocessRowFilterRules = buildPreprocessRowFilterRules(template, selectedMappings);
   const crossSheetBackfillRule = buildCrossSheetBackfillRule(template, selectedMappings);
+  // v3.2.21：跨 Sheet 回填按金额识别时认作币种的代码取自币种映射表，与输出 Currency 是否经映射表无关
+  //   （固定币种、所选大账号时同样加载）；映射表缺失时由回填模块用内置常见代码。
+  let crossSheetBackfillCurrencyCodes = null;
+  if (crossSheetBackfillRule && crossSheetBackfillRule.matchMode === 'amount') {
+    const tableMappings = currencyMappings.length || !fs.existsSync(getCurrencyMappingTablePath())
+      ? currencyMappings
+      : readCurrencyMappingTable();
+    crossSheetBackfillCurrencyCodes = tableMappings
+      .map((mapping) => normalizeCell(mapping && mapping.englishCode).toUpperCase())
+      .filter(Boolean);
+  }
   const featureFilters = resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig);
   const currencyBigAccountMapping = isCurrencyOnlyTemplate
     ? buildCurrencyBigAccountMappingConfig(template, outputName)
@@ -12216,8 +12441,9 @@ function buildStatementGenerationConfig({
     featureFilters,
     currencyBigAccountMapping,
     preprocessRowFilterRules,
-    // v3.2.21：原始账单预处理「跨 Sheet 回填」规则（未勾选为 null）
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」规则（未勾选为 null）与按金额识别用的币种代码
     crossSheetBackfillRule,
+    crossSheetBackfillCurrencyCodes,
     // v3.2.19：原始账单预处理「重复账单过滤」——映射时为源行算指纹，导入时跨文件查重（spec §8.3）
     duplicateRowFilterEnabled: isDuplicateRowFilterEnabled(selectedMappings),
     dateParseOrder: template.dateFormat || 'auto'
@@ -12598,15 +12824,17 @@ function buildMappedRowsForFile({
     currencyBigAccountMapping: config.currencyBigAccountMapping || null,
     preprocessRowFilterRules: config.preprocessRowFilterRules || null,
     crossSheetBackfillRule: config.crossSheetBackfillRule || null,
+    crossSheetBackfillCurrencyCodes: config.crossSheetBackfillCurrencyCodes || null,
     duplicateRowKeys: Boolean(config.duplicateRowFilterEnabled),
     dateParseOrder: config.dateParseOrder,
     readOptions: {
       readGuard: createStatementWorkbookReadGuard(inputFilePath),
-      onWorkbookRows(rawRows) {
+      onWorkbookRows(rawRows, { headerRowNumbers = [] } = {}) {
         provisionalRecognitionBasis = buildBigAccountRecognitionBasis({
           rawRows,
           expectedSourceHeaders: config.template.headers,
-          accountMappingByBankId: config.accountMappingByBankId
+          accountMappingByBankId: config.accountMappingByBankId,
+          matchedHeaderRowNumbers: headerRowNumbers
         });
       }
     }
@@ -13860,7 +14088,9 @@ function generateMultiTemplateGroupFiles({
         groupTemplateConfig,
         groupConfig,
         effectiveEntries,
-        groupPreparedBatch
+        groupPreparedBatch,
+        // v3.2.21：跨 Sheet 回填跳过了该组全部交易（组内各文件没有会写入明细的行）
+        backfillEmptied: isAllTransactionsSkippedByBackfill(effectiveEntries)
       });
     } catch (error) {
       // v3.2.21（D3）：各渠道的冲突账户与缺字段的行汇总后一并阻断（仍在副作用之前）
@@ -13881,6 +14111,24 @@ function generateMultiTemplateGroupFiles({
   if (balanceModeConflictGroups.length || balanceRowIssueGroups.length) {
     throw buildChannelBalancePlanningError(balanceModeConflictGroups, balanceRowIssueGroups);
   }
+  // v3.2.21：任一组的交易全部被跨 Sheet 回填跳过时整批失败（用户决定，2026-11-22；导入预检已在大账号选择之前拦下，见
+  //   handleFilenameMappingImport）。这里在改动会话（替换同路径的旧条目）与写出之前兜底，显式报错（组内留有带日期的期初余额
+  //   等说明行时生成也取得到账单日期，不能靠生成失败），失败报告带这些组的逐行回填跳过
+  const backfillEmptiedPlans = groupPlans.filter((plan) => plan.backfillEmptied);
+  if (backfillEmptiedPlans.length) {
+    const backfillWarnings = backfillEmptiedPlans
+      .flatMap((plan) => (Array.isArray(plan.groupPreparedBatch.warnings) ? plan.groupPreparedBatch.warnings : []))
+      .filter((warning) => warning && String(warning.type || '').startsWith('cross-sheet-backfill-'));
+    throw new FileValidationError(
+      'FILE_READ',
+      buildBackfillEmptiedGroupsMessage(backfillEmptiedPlans.flatMap((plan) => plan.effectiveEntries), backfillWarnings),
+      {
+        detailLines: buildImportWarningDetailLines(backfillWarnings),
+        logDetailLines: buildImportWarningDetailLines(backfillWarnings, { forLog: true })
+      }
+    );
+  }
+
   if (otherError) throw otherError;
 
   // 所有组先完成 source-stable 解析，再进入 session/输出副作用。
@@ -14084,6 +14332,12 @@ function buildPreparedBatchFromStatementSession({
   });
 }
 
+// 网银模板的表头：与账单导入同一取值规则（见 readers.js extractHeaders 的 exactIsoDates），模板的创建、更新与按文件名匹配的
+//   预检（matchFileToTemplate、matchesTemplateHeaders）一致，从某份文件创建的模板总能匹配该文件自身（v3.2.21 第二十九轮审查）
+function extractStatementTemplateHeaders(filePath) {
+  return extractHeaders(filePath, { exactIsoDates: true });
+}
+
 function matchFileToTemplate(filePath, candidateTemplates) {
   const matches = [];
 
@@ -14092,8 +14346,12 @@ function matchFileToTemplate(filePath, candidateTemplates) {
     if (headers.length === 0) continue;
 
     try {
+      // 只解析第一个 sheet（与缺省读取的表一致），不为表头预检解析整本工作簿（v3.2.21：跨 Sheet 回填的来源表可能很大）
+      // 表头取值与正式映射同一规则（exactIsoDates：按原文校正 ODS 只写在属性上的文本等，v3.2.21 第二十八轮审查）
       readRowsWithMetadata(filePath, headers, {
-        readGuard: createStatementWorkbookReadGuard(filePath)
+        readGuard: createStatementWorkbookReadGuard(filePath),
+        onlyTargetSheet: true,
+        exactIsoDates: true
       });
       matches.push(template);
     } catch (error) {
@@ -14359,22 +14617,42 @@ function getGeneratedStatementExport(kind, scope = 'current') {
 
 // v3.2.21：「跨 Sheet 回填」——【导出明细】时附带写出回填后的原始账单（spec §3.3）。导出范围内启用了回填且至少
 //   回填一行的源文件各一份（同一文件按大账号分段成多个条目时只算一份）；补丁与导入时的源文件指纹随会话条目缓存。
+//   只收集实际纳入本次明细的条目：按文件名映射导出全部时（不走缓存）逐组重新生成，模板已删除的组不纳入明细
+//   （exportStatementByScope），其回填文件同样不导出。其他范围与缓存的明细都含全部条目。
 function collectCrossSheetBackfillExportItems(session, scope) {
+  let entries = getStatementSessionEntries(session, scope);
+  if (scope === 'all' && session && isFilenameMappingMode(session.templateId) && !getGeneratedStatementExport('detail', 'all')) {
+    const included = new Set();
+    groupStatementEntriesForGeneration(entries).forEach(({ entries: groupEntries, templateConfig }) => {
+      if (templateConfig) groupEntries.forEach((entry) => included.add(entry));
+    });
+    entries = entries.filter((entry) => included.has(entry));
+  }
   const byPath = new Map();
-  getStatementSessionEntries(session, scope).forEach((entry) => {
+  entries.forEach((entry) => {
     const rows = entry && entry.detailRows;
     const patches = rows && Array.isArray(rows.crossSheetBackfillPatches) ? rows.crossSheetBackfillPatches : [];
     const source = rows && rows.crossSheetBackfillSource;
     if (!patches.length || !source || !entry.filePath || byPath.has(entry.filePath)) return;
     byPath.set(entry.filePath, { sourceFilePath: entry.filePath, patches, source });
   });
-  return Array.from(byPath.values());
+  if (!byPath.size) return [];
+  // 只导出在明细中留有交易的源文件：按明细导出的同一判定（hasDetailExportRow，与 buildDetailExportRows 一致：收、支都为空
+  //   或 0 的行不进明细）确认该文件至少有一行写入明细；回填后的行被「过滤账单」排除、或只剩零金额行时不导出。
+  //   只检查有回填补丁的文件，找到第一笔即停；同一文件按大账号分段成多个条目时，任一条目有明细行即可
+  const filesWithDetailRows = new Set();
+  entries.forEach((entry) => {
+    if (!entry || !byPath.has(entry.filePath) || filesWithDetailRows.has(entry.filePath)) return;
+    if (hasDetailExportRow(entry.detailRows)) filesWithDetailRows.add(entry.filePath);
+  });
+  return Array.from(byPath.values()).filter((item) => filesWithDetailRows.has(item.sourceFilePath));
 }
 
 // 源文件当前内容与导入时一致才写出；读不到（已删除、无权限）同样视为已变化
 function isCrossSheetBackfillSourceUnchanged(item) {
   try {
-    const fingerprint = computeFileFingerprint(item.sourceFilePath);
+    // 先比较大小（不一致时不读内容），再分块计算摘要
+    const fingerprint = computeFileFingerprint(item.sourceFilePath, { expectedSize: item.source.size });
     return fingerprint.size === item.source.size && fingerprint.sha256 === item.source.sha256;
   } catch (_error) {
     return false;
@@ -14387,13 +14665,22 @@ async function exportCrossSheetBackfillWorkbooks(items, outputPaths, changedItem
   for (const [index, item] of items.entries()) {
     const sourceName = path.basename(item.sourceFilePath);
     const outputFilePath = outputPaths[index];
-    if (!isCrossSheetBackfillSourceUnchanged(item)) {
+    // 读出一次原文件：按句柄核对普通文件与导入时大小后只读这么多字节，摘要一致才把同一份字节交给写出（不再按路径重读，
+    //   避免核对后被替换；文件被换成更大的文件时不读入整份内容）
+    let sourceBuffer = null;
+    try {
+      sourceBuffer = readFingerprintedFile(item.sourceFilePath, item.source);
+    } catch (_error) {
+      sourceBuffer = null;
+    }
+    if (!sourceBuffer) {
       results.push({ sourceName, status: 'changed' });
       continue;
     }
     try {
       const written = await writeCrossSheetBackfillWorkbook({
         sourceFilePath: item.sourceFilePath,
+        sourceBuffer,
         outputFilePath,
         patches: item.patches,
         source: item.source
@@ -14418,7 +14705,8 @@ async function exportCrossSheetBackfillWorkbooks(items, outputPaths, changedItem
   failed.forEach((item) => lines.push(`回填后的原始账单导出失败：${item.sourceName}（${item.message}）`));
   if (results.length) {
     appendActivityLogEntry({
-      level: changed.length || failed.length ? 'warn' : 'info',
+      // 日志按 warning / error / info 分文件，部分失败写入 warning（第三十五轮审查）
+      level: changed.length || failed.length ? 'warning' : 'info',
       message: '导出回填后的原始账单',
       details: results.map((item) => (item.status === 'success'
         ? `${item.sourceName} → ${item.filePath}（${item.cellCount} 个单元格）`
@@ -15936,7 +16224,7 @@ function prepareTemplateHeaderUpdate({ templateId, filePath }) {
       context: { templateId, templateName: template.name }
     });
   }
-  const headers = normalizeBundleTemplateHeaders(extractHeaders(filePath));
+  const headers = normalizeBundleTemplateHeaders(extractStatementTemplateHeaders(filePath));
   if (!headers.some((header) => header !== '')) {
     throw new FileValidationError('TEMPLATE_HEADERS_INVALID', '所选文件没有有效的表头');
   }
@@ -16095,8 +16383,10 @@ function matchesTemplateHeaders(filePath, template) {
   const headers = Array.isArray(template?.headers) ? template.headers : [];
   if (headers.length === 0) return false;
   try {
+    // 表头取值与正式映射同一规则（见 matchFileToTemplate）
     readRowsWithMetadata(filePath, headers, {
-      readGuard: createStatementWorkbookReadGuard(filePath)
+      readGuard: createStatementWorkbookReadGuard(filePath),
+      exactIsoDates: true
     });
     return true;
   } catch (error) {
@@ -16409,6 +16699,15 @@ async function handleFilenameMappingImport(prepared) {
       });
     }
 
+    // v3.2.21：多组时任一组的交易全部被「跨 Sheet 回填」跳过则整批取消，在大账号聚合、选择与写入会话之前返回（用户决定，
+    //   2026-11-22；见 createBackfillEmptiedGroupsErrorResult）。只有一组时沿用单模板「没有交易数据」的口径（后续步骤）
+    const backfillEmptiedGroups = importGenerationGroups.length > 1
+      ? importGenerationGroups.filter((group) => isAllTransactionsSkippedByBackfill(group.entries))
+      : [];
+    if (backfillEmptiedGroups.length) {
+      return createBackfillEmptiedGroupsErrorResult(backfillEmptiedGroups, virtualTemplateName);
+    }
+
     // ===== 步骤 4：聚合大账号 =====
     // 每个命中的模板自身 bigAccounts；v3.2.15（A3）：命中渠道的任一子模板时，取该渠道全部子模板的 bigAccounts。
     const aggregatedBigAccounts = [];
@@ -16485,13 +16784,8 @@ async function handleFilenameMappingImport(prepared) {
 
     if (bigAccountOptions.length > 1) {
       const selectionRows = buildBigAccountSelectionRows(trimmedProvisionalEntries);
-      if (!selectionRows.length) {
-        return createErrorResult({
-          step: '导入网银明细文件',
-          message: '导入文件中没有账号存在交易数据',
-          errorCode: 'NO_TRANSACTION_DATA',
-          templateName: virtualTemplateName
-        });
+      if (!selectionRows.length || isAllTransactionsSkippedByBackfill(trimmedProvisionalEntries)) {
+        return createNoTransactionDataErrorResult(trimmedProvisionalEntries, virtualTemplateName);
       }
       const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
@@ -16544,13 +16838,8 @@ async function handleFilenameMappingImport(prepared) {
 
       if (recognitionResult.status === 'needs-selection') {
         const selectionRows = buildBigAccountSelectionRows(trimmedProvisionalEntries);
-        if (!selectionRows.length) {
-          return createErrorResult({
-            step: '导入网银明细文件',
-            message: '导入文件中没有账号存在交易数据',
-            errorCode: 'NO_TRANSACTION_DATA',
-            templateName: virtualTemplateName
-          });
+        if (!selectionRows.length || isAllTransactionsSkippedByBackfill(trimmedProvisionalEntries)) {
+          return createNoTransactionDataErrorResult(trimmedProvisionalEntries, virtualTemplateName);
         }
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
@@ -17145,6 +17434,11 @@ function registerFileHandlers() {
         if (prepared.previewOnly && !selectionResult.parentProvisionalEntries) {
           selectionResult.parentProvisionalEntries = provisionalFileEntries;
         }
+        // v3.2.21：跨 Sheet 回填跳过了全部交易时，在套用已记住的大账号顺序之前返回逐行跳过原因（固定 / 不固定模式同一口径，
+        //   不按「账户个数或账户号匹配不上」提示检查账户）
+        if (isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
+          return createNoTransactionDataErrorResult(provisionalFileEntries, templateConfig.template.name);
+        }
         const savedMode = readBigAccountMode(ensureStorageRoot(), templateId);
         const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
 
@@ -17419,13 +17713,8 @@ function registerFileHandlers() {
 
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
-        if (!selectionRows.length) {
-          return createErrorResult({
-            step: '导入网银明细文件',
-            message: '导入文件中没有账号存在交易数据',
-            errorCode: 'NO_TRANSACTION_DATA',
-            templateName: templateConfig.template.name
-          });
+        if (!selectionRows.length || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
+          return createNoTransactionDataErrorResult(provisionalFileEntries, templateConfig.template.name);
         }
 
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
@@ -17474,13 +17763,8 @@ function registerFileHandlers() {
           return sum + identifyAccountBlocks(entry.detailRows).length;
         }, 0);
 
-        if (totalBlocks === 0) {
-          return createErrorResult({
-            step: '导入网银明细文件',
-            message: '导入文件中没有账号存在交易数据',
-            errorCode: 'NO_TRANSACTION_DATA',
-            templateName: templateConfig.template.name
-          });
+        if (totalBlocks === 0 || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
+          return createNoTransactionDataErrorResult(provisionalFileEntries, templateConfig.template.name);
         }
 
         const needsSelection = inputFileCount > 1 || totalBlocks > 1;
@@ -17496,13 +17780,8 @@ function registerFileHandlers() {
 
           const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
-          if (!selectionRows.length) {
-            return createErrorResult({
-              step: '导入网银明细文件',
-              message: '导入文件中没有账号存在交易数据',
-              errorCode: 'NO_TRANSACTION_DATA',
-              templateName: templateConfig.template.name
-            });
+          if (!selectionRows.length || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
+            return createNoTransactionDataErrorResult(provisionalFileEntries, templateConfig.template.name);
           }
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
@@ -17567,13 +17846,8 @@ function registerFileHandlers() {
         if (recognitionResult.status === 'needs-selection') {
           const selectionRows = buildBigAccountSelectionRows(recognitionFileEntries);
 
-          if (!selectionRows.length) {
-            return createErrorResult({
-              step: '导入网银明细文件',
-              message: '导入文件中没有账号存在交易数据',
-              errorCode: 'NO_TRANSACTION_DATA',
-              templateName: templateConfig.template.name
-            });
+          if (!selectionRows.length || isAllTransactionsSkippedByBackfill(recognitionFileEntries)) {
+            return createNoTransactionDataErrorResult(recognitionFileEntries, templateConfig.template.name);
           }
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(recognitionFileEntries, { includeEmptyBlocks: true });
@@ -18449,13 +18723,18 @@ function registerFileHandlers() {
               detail: lastGeneratedExports.detail,
               balanceRequested: true
             };
+            // v3.2.21：后续提示与首次提示同样带上「跨 Sheet 回填」跳过的笔数（明细仍可导出）
+            const withPendingNotes = (result) => statementGenerationHelpers.attachCrossSheetBackfillSkipped(
+              withDuplicateDropped(result),
+              regenResult.warnings
+            );
             // 还有其他 group 需要补录、确认断档或确认余额不一致 → 返回下一个 prompt
-            if (regenResult.gaps) return withDuplicateDropped(buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles));
-            if (regenResult.mismatches) return withDuplicateDropped(buildBalanceMismatchConfirmResult(regenResult.mismatches, pendingFiles));
+            if (regenResult.gaps) return withPendingNotes(buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles));
+            if (regenResult.mismatches) return withPendingNotes(buildBalanceMismatchConfirmResult(regenResult.mismatches, pendingFiles));
             if (regenResult.replacements) {
-              return withDuplicateDropped(buildBalanceSeedReplaceConfirmResult(regenResult.replacements, pendingFiles));
+              return withPendingNotes(buildBalanceSeedReplaceConfirmResult(regenResult.replacements, pendingFiles));
             }
-            return withDuplicateDropped(buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles));
+            return withPendingNotes(buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles));
           }
           const generatedFiles = regenResult.generatedFiles;
           if (importContext.scope === 'all') {
@@ -18614,22 +18893,32 @@ function registerFileHandlers() {
         taskContext.fileEvidence.filePlan.outputs[0].filePath
       );
       // v3.2.21：明细导出成功后再写回填后的原始账单（明细未导出时不写）；结果提示附上各份的导出情况
+      const backfillOutputs = taskContext.fileEvidence.filePlan.outputs.slice(1);
+      let backfillResults = [];
       if (result && result.status === 'success'
           && (prepared.backfillItems.length || prepared.backfillChangedItems.length)) {
         const backfill = await exportCrossSheetBackfillWorkbooks(
           prepared.backfillItems,
-          taskContext.fileEvidence.filePlan.outputs.slice(1).map((item) => item.filePath),
+          backfillOutputs.map((item) => item.filePath),
           prepared.backfillChangedItems
         );
+        backfillResults = backfill.results;
         result = {
           ...result,
           message: [result.message].concat(backfill.lines).join('；'),
           crossSheetBackfillExports: backfill.results
         };
       }
+      // 回填文件按本次写出内容的摘要结算（发布后被替换的不会当成本次产物）；未写出的声明为未产出，不按路径读取
+      //   （目标在分配名称后被他人占用时，不把占位者的文件归档成本次产物）。backfillResults 与 backfillOutputs 同序。
       await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
+        files: [{ artifactKey: taskContext.fileEvidence.filePlan.outputs[0].artifactKey }]
+          .concat(backfillOutputs.map((item, index) => {
+            const written = backfillResults[index];
+            return written && written.status === 'success'
+              ? { artifactKey: item.artifactKey, expectedSha256: written.sha256, expectedSizeBytes: written.size }
+              : { artifactKey: item.artifactKey, produced: false };
+          }))
       });
       return result;
     }

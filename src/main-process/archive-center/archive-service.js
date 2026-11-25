@@ -1597,13 +1597,23 @@ class ArchiveService {
         const expectedSizeBytes = hasExpectedSizeBytes
           ? Number(file.expectedSizeBytes)
           : null;
+        // 业务明确声明某个输出未产出（如单份附属文件未写出）：直接记为未产出，不按路径读取——该路径上即使出现了
+        //   他人的文件，也不能归档成本次产物。只允许输出 artifact，且不能同时带摘要。
+        const declaredNotProduced = file.produced === false;
+        if (file.produced !== undefined && file.produced !== false) {
+          throw new TypeError('settle produced 只能声明为 false');
+        }
+        if (declaredNotProduced && (hasExpectedSha256 || artifact.direction !== 'output')) {
+          throw new TypeError('只有输出 artifact 可声明未产出，且不能带摘要');
+        }
         if ((expectedSha256 && !SHA256_RE.test(expectedSha256))
             || (expectedSizeBytes !== null
               && (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0))) {
           throw new TypeError('settle evidence 格式非法');
         }
         if (artifact.status === 'ready') {
-          const matches = (!expectedSha256 || artifact.blob.sha256 === expectedSha256)
+          const matches = !declaredNotProduced
+            && (!expectedSha256 || artifact.blob.sha256 === expectedSha256)
             && (expectedSizeBytes === null || artifact.blob.sizeBytes === expectedSizeBytes);
           if (!matches) {
             throw new ArchiveOperationError(
@@ -1619,6 +1629,8 @@ class ArchiveService {
             sizeBytes: artifact.blob.sizeBytes,
             deduplicated: true
           });
+        } else if (declaredNotProduced) {
+          results.push(this._recordOutputNotProducedUnlocked(artifact));
         } else {
           results.push(await this._archiveArtifactUnlocked(
             artifact,
@@ -2395,6 +2407,32 @@ class ArchiveService {
     } catch (error) {
       return this._recordMaterializationFailureResult(current, error);
     }
+  }
+
+  // 输出未形成可归档内容：与按路径归档时读不到文件同一结果（ARCHIVE_OUTPUT_NOT_PRODUCED，不可重试、需重跑业务）
+  _recordOutputNotProducedUnlocked(artifact) {
+    const failure = {
+      code: 'ARCHIVE_OUTPUT_NOT_PRODUCED',
+      message: '任务预期输出文件未形成可归档内容',
+      retryable: false
+    };
+    let recorded = null;
+    try {
+      recorded = this.repository.failArtifact(artifact.id, {
+        ...failure,
+        sourceOperation: artifact.sourceOperation
+      });
+    } catch (_metadataError) {
+      // 元数据失败通过返回值显式报告，不向业务流程抛出（同 _archiveArtifactUnlocked）。
+    }
+    return {
+      ok: false,
+      status: 'failed',
+      artifact: publicArtifact(recorded ? recorded.artifact : this.repository.getArtifact(artifact.id)),
+      batch: recorded ? recorded.batch : this.repository.getBatch(artifact.batchId),
+      metadataRecorded: Boolean(recorded),
+      ...failure
+    };
   }
 
   async _archiveArtifactUnlocked(artifact, sourcePath, expectedEvidence = {}) {

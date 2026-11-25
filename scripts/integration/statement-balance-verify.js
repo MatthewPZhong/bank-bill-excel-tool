@@ -240,6 +240,7 @@ function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEnt
   const imported = [];
   const templateConfig = (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] });
   const generateGroups = loadMainFunction('generateMultiTemplateGroupFiles', {
+    isAllTransactionsSkippedByBackfill: loadMainFunction('isAllTransactionsSkippedByBackfill', { hasDetailExportRow: require('../../src/backend/file-service').hasDetailExportRow }),
     groupStatementEntriesForGeneration: loadGroupingFunction(templateConfig),
     ...loadOutputNameConflictFunctions(templates),
     getEntryTemplateConfig: ({ entry }) => ({

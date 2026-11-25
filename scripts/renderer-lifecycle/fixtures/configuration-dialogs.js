@@ -3298,7 +3298,11 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js(`cfg.bf('[data-role=condition-summary]').textContent`), '交易日期 空值');
 
     // 回填目标不能是发生额 / 币种所用的源列，也不能重复
-    await js(`cfg.setBf('sourceSheetName',' USD ');cfg.setBf('matchField','附言');cfg.setBf('sourceMatchField','Credit Amount');cfg.setBf('sourceDateOrder','MDY');
+    await js(`cfg.setBf('sourceSheetName','   ');cfg.bf('[data-action=save]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /跨 Sheet 回填：请填写来源 Sheet 名/, '全为空白视为未填写');
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    // Sheet 名按原文保存（工作簿可同时有「USD」与「USD 」两张表，与主进程同口径）
+    await js(`cfg.setBf('sourceSheetName','USD ');cfg.setBf('matchField','附言');cfg.setBf('sourceMatchField','Credit Amount');cfg.setBf('sourceDateOrder','MDY');
       cfg.setBfRow(0,'targetField','交易日期');cfg.setBfRow(0,'sourceField','ValueDate');cfg.bf('[data-action=add-field]').click();
       cfg.setBfRow(1,'targetField','金额');cfg.setBfRow(1,'sourceField','Channel');cfg.bf('[data-action=save]').click();`); await tick();
     assert.match(await js('cfg.top().textContent'), /跨 Sheet 回填：「金额」用于发生额、余额、币种或账户映射，不能作为回填字段/);
@@ -3320,7 +3324,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('cfg.top()===cfg.overlay'), true);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
     await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    assert.deepEqual(await js('cfg.savedBackfill()'), [{ rule: BACKFILL_RULE, toggle: '是' }]);
+    assert.deepEqual(await js('cfg.savedBackfill()'), [{ rule: { ...BACKFILL_RULE, sourceSheetName: 'USD ' }, toggle: '是' }]);
   });
 
   await test('跨 Sheet 回填：回显已保存的规则，字段已不在模板表头时显示「（已删除）」；【取消】与【返回】不提交，未勾选时保留草稿', async () => {

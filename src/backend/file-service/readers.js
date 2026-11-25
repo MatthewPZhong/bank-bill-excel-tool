@@ -16,6 +16,7 @@ const {
 // 自研流式 xlsx 读取器（JSZip + nodeStream 增量解码，内存恒定）。
 //   仅用于 readMeaningfulRowsHead 的「只读文件头部前 N 行」场景，规避 SheetJS 全量读大文件 OOM。
 const { readXlsxStreamed } = require('../xlsx/legacy/streaming-xlsx-reader');
+const { decodeExcelStXstring } = require('../xlsx/excel-text');
 
 function ensureSupportedFile(filePath) {
   const extension = path.extname(filePath).toLowerCase();
@@ -309,17 +310,180 @@ function detectWorkbookContainer(filePath) {
   }
 }
 
-function decodeXmlAttribute(value) {
-  return String(value)
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_m, hex) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(Number(dec)))
-    .replace(/&amp;/g, '&');
+// 注释、CDATA、处理指令按等长空白遮盖：按原文扫描元素时只用于定位（注释中的旧单元格、设置不算元素），需要原文时按位置切取。
+//   读取侧与回填写出侧共用
+function maskXmlMarkup(xml) {
+  return String(xml).replace(/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>/g, (text) => ' '.repeat(text.length));
+}
+
+// 按正则逐个替换元素：在遮盖注释、CDATA、处理指令后的视图中定位（注释中的 <table:table-cell>、<Cell> 不算元素，不会从注释
+//   开始一直匹配到下一个真实单元格的结束标签），整段与各分组按位置从原文切取后交给 replacer（参数同 String#replace）。
+//   pattern 须为全局正则（第三十二轮审查）
+function replaceXmlElements(text, pattern, replacer) {
+  const masked = maskXmlMarkup(text);
+  const locate = new RegExp(pattern.source, pattern.flags.includes('d') ? pattern.flags : `${pattern.flags}d`);
+  let output = '';
+  let cursor = 0;
+  let match;
+  while ((match = locate.exec(masked)) !== null) {
+    const [start, end] = match.indices[0];
+    const groups = match.indices.slice(1).map((range) => (range ? text.slice(range[0], range[1]) : undefined));
+    output += text.slice(cursor, start) + replacer(text.slice(start, end), ...groups);
+    cursor = end;
+    if (end === start) locate.lastIndex += 1;
+  }
+  return output + text.slice(cursor);
+}
+
+// 元素的字符数据：CDATA 段取原样内容，其余部分解码实体，注释与处理指令不算（第三十一轮审查）
+function xmlCharacterData(raw) {
+  const pattern = /<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>/g;
+  let output = '';
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(raw)) !== null) {
+    output += decodeXmlAttributeValue(raw.slice(cursor, match.index));
+    if (match[1] !== undefined) output += match[1];
+    cursor = match.index + match[0].length;
+  }
+  return output + decodeXmlAttributeValue(raw.slice(cursor));
+}
+
+// XML 开始标签（含自闭合）：属性值按引号边界读取（属性值中可有字面 `>`，如表名 `A > B`），第 1 组为属性部分。
+//   读取侧与回填写出侧定位工作表、关系时共用
+function xmlStartTagPattern(localName, flags = 'g') {
+  return new RegExp(`<(?:[\\w.-]+:)?${localName}\\b((?:[^>"']|"[^"]*"|'[^']*')*)>`, flags);
+}
+
+// v3.2.21 第二十六轮：xlsx 的工作表声明（workbook.xml 的 <sheet>）与关系（*.rels 的 <Relationship>）只认生效的元素。读取库按全文
+//   匹配（注释中的旧元素也算，同一 Id 后写的覆盖先写的），与 Excel 不一致：注释等标记中藏有这类元素、或生效的关系 Id 重复时，
+//   读取库读到的工作表无法确认，由调用方拒绝
+function xmlTagsHiddenInMarkup(xml, localName) {
+  const text = Buffer.isBuffer(xml) ? xml.toString('utf8') : String(xml || '');
+  const count = (source) => (source.match(xmlStartTagPattern(localName)) || []).length;
+  return count(text) !== count(maskXmlMarkup(text));
+}
+
+// 生效的关系：Id → { type, target }；同一 Id 重复时返回 null
+function parseXlsxRelationships(xml) {
+  const text = maskXmlMarkup(Buffer.isBuffer(xml) ? xml.toString('utf8') : String(xml || ''));
+  const relationships = new Map();
+  for (const tag of text.match(xmlStartTagPattern('Relationship')) || []) {
+    const id = readXmlAttribute(tag, 'Id');
+    if (!id) continue;
+    if (relationships.has(id)) return null;
+    relationships.set(id, { type: readXmlAttribute(tag, 'Type') || '', target: readXmlAttribute(tag, 'Target') || '' });
+  }
+  return relationships;
 }
 
 function readXmlAttribute(tag, name) {
   const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(tag);
-  return match ? decodeXmlAttribute(match[1] !== undefined ? match[1] : match[2]) : null;
+  return match ? decodeXmlAttributeValue(match[1] !== undefined ? match[1] : match[2]) : null;
+}
+
+// 文档中绑定到 namespace 的前缀（'p:'，默认命名空间为 ''）；rebound：其中某个前缀在文档中另被绑定到其他命名空间（局部重绑定，
+//   不按位置解析时无法确定含义）。text 应为遮盖了注释、CDATA 与处理指令的视图
+function namespacePrefixesOf(text, namespace) {
+  const prefixes = new Set();
+  const others = new Set();
+  const declarationPattern = /\sxmlns(?::([\w.-]+))?\s*=\s*(["'])([\s\S]*?)\2/g;
+  let declaration;
+  while ((declaration = declarationPattern.exec(text))) {
+    const prefix = declaration[1] ? `${declaration[1]}:` : '';
+    if (decodeXmlAttributeValue(declaration[3]).trim() === namespace) prefixes.add(prefix);
+    else others.add(prefix);
+  }
+  return { prefixes, rebound: Array.from(prefixes).some((prefix) => others.has(prefix)) };
+}
+
+// 按命名空间前缀读取属性（属性不继承默认命名空间：只认带前缀的写法）；同名属性在其他命名空间中的写法不论先后都不算
+function namespacedAttributeOf(attributes, prefixes, localName) {
+  const named = Array.from(prefixes).filter(Boolean);
+  if (!named.length) return null;
+  const match = new RegExp(`(?:^|\\s)(?:${named.map(escapeRegExpText).join('|')})${localName}\\s*=\\s*(["'])([\\s\\S]*?)\\1`).exec(attributes);
+  return match ? match[2] : null;
+}
+
+const SPREADSHEETML_MAIN_NAMESPACE_URIS = Object.freeze([
+  'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+  'http://purl.oclc.org/ooxml/spreadsheetml/main'
+]);
+
+// v3.2.21 第二十五轮：xlsx 工作簿的日期系统按 workbook.xml 中根元素 workbook 的直接子元素 workbookPr（SpreadsheetML 主命名空间）
+//   的 date1904 属性确定，与 Excel 一致：注释、CDATA、处理指令中的旧配置与扩展区（extLst）中其他命名空间的同名元素不算。
+//   读取库按全文所有 workbookPr 依次覆盖（注释中的 date1904="1" 后接不带该属性的实际元素时读成 1904）。读取侧与回填写出侧共用。
+//   返回 true / false；结构或命名空间无法确定（根元素不是主命名空间的 workbook、主命名空间的前缀被重绑定）时返回 null
+//   第二十七轮：命名空间按位置解析——根元素的前缀按根元素自身的声明，直接子元素的前缀先看自身的声明、再看根元素的；更深层元素的
+//   局部声明（扩展区中另声明默认命名空间等）不影响判断。返回 { namespace（根元素的命名空间）, date1904 }，无法确定时为 null
+function xlsxWorkbookRootInfo(workbookXml) {
+  const masked = maskXmlMarkup(Buffer.isBuffer(workbookXml) ? workbookXml.toString('utf8') : String(workbookXml || ''));
+  const pattern = /<(\/?)((?:[\w.-]+:)?)([\w.-]+)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>/g;
+  const root = pattern.exec(masked);
+  if (!root || root[1] || root[3] !== 'workbook') return null;
+  const declarationsOf = (attributes) => {
+    const declarations = new Map();
+    const declarationPattern = /(?:^|\s)xmlns(?::([\w.-]+))?\s*=\s*(["'])([\s\S]*?)\2/g;
+    let declaration;
+    while ((declaration = declarationPattern.exec(attributes))) {
+      declarations.set(declaration[1] ? `${declaration[1]}:` : '', decodeXmlAttributeValue(declaration[3]).trim());
+    }
+    return declarations;
+  };
+  const rootDeclarations = declarationsOf(root[4]);
+  const namespace = rootDeclarations.get(root[2]);
+  if (!SPREADSHEETML_MAIN_NAMESPACE_URIS.includes(namespace)) return null;
+  if (root[5]) return { namespace, date1904: false };
+  let depth = 0;
+  let tag;
+  while ((tag = pattern.exec(masked))) {
+    if (tag[1]) {
+      if (depth === 0) break;
+      depth -= 1;
+      continue;
+    }
+    if (depth === 0 && tag[3] === 'workbookPr') {
+      const own = declarationsOf(tag[4]);
+      const childNamespace = own.has(tag[2]) ? own.get(tag[2]) : rootDeclarations.get(tag[2]);
+      if (childNamespace === namespace) {
+        // xsd:boolean（第三十二轮审查）：去掉首尾空白后 true / 1 为开、false / 0 为关；没有该属性按关；其他取值无法确定，
+        //   为 null（读取与回填写出都拒绝，不静默按 1900）
+        const value = readXmlAttribute(tag[4], 'date1904');
+        if (value === null || value === undefined) return { namespace, date1904: false };
+        const normalized = String(value).trim();
+        if (normalized === 'true' || normalized === '1') return { namespace, date1904: true };
+        return { namespace, date1904: normalized === 'false' || normalized === '0' ? false : null };
+      }
+    }
+    if (!tag[5]) depth += 1;
+  }
+  return { namespace, date1904: false };
+}
+
+function xlsxWorkbookDate1904(workbookXml) {
+  const info = xlsxWorkbookRootInfo(workbookXml);
+  return info ? info.date1904 : null;
+}
+
+// 读取库按 bookFiles 保留的压缩包原文中的 workbook.xml；取不到时返回 null
+function xlsxWorkbookXmlOf(workbook) {
+  const directory = workbook && workbook.Directory;
+  const workbookPath = directory && Array.isArray(directory.workbooks) && directory.workbooks[0];
+  return workbookPath ? getZipEntryBuffer(workbook.files, workbookPath) : null;
+}
+
+// 工作簿结构是否无法确认（见 xmlTagsHiddenInMarkup）：workbook.xml 的注释等标记中藏有 <sheet>，或工作簿关系中藏有 <Relationship>、
+//   生效的关系 Id 重复。取不到原文时返回 false（无从核对，沿用读取库）
+function xlsxWorkbookStructureAmbiguous(workbook) {
+  const directory = workbook && workbook.Directory;
+  const workbookPath = directory && Array.isArray(directory.workbooks) && directory.workbooks[0];
+  const workbookXml = workbookPath ? getZipEntryBuffer(workbook.files, workbookPath) : null;
+  if (!workbookXml) return false;
+  if (xmlTagsHiddenInMarkup(workbookXml, 'sheet')) return true;
+  const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
+  const relsXml = getZipEntryBuffer(workbook.files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
+  if (!relsXml) return false;
+  return xmlTagsHiddenInMarkup(relsXml, 'Relationship') || parseXlsxRelationships(relsXml) === null;
 }
 
 function normalizeZipPath(baseDir, target) {
@@ -346,6 +510,1084 @@ function getZipEntryBuffer(files, entryPath) {
   const key = resolveZipEntryKey(files, entryPath);
   const entry = key ? files[key] : null;
   return entry && entry.content ? Buffer.from(entry.content) : null;
+}
+
+// v3.2.21：xlsx 中按 ISO 文本存的日期单元格（t="d"），读取库一律换算成 1900 日期系统的序号，且换算带本机时区偏差（上海
+//   时区多出数十秒、圣保罗时区少一小段，序号带小数，字符串日期映射按无效值拒绝或取到前一天）；1904 工作簿中与同表按 1904
+//   存储的日期序号口径也不同（按工作簿日期系统换算时会再加 1462 天，错移四年）。这里按工作表原文找出这类单元格（物理坐标），由
+//   readRowsWithMetadata 只在映射取值中改成按原文换算的本工作簿日期系统的序号（保留时分秒；日期不存在时改为原文，按无效日期处理，
+//   不取读取库滚入下月的值）；查重用的整行保持读取库原值（指纹与升级前一致）。只在调用方按工作簿日期系统换算日期时使用
+//   （exactIsoDates，网银账单映射与跨 Sheet 回填），其他读取入口保持原结果。单元格省略 r 时按所在行与前一个单元格推出位置
+//   （与读取库一致）。原文从已保留的压缩包（bookFiles）取，没有时只为取原文再读一次；取不到原文时保持读取库的结果。
+const EXCEL_1904_DAY_OFFSET = 1462;
+// ISO 日期文本按字面的年月日时分秒换算成日期序号（不经本机时区；时区后缀不参与换算），保留时间精度（按原值配对等
+//   普通字段与读取库同一精度；日期字段取日期部分）：写法无法识别时 null；写法可识别但日期或时间不存在（如 2026-02-30）时 NaN
+function isoTextToSerial(text, date1904 = false) {
+  const source = String(text || '');
+  // 整串校验：日期、可选的时分秒与小数秒、可选的时区后缀（Z、±hh、±hh:mm、±hhmm，小时 00–23、分钟 00–59；时区不参与
+  //   换算）。开头是 ISO 日期但其后另有内容（2026-09-25Tbroken、2026-09-25T12:30:00oops）或时区超出范围（+02:60、+99:99）
+  //   按无效日期处理，不取日期前缀。
+//   v3.2.21 第二十四轮：月、日可为一位数，年月日之间可用 -、/ 或 .（三者择一、前后一致，如 2026/9/25），同样按日历校验；
+//   其他写法（2026/02-30、Sep 25 2026 等）一律无效：原生日期单元格的原文不是可识别的日期时，读取库按 JavaScript Date 解析，
+//   2026/02/30、2026-2-30 会滚入 3 月 2 日，不能以读取库恰好给出有限数值作为放行条件。空原文返回 null（由调用方决定）
+  if (!source.trim()) return null;
+  const match = /^\s*(\d{4})([-/.])(\d{1,2})\2(\d{1,2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?(?:Z|[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?)?\s*$/i
+    .exec(source);
+  if (!match) return NaN;
+  // 去掉分隔符分组，其余分组下标与只认 ISO 写法时一致
+  match.splice(2, 1);
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const [hour, minute, second] = [Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)];
+  // 24:00:00（分、秒与小数秒都为零）是当日结束的合法写法，即次日零点（读取库同样读成次日）；其他超出范围的时间按不存在处理
+  const endOfDay = hour === 24 && minute === 0 && second === 0 && !/[1-9]/.test(match[7] || '');
+  if ((hour > 23 && !endOfDay) || minute > 59 || second > 59) return NaN;
+  const dayTime = Date.UTC(year, month - 1, day);
+  const date = new Date(dayTime);
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return NaN;
+  // 小数秒截到毫秒（不四舍五入：23:59:59.9999 不能进位到次日）
+  const milliseconds = match[7] ? Number(match[7].slice(0, 3).padEnd(3, '0')) : 0;
+  const fraction = endOfDay ? 1 : (((hour * 60 + minute) * 60 + second) * 1000 + milliseconds) / 86400000;
+  let days = (dayTime - Date.UTC(date1904 ? 1904 : 1899, date1904 ? 0 : 11, date1904 ? 1 : 30)) / 86400000;
+  // 1900 日期系统把 1900-02-29 算作存在的日期，1900-03-01 之前的序号比实际天数少 1
+  if (!date1904 && days < 61) days -= 1;
+  return days + fraction;
+}
+
+// SpreadsheetML 2003（XML 格式的 .xls）按原文逐格扫描（v3.2.21 跨 Sheet 回填）。把要找的单元格临时改成带标记的文本后按同一读取库
+//   再解析一次，由读取库给出与正式读取一致的坐标（含 ss:Index、合并区域的跳格）：
+//   - formulas：没有缓存结果的公式单元格（<Cell ss:Formula="…"/>，没有 <Data> 或 <Data> 为空；读取库会整格丢弃、读成空白）
+//     → formulaCells [{ r, c, cached: false }]，不当成可填的空格；
+//   - isoDates：DateTime 单元格（读取库一律按 1900 日期系统换算成序号，带本机时区偏差；1904 工作簿中同表的数值日期却是 1904 序号）
+//     → isoDateCells [{ r, c, text, serial }]，按原文与工作簿日期系统换算（见 isoTextToSerial），整表日期同一基准。
+//   按 BOM / 字节特征识别 UTF-16 文件（UTF-8 与单字节编码按字节读，标记与 ISO 文本都是 ASCII），标记后按同一编码再解析。
+//   返回 Map：sheet 名 → { formulaCells, isoDateCells }；sheetNames 为空时扫全部 sheet
+const XLML_UNCACHED_FORMULA_MARK = '\u0001__uncached_formula__\u0001';
+const XLML_DATETIME_MARK = '\u0001__datetime__\u0001';
+// ODS 公式错误（标记后接错误文本，如 #DIV/0!）：读取时与没有缓存结果的公式同样处理；转换写出留档时按错误值写出
+const ODS_FORMULA_ERROR_MARK = '\u0001__formula_error__\u0001';
+// ODS 自闭合单元格（只有 office:value 等属性、没有显示文本）的原值标记：值类型 + 分隔符 + 原值
+const ODS_SELF_CLOSING_VALUE_MARK = '\u0001__ods_value__\u0001';
+// ODS 单元格的取值属性（office 命名空间）。其他命名空间中的同名属性（扩展属性 x:value 等）读取库按本地名处理、后写的覆盖先写的，
+//   会读出扩展属性的值：有这类属性的单元格按 office 命名空间的属性改写原值
+const ODS_VALUE_ATTRIBUTE_NAMES = Object.freeze(['value', 'date-value', 'time-value', 'boolean-value', 'string-value']);
+function decodeXmlWorkbookBuffer(buffer) {
+  const swapped = (bytes) => {
+    const copy = Buffer.from(bytes.subarray(0, bytes.length - (bytes.length % 2)));
+    return copy.swap16();
+  };
+  if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) return { text: buffer.subarray(2).toString('utf16le'), utf16: true };
+  if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) return { text: swapped(buffer.subarray(2)).toString('utf16le'), utf16: true };
+  if (buffer.length >= 2 && buffer[0] === 0x3C && buffer[1] === 0x00) return { text: buffer.toString('utf16le'), utf16: true };
+  if (buffer.length >= 2 && buffer[0] === 0x00 && buffer[1] === 0x3C) return { text: swapped(buffer).toString('utf16le'), utf16: true };
+  return { text: buffer.toString('latin1'), utf16: false };
+}
+
+// SpreadsheetML 2003 自闭合的合并单元格（<Cell ss:MergeAcross="1"/>，Excel 导出空的合并格的常见写法）：读取库只把列号加一、
+//   不按合并跨度定位后续单元格（同一行后面没写 ss:Index 的单元格整体左移），也不记入 !merges。读取前改写成成对的起止标签，
+//   读取库即按跨度定位、记下合并范围（v3.2.21 第三十轮审查）。读这类文件的各处（主读取、原文扫描、转换写出）都按同一改写，
+//   坐标一致（查重不按原文核对 SpreadsheetML，见 markTextSourceCells）。注释等标记中的不改；没有这类单元格时返回 null
+function normalizeXlmlMergedCellsText(text) {
+  if (!/Merge(?:Across|Down)/.test(text)) return null;
+  const masked = maskXmlMarkup(text);
+  const pattern = /<((?:[\w.-]+:)?)Cell\b((?:[^>"']|"[^"]*"|'[^']*')*?)\/>/g;
+  let output = '';
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(masked))) {
+    if (!/(?:^|\s)(?:[\w.-]+:)?Merge(?:Across|Down)\s*=/.test(match[2])) continue;
+    const original = text.slice(match.index, match.index + match[0].length);
+    output += `${text.slice(cursor, match.index)}${original.slice(0, -2)}></${match[1]}Cell>`;
+    cursor = match.index + match[0].length;
+  }
+  return cursor === 0 ? null : output + text.slice(cursor);
+}
+
+// 文本容器的工作簿内容按上面的改写重新编码（UTF-16 带 BOM，其他按原字节）；不需要改写时返回 null
+function normalizeXlmlWorkbookBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer)) return null;
+  const { text, utf16 } = decodeXmlWorkbookBuffer(buffer);
+  const normalized = normalizeXlmlMergedCellsText(text);
+  if (normalized === null) return null;
+  return utf16 ? Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(normalized, 'utf16le')]) : Buffer.from(normalized, 'latin1');
+}
+
+// ODS（content.xml 或平面 OpenDocument 正文）中读取库处理不了坐标的写法，读取前改写（第三十三轮审查；主读取、原文扫描与
+//   转换写出同一改写，坐标一致）：
+//   - 被合并覆盖的单元格（table:covered-table-cell）：读取库不论 number-columns-repeated 都只前进一列，后面的单元格整体左移。
+//     改写成只带重复计数的空单元格（覆盖格的内容在表格软件中本就不显示，合并范围由左上角的格声明）；
+//   - 自闭合的行（<table:table-row table:number-rows-repeated="3"/>）：读取库在结束标签处推进行号，自闭合的行不推进，后面的行
+//     整体上移。改写成成对的起止标签。
+//   在遮盖注释等标记后的视图中定位；没有可改写的返回 null
+function normalizeOdsContentText(text) {
+  let changed = false;
+  const coveredPattern = /<((?:[\w.-]+:)?)covered-table-cell(?=[\s/>])((?:[^>"']|"[^"]*"|'[^']*')*?)(?:\/>|>[\s\S]*?<\/\1covered-table-cell>)/g;
+  let output = replaceXmlElements(String(text), coveredPattern, (_whole, prefix, attributes) => {
+    changed = true;
+    const repeat = /(?:^|\s)((?:[\w.-]+:)?number-columns-repeated\s*=\s*(["'])[\s\S]*?\2)/.exec(attributes || '');
+    return `<${prefix}table-cell${repeat ? ` ${repeat[1]}` : ''}/>`;
+  });
+  output = replaceXmlElements(output, /<((?:[\w.-]+:)?)table-row(?=[\s/>])((?:[^>"']|"[^"]*"|'[^']*')*?)\/>/g, (_whole, prefix, attributes) => {
+    changed = true;
+    return `<${prefix}table-row${attributes}></${prefix}table-row>`;
+  });
+  return changed ? output : null;
+}
+
+// ODS 按 normalizeOdsContentText 改写后的工作簿内容（ZIP 或平面 OpenDocument，供读取库读取）；不需要改写时返回 null。
+//   odsContent 为 loadOdsContent 的结果（不改动其内容）
+function odsWorkbookBuffer(odsContent) {
+  if (!odsContent || typeof odsContent.text !== 'string') return null;
+  const normalized = normalizeOdsContentText(odsContent.text);
+  if (normalized === null) return null;
+  if (odsContent.flat) return Buffer.from(normalized, 'utf8');
+  const originalContent = odsContent.entry.content;
+  try {
+    odsContent.entry.content = Buffer.from(normalized, 'utf8');
+    return XLSX.CFB.write(odsContent.container, { type: 'buffer', fileType: 'zip' });
+  } finally {
+    odsContent.entry.content = originalContent;
+  }
+}
+
+// 共享字符串表中实际生效的各项 <si> 的内容原文：在遮盖注释、CDATA、处理指令后的视图中定位（注释中的旧条目不计入下标，与表格
+//   软件一致），按位置从原文切取。读取侧与回填写出侧共用（第三十五轮审查）
+function sharedStringItemSources(text) {
+  const source = String(text || '');
+  const masked = maskXmlMarkup(source);
+  const pattern = /<(?:[\w.-]+:)?si\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?si>)/gd;
+  const items = [];
+  let match;
+  while ((match = pattern.exec(masked)) !== null) {
+    items.push(match.indices[1] ? source.slice(match.indices[1][0], match.indices[1][1]) : '');
+  }
+  return items;
+}
+
+// xlsx 共享字符串表原文中读取库算错下标的写法，读取前改写（第三十五、三十六轮审查）：读取库按原文找 <si>、按 </si> 切分条目——
+//   注释、处理指令中的旧条目也计入下标，自闭合的空条目（<si/>）不占下标，其后引用共享字符串的单元格整体错位（引用 ORIGINAL 的格
+//   读成注释中的空白、日期读成下一行的日期）。去掉注释与处理指令（CDATA 保留），自闭合的空条目展开成成对的空文本条目；
+//   没有可改写的返回 null
+function normalizeXlsxSharedStringsText(text) {
+  let changed = false;
+  const stripped = String(text).replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>/g, (markup) => {
+    if (markup.startsWith('<![CDATA[') || /^<\?xml[\s?]/i.test(markup)) return markup;
+    changed = true;
+    return '';
+  });
+  const expanded = replaceXmlElements(stripped, /<((?:[\w.-]+:)?)si(?=[\s/>])((?:[^>"']|"[^"]*"|'[^']*')*?)\/>/g, (_whole, prefix, attributes) => {
+    changed = true;
+    return `<${prefix}si${attributes}><${prefix}t></${prefix}t></${prefix}si>`;
+  });
+  return changed ? expanded : null;
+}
+
+const XLSX_SHARED_STRINGS_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml';
+
+// ZIP 工作簿内容中的共享字符串表按 normalizeXlsxSharedStringsText 改写后的整份内容，供读取库读取；表的位置按
+//   [Content_Types].xml 中共享字符串表的类型（与读取库一致）。不需要改写或无法确认时返回 null。读取侧与转换写出侧共用
+function normalizeXlsxSharedStringsBuffer(buffer) {
+  let container;
+  try {
+    container = XLSX.CFB.read(buffer, { type: 'buffer' });
+  } catch (_error) {
+    return null;
+  }
+  const types = XLSX.CFB.find(container, '/[Content_Types].xml');
+  if (!types || !types.content) return null;
+  const override = (maskXmlMarkup(Buffer.from(types.content).toString('utf8')).match(xmlStartTagPattern('Override')) || [])
+    .find((tag) => String(readXmlAttribute(tag, 'ContentType') || '').trim() === XLSX_SHARED_STRINGS_CONTENT_TYPE);
+  const partName = override ? readXmlAttribute(override, 'PartName') : null;
+  const entry = partName ? XLSX.CFB.find(container, `/${partName.replace(/^\/+/, '')}`) : null;
+  if (!entry || !entry.content) return null;
+  const normalized = normalizeXlsxSharedStringsText(Buffer.from(entry.content).toString('utf8'));
+  if (normalized === null) return null;
+  entry.content = Buffer.from(normalized, 'utf8');
+  return XLSX.CFB.write(container, { type: 'buffer', fileType: 'zip' });
+}
+
+// 已读入（保留压缩包原文）的工作簿的共享字符串表是否需要按 normalizeXlsxSharedStringsText 改写（只在需要时整份重读）
+function xlsxSharedStringsNeedNormalizing(workbook) {
+  const sstPath = workbook && workbook.Directory && typeof workbook.Directory.sst === 'string' ? workbook.Directory.sst : '';
+  const sstXml = sstPath && workbook.files ? getZipEntryBuffer(workbook.files, sstPath) : null;
+  return Boolean(sstXml) && normalizeXlsxSharedStringsText(sstXml.toString('utf8')) !== null;
+}
+
+// 读取工作簿文件（读取库）：已载入的 ODS 按 odsWorkbookBuffer 改写，其他文本容器按 normalizeXlmlWorkbookBuffer 改写，xlsx 共享
+//   字符串表需要改写时（见 normalizeXlsxSharedStringsText；只在保留了压缩包原文时能核对）按 normalizeXlsxSharedStringsBuffer 重读
+function readSpreadsheetFile(filePath, options, container = detectWorkbookContainer(filePath), odsContent = null) {
+  if (odsContent) {
+    const normalized = odsWorkbookBuffer(odsContent);
+    return normalized ? XLSX.read(normalized, { ...options, type: 'buffer' }) : XLSX.readFile(filePath, options);
+  }
+  if (container === 'text') {
+    const normalized = normalizeXlmlWorkbookBuffer(fs.readFileSync(filePath));
+    if (normalized) return XLSX.read(normalized, { ...options, type: 'buffer' });
+  }
+  const workbook = XLSX.readFile(filePath, options);
+  const normalized = container === 'zip' && options && options.bookFiles && xlsxSharedStringsNeedNormalizing(workbook)
+    ? normalizeXlsxSharedStringsBuffer(fs.readFileSync(filePath))
+    : null;
+  return normalized ? XLSX.read(normalized, { ...options, type: 'buffer' }) : workbook;
+}
+
+function scanXlmlWorkbookCells(source, { sheetNames = null, formulas = false, isoDates = false, date1904 = false } = {}) {
+  const found = new Map();
+  if (!formulas && !isoDates) return found;
+  let buffer;
+  try {
+    buffer = Buffer.isBuffer(source) ? source : fs.readFileSync(source);
+  } catch (_error) {
+    return found;
+  }
+  const decoded = decodeXmlWorkbookBuffer(buffer);
+  const { utf16 } = decoded;
+  // 与主读取同一改写（自闭合合并单元格），标记后再解析的坐标与主读取一致
+  const text = normalizeXlmlMergedCellsText(decoded.text) || decoded.text;
+  if (!(formulas && /Formula\s*=/.test(text)) && !(isoDates && /DateTime/.test(text))) return found;
+  const cellPattern = /<((?:[\w.-]+:)?)Cell\b((?:[^>"']|"[^"]*"|'[^']*')*?)(\/>|>([\s\S]*?)<\/\1Cell>)/g;
+  const dataPattern = /<((?:[\w.-]+:)?)Data\b((?:[^>"']|"[^"]*"|'[^']*')*?)(?:\/>|>([\s\S]*?)<\/\1Data>)/;
+  const typePattern = /((?:^|\s)(?:[\w.-]+:)?Type\s*=\s*)(["'])DateTime\2/;
+  let changed = false;
+  // 单元格自身的 Data（缓存结果）：批注（Comment）中的 Data 与 XML 注释不算（第三十轮审查：带批注的无缓存公式原先被当成有缓存）
+  const directDataOf = (body) => {
+    const source = String(body || '');
+    const hidden = maskXmlMarkup(source)
+      .replace(/<((?:[\w.-]+:)?)Comment\b(?:[^>"']|"[^"]*"|'[^']*')*?(?:\/>|>[\s\S]*?<\/\1Comment>)/g, (comment) => ' '.repeat(comment.length));
+    const located = dataPattern.exec(hidden);
+    return located ? dataPattern.exec(source.slice(located.index, located.index + located[0].length)) : null;
+  };
+  const marked = replaceXmlElements(text, cellPattern, (whole, prefix, attributes, _end, body) => {
+    const dataMatch = directDataOf(body);
+    // 缓存结果按 XML 字符数据判断：只有 XML 注释的 Data（<Data ss:Type="Number"><!-- none --></Data>）不算缓存，按没有缓存结果的
+    //   公式处理，不读成 0 / false 参与配对；CDATA 取原样内容（第三十四轮审查）
+    const cachedText = dataMatch ? xmlCharacterData(String(dataMatch[3] || '')).trim() : '';
+    const hasCachedValue = cachedText !== '';
+    if (formulas && !hasCachedValue && /(?:^|\s)(?:[\w.-]+:)?Formula\s*=/.test(attributes)) {
+      changed = true;
+      const rest = dataMatch ? String(body).replace(dataMatch[0], '') : (body || '');
+      return `<${prefix}Cell${attributes}><${prefix}Data ${prefix}Type="String">${XLML_UNCACHED_FORMULA_MARK}</${prefix}Data>${rest}</${prefix}Cell>`;
+    }
+    if (isoDates && hasCachedValue && typePattern.test(dataMatch[2])) {
+      changed = true;
+      const dataAttributes = dataMatch[2].replace(typePattern, '$1$2String$2');
+      const markedText = cachedText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const replaced = `<${dataMatch[1]}Data${dataAttributes}>${XLML_DATETIME_MARK}${markedText}</${dataMatch[1]}Data>`;
+      return whole.replace(dataMatch[0], replaced);
+    }
+    return whole;
+  });
+  if (!changed) return found;
+  let workbook;
+  try {
+    const markedBuffer = utf16
+      ? Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(marked, 'utf16le')])
+      : Buffer.from(marked, 'latin1');
+    workbook = XLSX.read(markedBuffer, { type: 'buffer', cellDates: false, dense: false, ...(sheetNames ? { sheets: sheetNames } : {}) });
+  } catch (_error) {
+    return found;
+  }
+  return collectMarkedWorkbookCells(workbook, sheetNames, date1904);
+}
+
+// ODS 自闭合单元格按值类型还原（与读取库读有显示文本的同类单元格一致）：数值类（float、percentage、currency）取 office:value，
+//   布尔取 office:boolean-value（xsd:boolean：true / false / 1 / 0），时间取 office:time-value（ISO 8601 时长，可带天数：
+//   PT12H30M → 0.5208…，P1DT2H → 1.0833…，按天的比例；年、月无法换算），文本取 office:string-value；
+//   原值无法识别时为无效数值（不当成空单元格）
+// 单元格内容中最后一个批注（office:annotation）之后的部分：批注不是单元格的值，读取库在批注的起止处清空已读的文字（ODF 中批注
+//   本应在段落之前），只取其后的段落（第三十四轮审查）。在遮盖注释等标记后的视图中定位
+function odsCellBody(inner) {
+  const source = String(inner || '');
+  const masked = maskXmlMarkup(source);
+  const pattern = /<((?:[\w.-]+:)?)annotation(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*?(?:\/>|>[\s\S]*?<\/\1annotation>)/g;
+  let end = 0;
+  let match;
+  while ((match = pattern.exec(masked))) end = match.index + match[0].length;
+  return source.slice(end);
+}
+
+// ODS 各值类型的取值属性（公式的缓存结果）
+const ODS_TYPED_VALUE_ATTRIBUTES = Object.freeze({
+  float: 'value', percentage: 'value', currency: 'value', date: 'date-value', time: 'time-value', boolean: 'boolean-value'
+});
+
+// 一格中 text:s 展开的空格累计上限：Excel 单元格的字符上限，超过时拒绝导入（不截短，截短会把不同的原值读成同一个配对键）
+const ODS_CELL_TEXT_SPACE_LIMIT = 32767;
+
+// 文本单元格的显示文本（没有 office:string-value 时读取库读到的值）：与读取库同一口径，只是不解码 _xHHHH_（第三十四轮审查）——
+//   批注不算（见 odsCellBody）；各段落（text:p；自闭合的段落、text:h 读取库不计）的原文先把制表符、换行各按一个空格，
+//   去首尾空白、连续空格合并为一个，再展开 text:s（按 text:c 个空格）、text:tab、text:line-break，去掉其余标记后解码字符引用；
+//   段落之间换行（前面还没有文字时不换行）。段落在遮盖注释等标记后的视图中定位
+function odsCellText(inner) {
+  const source = odsCellBody(inner);
+  const masked = maskXmlMarkup(source);
+  const paragraphPattern = /<((?:[\w.-]+:)?)p(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*?(?:\/>|>([\s\S]*?)<\/\1p>)/gd;
+  let spaces = 0;
+  let text = '';
+  let match;
+  while ((match = paragraphPattern.exec(masked))) {
+    if (!match.indices[2]) continue;
+    const paragraph = source.slice(match.indices[2][0], match.indices[2][1])
+      // CDATA 是字符数据，按原样保留（转成实体，随后与其余文字一同解码）；注释、处理指令不算（第三十六轮审查）
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>/g, (_markup, cdata) => (cdata === undefined ? ''
+        : cdata.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')))
+      .replace(/[\t\r\n]/g, ' ').trim().replace(/ +/g, ' ')
+      .replace(/<(?:[\w.-]+:)?s\b((?:[^>"']|"[^"]*"|'[^']*')*?)\/?>/g, (_whole, attributes) => {
+        const count = Number(xmlAttributeOf(attributes, 'c'));
+        const width = Number.isSafeInteger(count) && count > 0 ? count : 1;
+        spaces += width;
+        if (spaces > ODS_CELL_TEXT_SPACE_LIMIT) {
+          throw new FileValidationError('FILE_READ', `ODS 单元格中的空格超过 ${ODS_CELL_TEXT_SPACE_LIMIT} 个（Excel 单元格的字符上限），无法读取，请检查文件后重新导入`);
+        }
+        return ' '.repeat(width);
+      })
+      .replace(/<(?:[\w.-]+:)?tab\b[^>]*>/g, '\t')
+      .replace(/<(?:[\w.-]+:)?line-break\b[^>]*>/g, '\n')
+      .replace(/<[^>]*>/g, '');
+    text = `${text.length > 0 ? `${text}\n` : ''}${decodeXmlAttributeValue(paragraph)}`;
+  }
+  return text;
+}
+
+function odsTypedValue(valueType, raw) {
+  const text = String(raw).trim();
+  if (valueType === 'float' || valueType === 'percentage' || valueType === 'currency') {
+    return /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(text) ? Number(text) : Number.NaN;
+  }
+  if (valueType === 'boolean') {
+    if (text === 'true' || text === '1') return true;
+    return text === 'false' || text === '0' ? false : Number.NaN;
+  }
+  if (valueType === 'time') {
+    const match = /^(-)?P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(text);
+    // 至少一个分量；写了 T 时至少一个时间分量（P、PT、P1DT 无效）
+    if (!match || !match.slice(2).some((part) => part !== undefined) || (/T$/.test(text))) return Number.NaN;
+    const seconds = Number(match[2] || 0) * 86400 + Number(match[3] || 0) * 3600 + Number(match[4] || 0) * 60 + Number(match[5] || 0);
+    return (match[1] ? -1 : 1) * seconds / 86400;
+  }
+  return String(raw);
+}
+
+// ODS 自闭合单元格（只有 office:date-value / office:value 等属性、没有显示文本）读取库不创建（读成空）：按原文扫描结果补回
+//   读取库没有读出的格，已有值的格不动。日期补按原文换算的序号（无效日期补无效数值），其他类型按 odsTypedValue。
+//   dateFormat：补回日期时带的数字格式（转换写出用）。读取侧（dense 工作表）与回填写出侧（普通工作表）共用，返回是否补回了单元格
+//   第二十五轮：读取库读出了值、却没有把该格计入工作表范围（表尾整行都是只写在属性上的文本格时，读取库创建了单元格，范围仍停在
+//   前面），按扫描结果扩展范围，否则读取与转换写出都会漏掉这些行。值类单元格（valueCells）按 office 属性的原值改写已有的格
+//   （外来命名空间的同名属性让读取库读错时以标准属性为准），日期单元格只补读取库没有读出的格
+function restoreOdsSelfClosingCells(sheet, { isoDateCells = [], valueCells = [] } = {}, { dateFormat = null } = {}) {
+  let restored = false;
+  // dense 工作表：本版 SheetJS 为 sheet[r][c]（sheet 本身是数组），新版为 sheet['!data'][r][c]
+  const denseRows = Array.isArray(sheet) ? sheet : (Array.isArray(sheet['!data']) ? sheet['!data'] : null);
+  const extendRange = (r, c) => {
+    const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : { s: { r, c }, e: { r, c } };
+    if (sheet['!ref'] && r >= range.s.r && r <= range.e.r && c >= range.s.c && c <= range.e.c) return;
+    range.s.r = Math.min(range.s.r, r);
+    range.s.c = Math.min(range.s.c, c);
+    range.e.r = Math.max(range.e.r, r);
+    range.e.c = Math.max(range.e.c, c);
+    sheet['!ref'] = XLSX.utils.encode_range(range);
+    restored = true;
+  };
+  // overwrite：已有值时是否按扫描结果改写（true 或按已有单元格判断的函数）
+  const put = (r, c, cell, { overwrite = false } = {}) => {
+    const address = XLSX.utils.encode_cell({ r, c });
+    const existing = denseRows ? (denseRows[r] || [])[c] : sheet[address];
+    extendRange(r, c);
+    const hasValue = existing && existing.t !== 'z' && existing.v !== undefined && existing.v !== null && existing.v !== '';
+    if (hasValue && !(typeof overwrite === 'function' ? overwrite(existing) : overwrite)) return;
+    if (hasValue) {
+      if (existing.t === cell.t && Object.is(existing.v, cell.v)) return;
+      // 保留读取库给出的数字格式等，只换类型与值（显示文本按新值重新生成）
+      existing.t = cell.t;
+      existing.v = cell.v;
+      if (cell.z && !existing.z) existing.z = cell.z;
+      delete existing.w;
+      restored = true;
+      return;
+    }
+    if (denseRows) {
+      if (!denseRows[r]) denseRows[r] = [];
+      denseRows[r][c] = cell;
+    } else {
+      sheet[address] = cell;
+    }
+    restored = true;
+  };
+  // 日期单元格：读取库读成数值的（带时区偏差）由调用方按原文换算；读成文本等其他类型的（扩展命名空间的 value-type="string"
+  //   写在后面时读取库按文本读出显示文字）按标准日期属性纠正（第二十六轮）
+  isoDateCells.forEach(({ r, c, text, serial }) => {
+    if (!text) return;
+    put(r, c, Number.isFinite(serial)
+      ? { t: 'n', v: serial, ...(dateFormat ? { z: dateFormat } : {}) }
+      : { t: 'n', v: Number.NaN }, { overwrite: (existing) => existing.t !== 'n' });
+  });
+  valueCells.forEach(({ r, c, value }) => {
+    if (typeof value === 'number') put(r, c, { t: 'n', v: value }, { overwrite: true });
+    else if (typeof value === 'boolean') put(r, c, { t: 'b', v: value }, { overwrite: true });
+    else put(r, c, { t: 's', v: String(value) }, { overwrite: true });
+  });
+  return restored;
+}
+
+// 按标记文本收集再解析后的单元格坐标（SpreadsheetML 2003 与 ODS 共用）
+function collectMarkedWorkbookCells(workbook, sheetNames, date1904, markedValues = []) {
+  const found = new Map();
+  (sheetNames || workbook.SheetNames).forEach((name) => {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) return;
+    const entry = { formulaCells: [], isoDateCells: [], errorCells: [], valueCells: [], mergeRanges: [] };
+    Object.keys(sheet).forEach((address) => {
+      if (address[0] === '!') return;
+      const value = sheet[address] && sheet[address].v;
+      if (typeof value !== 'string') return;
+      if (value === XLML_UNCACHED_FORMULA_MARK) {
+        entry.formulaCells.push({ ...XLSX.utils.decode_cell(address), cached: false });
+        // SpreadsheetML 没有缓存结果的数组公式（ss:ArrayRange）：读取库丢弃锚点、不记范围；标记后重新解析的锚点带范围，
+        //   补作不能单独填写的区域（第三十一轮审查）
+        if (typeof sheet[address].F === 'string' && sheet[address].F) {
+          try {
+            entry.mergeRanges.push(XLSX.utils.decode_range(sheet[address].F));
+          } catch (_error) { /* 范围无法解析时只记该格 */ }
+        }
+      } else if (value.startsWith(ODS_FORMULA_ERROR_MARK)) {
+        const cell = XLSX.utils.decode_cell(address);
+        entry.formulaCells.push({ ...cell, cached: false });
+        entry.errorCells.push({ ...cell, text: value.slice(ODS_FORMULA_ERROR_MARK.length) });
+      } else if (value.startsWith(XLML_DATETIME_MARK)) {
+        const isoText = value.slice(XLML_DATETIME_MARK.length);
+        entry.isoDateCells.push({ ...XLSX.utils.decode_cell(address), text: isoText, serial: isoTextToSerial(isoText, date1904) });
+      } else if (value.startsWith(ODS_SELF_CLOSING_VALUE_MARK)) {
+        // 标记只带序号（只定位坐标），原值取自扫描时记下的属性原文：文本不经读取库的段落空白归一化（REF  123 不折成 REF 123）
+        const marked = markedValues[Number(value.slice(ODS_SELF_CLOSING_VALUE_MARK.length))];
+        const cell = XLSX.utils.decode_cell(address);
+        if (marked && marked.formula) {
+          entry.formulaCells.push({ ...cell, cached: false });
+          if (typeof marked.errorText === 'string') entry.errorCells.push({ ...cell, text: marked.errorText });
+        } else if (marked && marked.valueType === 'date') {
+          entry.isoDateCells.push({ ...cell, text: marked.text, serial: isoTextToSerial(marked.text, date1904) });
+        } else if (marked && marked.valueType) {
+          entry.valueCells.push({ ...cell, value: odsTypedValue(marked.valueType, marked.text) });
+        }
+        // 合并范围与数组公式范围（读取库未记下的）：按标记位置补出，供不可单独填写的判定使用
+        (marked && marked.spans ? marked.spans : []).forEach((span) => {
+          entry.mergeRanges.push({ s: cell, e: { r: cell.r + span.rows - 1, c: cell.c + span.columns - 1 } });
+        });
+      }
+    });
+    found.set(name, entry);
+  });
+  return found;
+}
+
+// 内容是否为 OpenDocument 表格（ODS，含扩展名为 .xls / .xlsx 的）：按规范 ZIP 的第一个条目是不压缩的 mimetype
+// ZIP 格式的 ODS：先按容器签名确认是 ZIP，再看开头的 mimetype（平面 OpenDocument 的根元素属性中也可能出现该 MIME 字符串）
+//   第二十六轮：开头没有明文 mimetype（重新压缩过的 ODS）时按 ZIP 中央目录的条目名识别，与读取库判定 ODS 的依据一致
+//   （有 META-INF/manifest.xml 或 objectdata.xml 即按 ODS 解析），不因开头特征未命中就按 xlsx 处理、跳过 ODS 原文校正
+function isOdsBuffer(buffer) {
+  if (!(Buffer.isBuffer(buffer) && buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04)) {
+    return false;
+  }
+  if (buffer.subarray(0, 512).toString('latin1').includes('application/vnd.oasis.opendocument.spreadsheet')) return true;
+  const names = zipEntryNames((offset, length) => buffer.subarray(offset, offset + length), buffer.length);
+  return Boolean(names && names.some(isOdsMarkerEntry));
+}
+
+function isOdsMarkerEntry(name) {
+  const normalized = String(name).replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+  return normalized === 'meta-inf/manifest.xml' || normalized === 'objectdata.xml';
+}
+
+// ZIP 中央目录中的条目名（支持 ZIP64）；readAt(offset, length) 返回该段字节。结构无法识别时返回 null
+function zipEntryNames(readAt, size) {
+  const tailLength = Math.min(size, 65557);
+  const tail = readAt(size - tailLength, tailLength);
+  let eocd = -1;
+  for (let index = tail.length - 22; index >= 0; index -= 1) {
+    if (tail.readUInt32LE(index) === 0x06054b50) {
+      eocd = index;
+      break;
+    }
+  }
+  if (eocd < 0) return null;
+  let entryCount = tail.readUInt16LE(eocd + 10);
+  let directorySize = tail.readUInt32LE(eocd + 12);
+  let directoryOffset = tail.readUInt32LE(eocd + 16);
+  if (directoryOffset === 0xFFFFFFFF || directorySize === 0xFFFFFFFF || entryCount === 0xFFFF) {
+    const locator = eocd - 20;
+    if (locator < 0 || tail.readUInt32LE(locator) !== 0x07064b50) return null;
+    const zip64Offset = Number(tail.readBigUInt64LE(locator + 8));
+    const zip64 = readAt(zip64Offset, 56);
+    if (zip64.length < 56 || zip64.readUInt32LE(0) !== 0x06064b50) return null;
+    entryCount = Number(zip64.readBigUInt64LE(32));
+    directorySize = Number(zip64.readBigUInt64LE(40));
+    directoryOffset = Number(zip64.readBigUInt64LE(48));
+  }
+  if (directoryOffset + directorySize > size || directorySize > 64 * 1024 * 1024) return null;
+  const directory = readAt(directoryOffset, directorySize);
+  const names = [];
+  let cursor = 0;
+  while (cursor + 46 <= directory.length && directory.readUInt32LE(cursor) === 0x02014b50 && names.length < entryCount) {
+    const nameLength = directory.readUInt16LE(cursor + 28);
+    const extraLength = directory.readUInt16LE(cursor + 30);
+    const commentLength = directory.readUInt16LE(cursor + 32);
+    names.push(directory.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8'));
+    cursor += 46 + nameLength + extraLength + commentLength;
+  }
+  return names;
+}
+
+// 文本格式工作簿的字节按编码解码：UTF-8（可带 BOM）、UTF-16LE / BE（带 BOM，或 XML 开头 `<` 两字节中有一个 0 字节）
+function decodeTextBuffer(buffer) {
+  if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) return buffer.subarray(2).toString('utf16le');
+  if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) return swapUtf16(buffer.subarray(2)).toString('utf16le');
+  if (buffer.length >= 2 && buffer[0] === 0x3C && buffer[1] === 0x00) return buffer.toString('utf16le');
+  if (buffer.length >= 2 && buffer[0] === 0x00 && buffer[1] === 0x3C) return swapUtf16(buffer).toString('utf16le');
+  return buffer.toString('utf8').replace(/^\uFEFF/, '');
+}
+
+function swapUtf16(buffer) {
+  const copy = Buffer.from(buffer.subarray(0, buffer.length - (buffer.length % 2)));
+  return copy.swap16();
+}
+
+// 去掉 XML 开头的空白、声明与注释，返回从根元素开始的文本
+function skipXmlProlog(text) {
+  let rest = text;
+  for (;;) {
+    const next = rest.replace(/^\s+/, '').replace(/^<\?[\s\S]*?\?>/, '').replace(/^<!--[\s\S]*?-->/, '').replace(/^<!DOCTYPE[^>]*>/i, '');
+    if (next === rest) return rest;
+    rest = next;
+  }
+}
+
+// 文本格式工作簿开头的根元素本地名（小写）与属性；不是 XML / HTML 开头时为 null。只解码开头一段，根开始标签在其中没有结束时
+//   再解码整个文件
+function readTextRootElement(buffer) {
+  const rootPattern = /^<([\w.:-]+)((?:[^>"']|"[^"]*"|'[^']*')*)>/;
+  const headLength = 65536;
+  let rest = skipXmlProlog(decodeTextBuffer(buffer.subarray(0, headLength)));
+  let root = rootPattern.exec(rest);
+  if (!root && buffer.length > headLength && rest.startsWith('<')) {
+    rest = skipXmlProlog(decodeTextBuffer(buffer));
+    root = rootPattern.exec(rest);
+  }
+  if (!root) return rest.startsWith('<') ? { name: '', attributes: '' } : null;
+  return { name: root[1].split(':').pop().toLowerCase(), attributes: root[2] };
+}
+
+function isOdsFile(filePath) {
+  let handle = null;
+  try {
+    handle = fs.openSync(filePath, 'r');
+    const head = Buffer.alloc(512);
+    const length = fs.readSync(handle, head, 0, head.length, 0);
+    if (isOdsBuffer(head.subarray(0, length))) return true;
+    if (length < 4 || head[0] !== 0x50 || head[1] !== 0x4B || head[2] !== 0x03 || head[3] !== 0x04) return false;
+    const fd = handle;
+    const size = fs.fstatSync(fd).size;
+    const names = zipEntryNames((offset, count) => {
+      const chunk = Buffer.alloc(Math.max(0, Math.min(count, size - offset)));
+      const read = fs.readSync(fd, chunk, 0, chunk.length, offset);
+      return chunk.subarray(0, read);
+    }, size);
+    return Boolean(names && names.some(isOdsMarkerEntry));
+  } catch (_error) {
+    return false;
+  } finally {
+    if (handle !== null) fs.closeSync(handle);
+  }
+}
+
+function xmlAttributeOf(attributes, name) {
+  const match = new RegExp(`(?:^|\\s)(?:[\\w.-]+:)?${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`).exec(attributes);
+  return match ? match[2] : null;
+}
+
+// XML 字符引用与预定义实体单遍解码：&#38;amp; 解码为字面的 &amp;，不再二次解码为 &（与读取库一致）。读取侧与回填写出侧的
+//   属性、文本统一用此函数（原先逐个实体依次替换的写法先解出 &、再把它与后面的 amp; 当成实体，第三十四轮审查）
+function decodeXmlAttributeValue(value) {
+  return String(value).replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (whole, entity) => {
+    const lower = entity.toLowerCase();
+    if (lower[0] === '#') {
+      const code = lower[1] === 'x' ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
+      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    }
+    return { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[lower];
+  });
+}
+
+// ODS 的日期基准（<table:null-date table:date-value="…"/>，读取库不识别、一律按 1900）：没有声明或为 1899-12-30（ODF 缺省）时
+//   同 Excel 1900 日期系统，1904-01-01 同 1904 日期系统；其他基准（如 StarCalc 的 1900-01-01）返回 null，由调用方报错
+const OPENDOCUMENT_TABLE_NAMESPACE = 'urn:oasis:names:tc:opendocument:xmlns:table:1.0';
+
+function escapeRegExpText(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+}
+
+// 日期基准只取 ODF 表格命名空间中 table:calculation-settings 的 table:null-date（注释、CDATA 中的旧设置与其他元素不算）；
+//   没有该设置时按默认基准 1899-12-30。属性同样按命名空间识别：只认绑定到表格命名空间的前缀上的 date-value（不带前缀的属性
+//   不属于任何命名空间），其他命名空间的同名属性（x:date-value）不论先后都不算。绑定到表格命名空间的前缀在文档中另被绑定到
+//   其他命名空间（局部重绑定）时无法按位置确定含义，返回 null（由调用方报错），不按任一绑定猜测
+function resolveOdsDateSystem(contentXml) {
+  const text = maskXmlMarkup(contentXml);
+  const { prefixes, rebound } = namespacePrefixesOf(text, OPENDOCUMENT_TABLE_NAMESPACE);
+  if (!prefixes.size) return '1900';
+  if (rebound) return null;
+  const prefixPattern = Array.from(prefixes).sort((left, right) => right.length - left.length).map(escapeRegExpText).join('|');
+  const settings = new RegExp(`<(${prefixPattern})calculation-settings\\b(?:[^>"']|"[^"]*"|'[^']*')*?(?:\\/>|>([\\s\\S]*?)<\\/\\1calculation-settings>)`)
+    .exec(text);
+  const element = settings && settings[2]
+    ? new RegExp(`<(?:${prefixPattern})null-date\\b((?:[^>"']|"[^"]*"|'[^']*')*?)\\/?>`).exec(settings[2])
+    : null;
+  const rawValue = element ? namespacedAttributeOf(element[1], prefixes, 'date-value') : null;
+  const value = rawValue === null ? null : decodeXmlAttributeValue(rawValue);
+  if (value === null) return '1900';
+  // XML Schema 日期 / 日期时间可带时区后缀：等价的 UTC 写法（Z、+00:00、-00:00）与不带后缀的同一基准
+  const match = /^(\d{4}-\d{2}-\d{2})(?:T00:00:00(?:\.0+)?)?(?:Z|[+-]00:00)?$/.exec(value.trim());
+  if (match && match[1] === '1899-12-30') return '1900';
+  if (match && match[1] === '1904-01-01') return '1904';
+  return null;
+}
+
+const OPENDOCUMENT_OFFICE_NAMESPACE = 'urn:oasis:names:tc:opendocument:xmlns:office:1.0';
+
+// 平面 OpenDocument（FODS，单个 XML 文件，读取库同样能打开，含扩展名为 .xls 的）：根元素为 OpenDocument 命名空间的
+//   office:document。是时返回全文，否则 null（ZIP、OLE2 与其他文本格式）
+//   按编码解码（含 UTF-16），根开始标签可以很长；返回解码后的全文，读取前把 XML 声明的编码改成 UTF-8（按 UTF-8 重新解析）
+function flatOdsText(buffer) {
+  if (buffer.length >= 4 && ((buffer[0] === 0x50 && buffer[1] === 0x4B) || (buffer[0] === 0xD0 && buffer[1] === 0xCF))) return null;
+  const root = readTextRootElement(buffer);
+  if (!root || root.name !== 'document' || !root.attributes.includes(OPENDOCUMENT_OFFICE_NAMESPACE)) return null;
+  return decodeTextBuffer(buffer).replace(/^(\s*<\?xml\b[^>]*?\bencoding\s*=\s*)(["'])[^"']*\2/i, '$1$2UTF-8$2');
+}
+
+// 内容是网页（HTML）表格的工作簿（含扩展名为 .xls 的；读取库把每个 <table> 读成一张表）。平面 OpenDocument 同样含
+//   <table:table>，不算 HTML
+//   按编码解码后识别（含 UTF-16 的 HTML，读取库同样能读出其中的表格）
+function isHtmlWorkbookFile(filePath) {
+  try {
+    if (detectWorkbookContainer(filePath) !== 'text') return false;
+    const buffer = fs.readFileSync(filePath);
+    return flatOdsText(buffer) === null && classifyTextWorkbook(decodeTextBuffer(buffer)) === 'html';
+  } catch (_error) {
+    return false;
+  }
+}
+
+// 文本容器（非 ZIP、非 OLE2）中读取库读出的数值是否可能由显示文本推断（网页表格、分隔符文本等：读取库把 2026-09-25 这类
+//   文本按本机时区推断成带小数的日期序号，不是工作簿原生的日期值）。只有确认是原生值的格式才不算：平面 OpenDocument
+//   （odsContent 已按全文识别）、不在 OLE2 容器中的 BIFF2–5 工作表流（与读取库同一判断：首字节 0x09、次字节不大于 0x08）、
+//   SpreadsheetML 2003（根元素 Workbook）。其余文本容器（含首行是标题、不含分隔符的分隔符文本）一律算，不能确认时不取日期部分。
+//   在读取时调用，只读文件开头（不为此再整文件读取）
+function textContainerValuesInferred(filePath, odsContent) {
+  if (odsContent && odsContent.flat) return false;
+  try {
+    const handle = fs.openSync(filePath, 'r');
+    let head;
+    try {
+      head = Buffer.alloc(65536);
+      head = head.subarray(0, fs.readSync(handle, head, 0, head.length, 0));
+    } finally {
+      fs.closeSync(handle);
+    }
+    if (head.length >= 2 && head[0] === 0x09 && head[1] <= 0x08) return false;
+    const root = readTextRootElement(head);
+    return !(root && root.name === 'workbook');
+  } catch (_error) {
+    return true;
+  }
+}
+
+// 读取 ODS 的内容（按内容识别，含扩展名为 .xls / .xlsx 的）：ZIP 格式为 content.xml，{ container, entry, text, dateSystem }；
+//   平面 OpenDocument（FODS）为整个文件，{ flat: true, text, dateSystem }；不是 ODS 或读不出时为 null
+function loadOdsContent(source) {
+  try {
+    const buffer = Buffer.isBuffer(source) ? source : fs.readFileSync(source);
+    if (!isOdsBuffer(buffer)) {
+      const flatText = flatOdsText(buffer);
+      return flatText === null ? null : { flat: true, text: flatText, dateSystem: resolveOdsDateSystem(flatText) };
+    }
+    const container = XLSX.CFB.read(buffer, { type: 'buffer' });
+    const entry = XLSX.CFB.find(container, 'content.xml');
+    if (!entry || !entry.content) return null;
+    const text = Buffer.from(entry.content).toString('utf8');
+    return { container, entry, text, dateSystem: resolveOdsDateSystem(text) };
+  } catch (_error) {
+    return null;
+  }
+}
+
+// 只保留指定的工作表（顶层 <table:table> 元素按 table:name 筛选，嵌套的表随所在表保留）；sheetNames 为空时原样返回
+function odsTableNameCandidates(attributes) {
+  const candidates = [];
+  const pattern = /(?:^|\s)(?:[\w.-]+:)?(?:name|名称)\s*=\s*(["'])([\s\S]*?)\1/g;
+  let match;
+  while ((match = pattern.exec(attributes))) candidates.push(match[2], decodeXmlAttributeValue(match[2]));
+  return candidates;
+}
+
+// ODS 的工作表（按文档顺序）：name 为实际表名（表名属性解码一次），key 为读取库的工作表键（表名属性原文，读取库不解码字符引用）；
+//   表名属性不止一个（读取库取最后一个、本函数无法确认）时 ambiguous 为 true。不是 ODS 时返回 null（第二十九轮）
+function odsSheetNameEntries(source) {
+  // 已载入的 ODS 内容（loadOdsContent 的结果）直接使用
+  const loaded = source && typeof source === 'object' && !Buffer.isBuffer(source) && typeof source.text === 'string'
+    ? source
+    : loadOdsContent(source);
+  if (!loaded) return null;
+  const tagPattern = /<(\/?)((?:[\w.-]+:)?)table((?:\s(?:[^>"']|"[^"]*"|'[^']*')*?)?)(\/?)>/g;
+  const masked = maskXmlMarkup(loaded.text);
+  const entries = [];
+  let depth = 0;
+  let match;
+  while ((match = tagPattern.exec(masked))) {
+    const [whole, closing, , maskedAttributes, selfClosing] = match;
+    if (closing) {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0) {
+      // 标签按遮盖注释后的文本定位，属性取原文（遮盖不改变长度）
+      const attributes = maskedAttributes ? loaded.text.slice(match.index, match.index + whole.length) : '';
+      const raws = [];
+      const pattern = /\s(?:[\w.-]+:)?(?:name|名称)\s*=\s*(["'])([\s\S]*?)\1/g;
+      let attribute;
+      while ((attribute = pattern.exec(attributes))) raws.push(attribute[2]);
+      const key = raws.length > 0 ? raws[raws.length - 1] : '';
+      entries.push({ key, name: decodeXmlAttributeValue(key), ambiguous: raws.length !== 1 });
+    }
+    if (!selfClosing) depth += 1;
+  }
+  return entries;
+}
+
+function keepOdsTables(text, sheetNames) {
+  if (!Array.isArray(sheetNames)) return text;
+  const wanted = new Set(sheetNames);
+  const tagPattern = /<(\/?)((?:[\w.-]+:)?)table((?:\s(?:[^>"']|"[^"]*"|'[^']*')*?)?)(\/?)>/g;
+  let output = '';
+  let cursor = 0;
+  let depth = 0;
+  let dropFrom = -1;
+  // 按遮盖注释后的文本定位标签（注释中的 <table:table> 不计入层级），切取原文
+  const masked = maskXmlMarkup(text);
+  let match = tagPattern.exec(masked);
+  while (match) {
+    const [whole, closing, , attributes, selfClosing] = match;
+    if (closing) {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0 && dropFrom >= 0) {
+        cursor = match.index + whole.length;
+        dropFrom = -1;
+      }
+    } else {
+      if (depth === 0) {
+        // 读取库的工作表键是表名属性的原文（不解码字符引用，Cash & Bank 的键是 Cash &amp; Bank）：原文与解码后的写法都比对，
+        //   多保留的表只多解析、不影响按键收集（第二十八轮）
+        const keep = odsTableNameCandidates(attributes || '').some((name) => wanted.has(name));
+        if (!keep) {
+          output += text.slice(cursor, match.index);
+          cursor = match.index + whole.length;
+          if (!selfClosing) dropFrom = match.index;
+        }
+      }
+      if (!selfClosing) depth += 1;
+    }
+    match = tagPattern.exec(masked);
+  }
+  return dropFrom >= 0 ? output : output + text.slice(cursor);
+}
+
+// ODS 按 content.xml 原文逐格扫描（v3.2.21 跨 Sheet 回填与账单日期），做法同 SpreadsheetML 2003（scanXlmlWorkbookCells）：
+//   - isoDates：日期单元格（office:value-type="date"）读取库按本机时区换算成序号（西半球时区取日期部分会早一天）
+//     → 按 office:date-value 原文与工作簿日期系统（date1904，由调用方按 loadOdsContent 的 dateSystem 确定）换算；
+//   - formulas：没有缓存结果的公式单元格（带 table:formula、没有 office:value-type；读取库整格丢弃、读成空白）。
+//   source 可以是路径、Buffer 或 loadOdsContent 的结果。只标记并重新解析 sheetNames 指定的工作表（读取库解析 ODS 不支持
+//   只解析部分工作表，先去掉其他表）；没有要标记的单元格时不重新解析。不是 ODS（按内容识别）时返回空 Map
+function scanOdsWorkbookCells(source, { sheetNames = null, formulas = false, isoDates = false, date1904 = false } = {}) {
+  const found = new Map();
+  if (!formulas && !isoDates) return found;
+  const loaded = source && typeof source.text === 'string' && (source.container || source.flat) ? source : loadOdsContent(source);
+  if (!loaded) return found;
+  const cellPattern = /<((?:[\w.-]+:)?)table-cell\b((?:[^>"']|"[^"]*"|'[^']*')*?)(\/>|>([\s\S]*?)<\/\1table-cell>)/g;
+  // 取值属性按 office 命名空间读取（第二十五轮）：扩展属性 x:value 等不论先后都不算；office 前缀被局部重绑定时无法确定，拒绝
+  const office = namespacePrefixesOf(maskXmlMarkup(loaded.text), OPENDOCUMENT_OFFICE_NAMESPACE);
+  if (office.rebound) {
+    throw new FileValidationError('FILE_READ', 'ODS 文件的命名空间无法识别，无法确定单元格的值，请用 Excel 另存为 xlsx 后重新导入');
+  }
+  const officeAttributeOf = (attributes, localName) => namespacedAttributeOf(attributes, office.prefixes, localName);
+  const table = namespacePrefixesOf(maskXmlMarkup(loaded.text), OPENDOCUMENT_TABLE_NAMESPACE);
+  const spanOf = (attributes, localName) => {
+    const count = Number(namespacedAttributeOf(attributes, table.prefixes, localName));
+    return Number.isSafeInteger(count) && count > 1 ? count : 1;
+  };
+  const foreignValueAttribute = (attributes, officeValueType) => {
+    const pattern = /(?:^|\s)([\w.-]+:)?([\w.-]+)\s*=\s*(["'])([\s\S]*?)\3/g;
+    let attribute;
+    while ((attribute = pattern.exec(attributes))) {
+      const [, prefix = '', localName, , value] = attribute;
+      if (!prefix || office.prefixes.has(prefix)) continue;
+      if (ODS_VALUE_ATTRIBUTE_NAMES.includes(localName)) return true;
+      // 扩展的值类型（LibreOffice 的 calcext:value-type）与标准值类型相同、或为公式错误（error，另行处理）时不算冲突
+      if (localName === 'value-type' && value !== officeValueType && value !== 'error') return true;
+    }
+    return false;
+  };
+  let changed = false;
+  const markedValues = [];
+  // 属性值按 XML 规范化后解码字符引用：行尾先统一（字面 CRLF 与单独的 CR 都按一个换行），再把字面的制表符、换行各按一个
+  //   空格（PO<CRLF>123 读成 PO 123，不是两个空格，第三十二轮审查）；原有的连续空格与字符引用（&#10;）保留
+  const attributeText = (raw) => decodeXmlAttributeValue(String(raw).replace(/\r\n?/g, '\n').replace(/[\t\n]/g, ' '));
+  // 文本单元格读取库读到的值：有 office:string-value 时取其值，否则取显示文本
+  const odsStringDisplay = (attributes, inner) => {
+    const raw = officeAttributeOf(attributes, 'string-value');
+    return raw !== null && attributeText(raw) !== '' ? attributeText(raw) : odsCellText(inner);
+  };
+  const valueMark = (valueType, text) => {
+    markedValues.push({ valueType, text });
+    return `${ODS_SELF_CLOSING_VALUE_MARK}${markedValues.length - 1}`;
+  };
+  // 与主读取同一改写（覆盖格的重复计数、自闭合的行），标记后再解析的坐标与主读取一致
+  const odsText = normalizeOdsContentText(loaded.text) || loaded.text;
+  const marked = replaceXmlElements(keepOdsTables(odsText, sheetNames), cellPattern, (whole, prefix, attributes, _closing, inner) => {
+    const valueType = officeAttributeOf(attributes, 'value-type');
+    // 公式错误（LibreOffice 写成 office:value-type="string" 加 calcext:value-type="error"，读取库读成 #DIV/0! 等文本）：与没有
+    //   缓存结果的公式同样处理，不提供配对键或回填值（office:value-type 没有 error 这一取值，按任一前缀的 value-type="error" 识别）
+    const isFormulaError = /\s(?:[\w.-]+:)?value-type\s*=\s*(["'])error\1/.test(attributes);
+    // 文本单元格的值可能与读取库读到的不同：原文含形似 Excel 转义码的 _xHHHH_ 或字符引用（读取库按 SpreadsheetML 规则解码），
+    //   或含 CDATA（读取库连同其中的文字一起丢掉，第三十六轮审查）。先粗筛，再按读取库口径取显示文本核对
+    const hasCdata = /<!\[CDATA\[/.test(String(inner || ''));
+    const literalText = isoDates && valueType === 'string' && (hasCdata
+      || /&#|_x[0-9a-f]{4}_/i.test(`${officeAttributeOf(attributes, 'string-value') || ''}${String(inner || '').replace(/<[^>]*>/g, '')}`))
+      ? odsStringDisplay(attributes, inner)
+      : null;
+    let markText = null;
+    let errorText = null;
+    if (formulas && isFormulaError) {
+      // 错误码优先取标准的 office:string-value（可以没有显示文本），没有或为空时取显示文本（第二十八轮）
+      const errorValue = officeAttributeOf(attributes, 'string-value');
+      errorText = (errorValue !== null && attributeText(errorValue).trim() !== ''
+        ? attributeText(errorValue)
+        : odsCellText(inner)).trim();
+      markText = `${ODS_FORMULA_ERROR_MARK}${errorText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}`;
+    } else if (formulas && xmlAttributeOf(attributes, 'formula') !== null && (valueType === null
+      || (valueType === 'string' && odsStringDisplay(attributes, inner) === '')
+      || (ODS_TYPED_VALUE_ATTRIBUTES[valueType] && officeAttributeOf(attributes, ODS_TYPED_VALUE_ATTRIBUTES[valueType]) === null))) {
+      // 没有缓存结果的公式；结果为空文本的公式（value-type="string"、空的 string-value、没有显示段落，读取库整格丢弃）同样
+      //   按没有结果处理，不当成可填的空格覆盖银行公式（第三十三轮审查）；声明了值类型却没有该类型的取值属性（of:=TRUE() 写了
+      //   value-type="boolean" 而没有 office:boolean-value，读取库推断成 false）同样没有缓存结果，显式缓存的 false、0 照常保留
+      //   （第三十六轮审查）
+      markText = XLML_UNCACHED_FORMULA_MARK;
+    } else if (isoDates && valueType === 'date' && officeAttributeOf(attributes, 'date-value')) {
+      markText = `${XLML_DATETIME_MARK}${officeAttributeOf(attributes, 'date-value').trim()}`;
+    } else if (isoDates && valueType !== null && foreignValueAttribute(attributes, valueType)) {
+      // 有外来命名空间的同名取值属性：按 office 属性的原值改写（文本格没有 office:string-value 时取显示文本）
+      const attributeName = { boolean: 'boolean-value', time: 'time-value', string: 'string-value' }[valueType] || 'value';
+      const raw = officeAttributeOf(attributes, attributeName);
+      const text = raw === null ? (valueType === 'string' ? odsCellText(inner) : '') : attributeText(raw);
+      markText = valueMark(valueType, text);
+    } else if (literalText !== null && (hasCdata || /_x[0-9a-f]{4}_/i.test(literalText))) {
+      // 文本中形似 Excel 转义码的 _xHHHH_ 在 ODF 中是字面文字，读取库按 SpreadsheetML 的规则解码（Ref_x0041_ 读成 RefA，与另一行
+      //   的 RefA 配成一对）：按原文改写，配对键与回填值按 ODF 文本语义（第三十三轮审查）；只看单元格的值，批注中的文字不算
+      //   （第三十四轮审查）
+      markText = valueMark('string', literalText);
+    } else if (isoDates && valueType !== null && !/\S/.test(odsCellBody(inner).replace(/<[^>]*>/g, ''))) {
+      // 值只在属性上、没有显示文本的单元格（自闭合，或开闭标签之间没有文字）读取库读成空，或带
+      //   table:number-columns-repeated 时只有第一格有值：按值类型记下原值，由 restoreOdsSelfClosingCells 补回（已有值的格不动）
+      const attributeName = { boolean: 'boolean-value', time: 'time-value', string: 'string-value' }[valueType] || 'value';
+      const raw = officeAttributeOf(attributes, attributeName);
+      // 空文本（行尾常见 office:string-value="" 加大量重复列）与空单元格相同，不标记、不展开成数据列
+      if (raw !== null && !(valueType === 'string' && attributeText(raw) === '')) {
+        markText = valueMark(valueType, attributeText(raw));
+      }
+    }
+    // 单元格声明的合并范围（table:number-columns-spanned / number-rows-spanned）与数组公式范围（number-matrix-*-spanned）：
+    //   读取库对自闭合单元格都不记（第二十七轮只补了带值的自闭合合并），数组公式还要求行列两个属性都写才记。按原文补出，
+    //   独立于缓存值与标记类型（第二十八轮）：改用带序号的标记，同时带的日期、值、无缓存公式或公式错误随同一标记还原。
+    //   读取库已记下的范围重复记入不影响判定（按范围去重）
+    if (!table.rebound) {
+      const spans = [
+        { rows: spanOf(attributes, 'number-rows-spanned'), columns: spanOf(attributes, 'number-columns-spanned') },
+        { rows: spanOf(attributes, 'number-matrix-rows-spanned'), columns: spanOf(attributes, 'number-matrix-columns-spanned') }
+      ].filter((span) => span.rows > 1 || span.columns > 1);
+      if (spans.length > 0) {
+        let index;
+        if (markText !== null && markText.startsWith(ODS_SELF_CLOSING_VALUE_MARK)) {
+          index = Number(markText.slice(ODS_SELF_CLOSING_VALUE_MARK.length));
+        } else {
+          const original = markText;
+          markText = valueMark(null, '');
+          index = markedValues.length - 1;
+          if (original === XLML_UNCACHED_FORMULA_MARK) {
+            markedValues[index].formula = true;
+          } else if (original !== null && original.startsWith(ODS_FORMULA_ERROR_MARK)) {
+            Object.assign(markedValues[index], { formula: true, errorText });
+          } else if (original !== null && original.startsWith(XLML_DATETIME_MARK)) {
+            Object.assign(markedValues[index], { valueType: 'date', text: original.slice(XLML_DATETIME_MARK.length) });
+          }
+        }
+        markedValues[index].spans = spans;
+      }
+    }
+    if (markText === null) return whole;
+    changed = true;
+    // 去掉全部取值属性（含 string-value、boolean-value、time-value：读取库优先取 office:string-value，留着就读不到标记），
+    //   重复列数等其他属性保留，由读取库按同一规则展开到每个位置
+    const kept = attributes.replace(/\s(?:[\w.-]+:)?(?:value-type|date-value|time-value|boolean-value|string-value|value|formula)\s*=\s*(["'])[\s\S]*?\1/g, '');
+    return `<${prefix}table-cell${kept} office:value-type="string"><text:p>${markText}</text:p></${prefix}table-cell>`;
+  });
+  if (!changed) return found;
+  let workbook;
+  if (loaded.flat) {
+    try {
+      workbook = XLSX.read(Buffer.from(marked, 'utf8'), { type: 'buffer', cellDates: false, dense: false });
+    } catch (_error) {
+      return found;
+    }
+    return collectMarkedWorkbookCells(workbook, sheetNames, date1904, markedValues);
+  }
+  const originalContent = loaded.entry.content;
+  try {
+    loaded.entry.content = Buffer.from(marked, 'utf8');
+    workbook = XLSX.read(XLSX.CFB.write(loaded.container, { type: 'buffer', fileType: 'zip' }), { type: 'buffer', cellDates: false, dense: false });
+  } catch (_error) {
+    return found;
+  } finally {
+    loaded.entry.content = originalContent;
+  }
+  return collectMarkedWorkbookCells(workbook, sheetNames, date1904, markedValues);
+}
+
+// 按工作表原文逐格扫描（v3.2.21）：isoDates 时收集 ISO 日期单元格（t="d"，附原文与按原文换算的序号，见 isoTextToSerial），formulas 时收集
+//   含公式元素的单元格（含没有缓存结果、读取库读成空白的共享公式从属格 <f t="shared" si="0"/>）与数组公式范围。
+//   坐标与读取库一致：有 r 取 r，没有时按前一行 / 前一个单元格加 1；自闭合的空行（<row/>、<row r="2"/>）读取库不推进
+//   行号，这里同样跳过（实测 SheetJS 0.18.5）。取不到原文时返回空结果（保持读取库的结果）。
+function scanXlsxSheetCells(filePath, workbook, sheetName, { isoDates = false, formulas = false, date1904 = false } = {}) {
+  const found = { isoDateCells: [], formulaCells: [], arrayFormulaRanges: [] };
+  let xml = findXlsxSheetXml(workbook, sheetName);
+  if (!xml && !workbook.files) {
+    try {
+      xml = findXlsxSheetXml(XLSX.readFile(filePath, { bookFiles: true, sheetRows: 1 }), sheetName);
+    } catch (_error) {
+      xml = null;
+    }
+  }
+  if (!xml) {
+    // OOXML 工作簿（workbook.xml）中找不到该表的原文时拒绝，不当成“没有日期、公式单元格”继续：t="d" 的日期会保留读取库换算的
+    //   序号（1904 日期系统下再按 1904 解释，差四年），没有缓存结果的公式会当成空格回填（第三十四轮审查）。二进制工作簿（xlsb）
+    //   没有这两类写法，ODS 另按 content.xml 扫描，不在此列
+    const directory = workbook && workbook.Directory;
+    const workbookPath = directory && Array.isArray(directory.workbooks) ? directory.workbooks[0] : '';
+    if (/\.xml$/i.test(String(workbookPath || ''))) {
+      throw new FileValidationError('FILE_READ', `无法定位工作表「${sheetName}」的原文，无法核对其中的日期与公式，请用 Excel 另存为 xlsx 后重新导入`);
+    }
+    return found;
+  }
+  const rowPattern = /<(?:[\w.-]+:)?row\b((?:[^>"']|"[^"]*"|'[^']*')*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?row>)/gd;
+  const cellPattern = /<(?:[\w.-]+:)?c\b((?:[^>"']|"[^"]*"|'[^']*')*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?c>)/gd;
+  const valuePattern = /<(?:[\w.-]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?v>/d;
+  const formulaPattern = /<(?:[\w.-]+:)?f\b((?:[^>"']|"[^"]*"|'[^']*')*?)(?:\/>|>)/;
+  // 只扫描 sheetData 中的单元格（与读取库一致）：注释、CDATA 中的旧单元格与 sheetData 以外的元素不算，否则会把注释里同坐标的
+  //   旧日期当成银行原值、改写读取库读到的金额
+  const sheetXmlText = xml.toString('utf8');
+  const sheetData = /<(?:[\w.-]+:)?sheetData\b(?:[^>"']|"[^"]*"|'[^']*')*?(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?sheetData>)/d
+    .exec(maskXmlMarkup(sheetXmlText));
+  const text = sheetData && sheetData[1] ? sheetData[1] : '';
+  // 同一位置的原文（遮盖不改变长度）：元素只在遮盖后的文本中定位，单元格的值（缓存结果、ISO 原文）按位置从原文切取，CDATA
+  //   中的值照常读取（读取库同样读出；按遮盖后的空白判断会把有缓存的公式当成没有结果、清空银行金额，第三十一轮审查）
+  const originalText = sheetData && sheetData[1] ? sheetXmlText.slice(sheetData.indices[1][0], sheetData.indices[1][1]) : '';
+  // 只找 ISO 日期且原文没有 t="d" 时不逐格扫描（大多数账单）
+  if (!formulas && !/\st\s*=\s*["']d["']/.test(text)) return found;
+  let previousRow = -1;
+  let rowMatch;
+  while ((rowMatch = rowPattern.exec(text)) !== null) {
+    if (rowMatch[2] === undefined) continue;
+    const rowAttr = readXmlAttribute(rowMatch[1], 'r');
+    const rowIndex = rowAttr && /^\d+$/.test(rowAttr) ? Number(rowAttr) - 1 : previousRow + 1;
+    previousRow = rowIndex;
+    let previousColumn = -1;
+    let cellMatch;
+    cellPattern.lastIndex = 0;
+    const body = rowMatch[2];
+    const bodyStart = rowMatch.indices[2][0];
+    while ((cellMatch = cellPattern.exec(body)) !== null) {
+      const ref = readXmlAttribute(cellMatch[1], 'r');
+      let address = { r: rowIndex, c: previousColumn + 1 };
+      if (ref) {
+        try {
+          address = XLSX.utils.decode_cell(ref);
+        } catch (_error) {
+          address = null;
+        }
+      }
+      if (!address || address.c < 0 || address.r < 0) break;
+      previousColumn = address.c;
+      const cellBody = cellMatch[2] || '';
+      const cellBodyStart = cellMatch[2] === undefined ? bodyStart : bodyStart + cellMatch.indices[2][0];
+      // <v> 的字符数据（取自原文，见 xmlCharacterData）；没有 <v> 时为 null
+      const valueTextOf = () => {
+        const valueMatch = valuePattern.exec(cellBody);
+        return valueMatch
+          ? xmlCharacterData(originalText.slice(cellBodyStart + valueMatch.indices[1][0], cellBodyStart + valueMatch.indices[1][1]))
+          : null;
+      };
+      if (isoDates && readXmlAttribute(cellMatch[1], 't') === 'd') {
+        const isoText = (valueTextOf() || '').trim();
+        found.isoDateCells.push({ r: address.r, c: address.c, text: isoText, serial: isoText ? isoTextToSerial(isoText, date1904) : null });
+      }
+      const formulaMatch = formulas ? formulaPattern.exec(cellBody) : null;
+      if (formulaMatch) {
+        // cached：原文是否带非空的缓存结果（<v>0</v> 是确实缓存的 FALSE；<v/>、<v></v> 与没有 <v> 一样没有结果）。没有缓存的
+        //   布尔公式会被读取库读成 false，与银行保存的 FALSE 无法区分
+        const cachedText = valueTextOf();
+        found.formulaCells.push({ r: address.r, c: address.c, cached: cachedText !== null && cachedText.trim() !== '' });
+        const formulaRef = readXmlAttribute(formulaMatch[1], 'ref');
+        if (readXmlAttribute(formulaMatch[1], 't') === 'array' && formulaRef) {
+          try {
+            found.arrayFormulaRanges.push(XLSX.utils.decode_range(formulaRef));
+          } catch (_error) { /* 范围无法解析时只记该格 */ }
+        }
+      }
+    }
+  }
+  return found;
+}
+
+// v3.2.21：不能单独填写的单元格区域（物理坐标，0 起）：合并单元格与数组公式。区域内除左上角以外的位置读成空值，
+//   但显示的是左上角的值 / 公式结果，写入常量也不会生效或会破坏公式（跨 Sheet 回填据此跳过这类目标单元格）
+function collectUnwritableRanges(sheet, extraArrayRanges = []) {
+  const ranges = [];
+  const seen = new Set();
+  const add = (range, label) => {
+    if (!range || !range.s || !range.e) return;
+    if (range.s.r === range.e.r && range.s.c === range.e.c) return;
+    const text = XLSX.utils.encode_range(range);
+    if (seen.has(text)) return;
+    seen.add(text);
+    ranges.push(Object.freeze({ s: { r: range.s.r, c: range.s.c }, e: { r: range.e.r, c: range.e.c }, reason: `${label} ${text}` }));
+  };
+  (Array.isArray(sheet['!merges']) ? sheet['!merges'] : []).forEach((merge) => add(merge, '合并单元格'));
+  (Array.isArray(extraArrayRanges) ? extraArrayRanges : []).forEach((range) => add(range, '数组公式'));
+  const visit = (cell) => {
+    if (!cell || typeof cell.F !== 'string' || !cell.F) return;
+    try {
+      add(XLSX.utils.decode_range(cell.F), '数组公式');
+    } catch (_error) { /* 范围无法解析时不记，整行已由 collectSpecialCells 标记 */ }
+  };
+  const denseRows = Array.isArray(sheet) ? sheet : (Array.isArray(sheet['!data']) ? sheet['!data'] : null);
+  if (denseRows) {
+    denseRows.forEach((row) => { if (Array.isArray(row)) row.forEach(visit); });
+  } else {
+    Object.keys(sheet).forEach((address) => { if (address[0] !== '!') visit(sheet[address]); });
+  }
+  return ranges;
+}
+
+function decodeSheetNameAttribute(value) {
+  if (value === null) return null;
+  try {
+    return decodeExcelStXstring(value);
+  } catch (_error) {
+    return value;
+  }
 }
 
 // 读取库（safegetzipfile）找条目的口径：名称不区分大小写、按原样比较（不规范化 . 与 ..），斜杠与反斜杠两种写法都认
@@ -416,16 +1658,17 @@ function findXlsxSheetXml(workbook, sheetName) {
   const relsXml = getZipEntryBuffer(files, `${relsDirPrefix}_rels/${String(workbookPath).split('/').pop()}.rels`);
   if (!relsXml) return null;
   const rawWorkbookText = workbookXml.toString('utf8');
-  const workbookText = stripXmlComments(rawWorkbookText);
-  const sheetTagPattern = /<(?:[\w.-]+:)?sheet\b[^>]*>/g;
-  const sheetTags = workbookText.match(sheetTagPattern) || [];
-  if ((rawWorkbookText.match(sheetTagPattern) || []).length !== sheetTags.length) return null;
+  // 注释、CDATA、处理指令中的标签不算；属性值可含字面 `>`（见 xmlStartTagPattern）
+  const workbookText = maskXmlMarkup(rawWorkbookText);
+  const sheetTags = workbookText.match(xmlStartTagPattern('sheet')) || [];
+  if ((rawWorkbookText.match(xmlStartTagPattern('sheet')) || []).length !== sheetTags.length) return null;
   const sheetIndex = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.indexOf(sheetName) : -1;
   const sheetTag = sheetIndex >= 0 ? sheetTags[sheetIndex] : null;
-  if (!sheetTag || readXmlAttribute(sheetTag, 'name') !== sheetName) return null;
+  // 表名可以按 ST_Xstring 转义存储（如 ABC_x005F_x0041_），读取库给出的是解码后的名字：按同一规则解码后再核对
+  if (!sheetTag || decodeSheetNameAttribute(readXmlAttribute(sheetTag, 'name')) !== sheetName) return null;
   const relsText = relsXml.toString('utf8');
   const relationTagsById = new Map();
-  (stripXmlComments(relsText).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || []).forEach((tag) => {
+  (maskXmlMarkup(relsText).match(xmlStartTagPattern('Relationship')) || []).forEach((tag) => {
     const id = readXmlAttribute(tag, 'Id');
     if (!relationTagsById.has(id)) relationTagsById.set(id, []);
     relationTagsById.get(id).push(tag);
@@ -541,7 +1784,7 @@ function readXlsxSharedStringSources(workbook) {
   if (workbookPath) {
     const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
     const relsXml = getZipEntryBuffer(files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
-    const relationTag = relsXml && (stripXmlComments(relsXml.toString('utf8')).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
+    const relationTag = relsXml && (maskXmlMarkup(relsXml.toString('utf8')).match(xmlStartTagPattern('Relationship')) || [])
       .find((tag) => /\/sharedStrings$/.test(readXmlAttribute(tag, 'Type') || ''));
     const target = relationTag ? readXmlAttribute(relationTag, 'Target') : null;
     if (target) sstPath = normalizeZipPath(workbookDir, target);
@@ -550,12 +1793,7 @@ function readXlsxSharedStringSources(workbook) {
   if (!sstPath) return [];
   const sstXml = getZipEntryBuffer(files, sstPath);
   if (!sstXml) return null;
-  const sources = [];
-  const itemPattern = /<(?:[\w.-]+:)?si\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?si>)/g;
-  const text = sstXml.toString('utf8');
-  let match;
-  while ((match = itemPattern.exec(text)) !== null) sources.push(match[1] || '');
-  return sources;
+  return sharedStringItemSources(sstXml.toString('utf8'));
 }
 
 // XLSX 样式表原文：没有样式表时返回 ''；声明了却读不到时返回 null。
@@ -567,7 +1805,7 @@ function readXlsxStylesText(workbook) {
   if (workbookPath) {
     const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
     const relsXml = getZipEntryBuffer(files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
-    const relationTag = relsXml && (relsXml.toString('utf8').match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
+    const relationTag = relsXml && (relsXml.toString('utf8').match(xmlStartTagPattern('Relationship')) || [])
       .find((tag) => /\/styles$/.test(readXmlAttribute(tag, 'Type') || ''));
     const target = relationTag ? readXmlAttribute(relationTag, 'Target') : null;
     if (target) stylesPath = normalizeZipPath(workbookDir, target);
@@ -858,14 +2096,10 @@ function classifyTextWorkbook(latinText) {
   if (body.slice(0, 4096).includes('\x00')) return 'unsupported';
   const head = body.replace(/^\s+/, '').slice(0, 4096);
   if (head.startsWith('<')) {
-    // 按文档根元素区分：Excel 2003 XML 的根元素是 Workbook；HTML 可以声明 SpreadsheetML 命名空间，不能按全文搜索判断
-    let rest = head;
-    for (;;) {
-      const next = rest.replace(/^\s+/, '').replace(/^<\?[\s\S]*?\?>/, '').replace(/^<!--[\s\S]*?-->/, '').replace(/^<!DOCTYPE[^>]*>/i, '');
-      if (next === rest) break;
-      rest = next;
-    }
-    const rootMatch = /^<([\w.:-]+)/.exec(rest);
+    // 按文档根元素区分：Excel 2003 XML 的根元素是 Workbook；HTML 可以声明 SpreadsheetML 命名空间，不能按全文搜索判断。
+    //   根元素前的声明、注释可以很长，按全文跳过（只看开头一段时，Workbook 前有长注释的 SpreadsheetML 会因工作表的 <Table>
+    //   判成 HTML，第三十二轮审查）
+    const rootMatch = /^<([\w.:-]+)/.exec(skipXmlProlog(body));
     const rootName = rootMatch ? rootMatch[1].split(':').pop().toLowerCase() : '';
     if (rootName === 'workbook') return 'unsupported';
     return /<table/i.test(latinText) ? 'html' : 'unsupported';
@@ -1245,7 +2479,13 @@ function readTextIntegerLiterals(filePath, sheet, sheetName, rowLimit) {
 // exactSourceText（v3.2.21 B112，只由网银账单生成传入，须同时 blankrows）：读出的值不变，另附不可枚举属性——
 //   sourceText：长整数的文件原文（collectLongIntegerSourceText）；displayText：CSV 的「Excel 显示值」（parseCsvText）。
 //   readRowsWithMetadata 只用于数据行；readRows 原样带出 sourceText，由大账号识别定位表头后用于账户信息行。
-function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, maxRows = 0, csvMaxSourceBytes, markErrorCells = false, exactSourceText = false } = {}) {
+function readWorkbookRowsUnchecked(filePath, {
+  blankrows = false, sheetName, maxRows = 0, csvMaxSourceBytes, markErrorCells = false, markCells = false, exactIsoDates = false,
+  onlyTargetSheet = false, blankUncachedFormulas = false, headerOnly = false, exactSourceText = false
+} = {}) {
+  // markErrorCells：重复账单过滤的整行证据（逐格标记 + 按原文核对格式、行摘要等）；markCells（v3.2.21 跨 Sheet 回填）：
+  //   只要逐格标记（错误值、公式）与不能单独填写的区域，不做查重证据（按原文核对整张表的格式与行摘要开销大）
+  const collectCellMarks = markErrorCells || markCells;
   ensureSupportedFile(filePath);
 
   if (!fs.existsSync(filePath) || (fs.statSync(filePath).size === 0 && csvMaxSourceBytes === undefined)) {
@@ -1264,6 +2504,7 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
       if (!isOLE2 && !isZIP) {
         const body = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF ? raw.subarray(3) : raw;
         const content = body.toString('utf-8');
+        // 每行原文与整行摘要只用于重复账单过滤（markErrorCells）；跨 Sheet 回填只要逐格标记，不为整表逐行计算摘要
         const rows = parseCsvText(content, { blankrows, withSources: markErrorCells, withDisplayText: exactSourceText });
         const result = rowLimit > 0 ? rows.slice(0, rowLimit) : rows;
         if (result !== rows && Array.isArray(rows.displayText)) {
@@ -1273,13 +2514,15 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
         //   解析器会吞掉未加引号字段中间的引号（SALE 2" X" 与 SALE 2 X 读成同一文本）等。
         //   有不能按 UTF-8 解码的字节时，不同的原文可能解出同一替换字符（如 café、cafè 都成 caf�），
         //   含替换字符的单元格值未知，该行不参与查重（普通映射照旧）
-        if (markErrorCells) {
+        if (collectCellMarks) {
           const specials = new Map();
           const sources = Array.isArray(rows.sources) ? rows.sources : [];
           result.forEach((row, rowIndex) => {
             const rowMarks = new Map();
-            rowMarks.set(-2, { sourceText: sha256Text(sources[rowIndex] === undefined ? '' : sources[rowIndex]) });
-            if (sources[rowIndex] === undefined) rowMarks.set(-1, { unknownValue: '行原文无法核对' });
+            if (markErrorCells) {
+              rowMarks.set(-2, { sourceText: sha256Text(sources[rowIndex] === undefined ? '' : sources[rowIndex]) });
+              if (sources[rowIndex] === undefined) rowMarks.set(-1, { unknownValue: '行原文无法核对' });
+            }
             (Array.isArray(row) ? row : []).forEach((cell, columnIndex) => {
               if (typeof cell !== 'string') return;
               // Excel 打开时按公式计算的文本（如 ="TX-"&ROW()、+ROW()）：值无法证明
@@ -1287,10 +2530,14 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
               // 含替换字符（U+FFFD）的单元格不论本次解码是否有损都无法核对：文件里的替换字符可能是上游解码丢失后写入的
               else if (cell.includes('\uFFFD')) rowMarks.set(columnIndex, { unknownValue: '编码无法识别' });
             });
-            specials.set(rowIndex, rowMarks);
+            if (rowMarks.size) specials.set(rowIndex, rowMarks);
           });
           Object.defineProperty(result, 'excelErrorCells', { value: specials, enumerable: false });
         }
+        // 纯文本 CSV 没有 sheet 维度（与 listSheetNames 一致）
+        Object.defineProperty(result, 'sheetNames', { value: [null], enumerable: false });
+        // 值都是文本，不是工作簿原生的日期序号（见 textContainerValuesInferred）
+        Object.defineProperty(result, 'valuesInferredFromText', { value: true, enumerable: false });
         return result;
       }
       if (csvMaxSourceBytes !== undefined) {
@@ -1306,16 +2553,34 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
   }
 
   try {
-    const workbook = XLSX.readFile(filePath, {
+    const container = detectWorkbookContainer(filePath);
+    const isZipContainer = container === 'zip';
+    // blankUncachedFormulas（v3.2.21 跨 Sheet 回填读来源表）：只按原文找没有缓存结果的公式按空值读取，不做逐格标记
+    const scanFormulas = markCells || blankUncachedFormulas;
+    // ODS：日期单元格与没有缓存结果的公式按 content.xml 原文识别（见 scanOdsWorkbookCells）；按原值换算日期时，日期系统取
+    //   ODS 声明的日期基准（table:null-date，读取库不识别），不是 1899-12-30 / 1904-01-01 时报错，不按 1900 猜测
+    //   平面 OpenDocument（FODS，文本容器）同样如此
+    const odsContent = (scanFormulas || exactIsoDates) && (isZipContainer ? isOdsFile(filePath) : container === 'text')
+      ? loadOdsContent(filePath)
+      : null;
+    const workbook = readSpreadsheetFile(filePath, {
       cellDates: false,
       dense: true,
       raw: false,
       // v3.2.19：查重读取时保留没有缓存结果的公式（占位单元格在 collectSpecialCells 中收集后删除），
       //   并保留压缩包原文（bookFiles），用于按工作表 XML 核对公式
       //   并保留数字格式（cellNF，按格式比较显示文本不同的值）
-      ...(markErrorCells ? { sheetStubs: true, bookFiles: true, cellNF: true } : {}),
+      //   只做跨 Sheet 回填的逐格标记（不查重）时，ODS 不保留占位单元格：行尾的重复空列（table:number-columns-repeated）会
+      //   展开成数据行数乘以整表列数的占位对象；回填所需的公式、公式错误与合并范围由原文扫描与 !merges 提供（第三十轮审查）
+      ...(collectCellMarks ? { bookFiles: true, ...(markErrorCells || !odsContent ? { sheetStubs: true } : {}) } : {}),
+      // 按原文核对 ISO 日期单元格需要压缩包原文
+      ...(exactIsoDates ? { bookFiles: true } : {}),
+      // 只解析指定的 sheet（v3.2.21 跨 Sheet 回填：读主表时只解析主表，找到待回填行后再单独读来源表），SheetNames 仍为全部；
+      //   未指定 sheetName 时解析第一个 sheet（与缺省读取的表一致）
+      ...(onlyTargetSheet ? { sheets: sheetName != null && sheetName !== '' ? sheetName : 0 } : {}),
+      ...(markErrorCells ? { cellNF: true } : {}),
       ...(rowLimit > 0 ? { sheetRows: rowLimit } : {})
-    });
+    }, container, odsContent);
     // 缺省读第一个 sheet（历史行为）；指定 sheetName 时读该 sheet（detector 多 sheet 扫描）。
     const targetSheetName = sheetName != null && sheetName !== ''
       ? sheetName
@@ -1330,11 +2595,70 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
       // 指定 sheet 不存在（理论上 detector 只用 listSheetNames 返回的名字，不应发生）
       throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
     }
+    // 读取库没有给出 OOXML 结构（按 ODS 等解析）、这里却没有识别出 ODS 时无法按原文校正日期与取值，拒绝，不按读取库的值静默导入
+    if (isZipContainer && exactIsoDates && !odsContent
+      && !(workbook.Directory && Array.isArray(workbook.Directory.workbooks) && workbook.Directory.workbooks.length)) {
+      throw new FileValidationError('FILE_READ', '无法确认文件格式（ZIP 中不是可识别的 xlsx 或 ODS 结构），请用 Excel 另存为 xlsx 后重新导入');
+    }
+    let workbookDate1904 = Boolean(workbook.Workbook && workbook.Workbook.WBProps && workbook.Workbook.WBProps.date1904);
+    // xlsx：按 workbook.xml 中实际生效的 workbookPr 确定（见 xlsxWorkbookDate1904；与回填写出侧一致），取不到原文时沿用读取库
+    if (isZipContainer && !odsContent && workbook.files) {
+      if (xlsxWorkbookStructureAmbiguous(workbook)) {
+        throw new FileValidationError('FILE_READ', '工作簿结构中有被注释的工作表或关系声明（或关系编号重复），无法确认各工作表的内容，请用 Excel 另存为 xlsx 后重新导入');
+      }
+      const workbookXml = xlsxWorkbookXmlOf(workbook);
+      const ownDate1904 = workbookXml ? xlsxWorkbookDate1904(workbookXml) : null;
+      // 有 workbook.xml 原文、却确定不了日期系统时拒绝（与回填写出侧一致），不沿用读取库按全文（含注释）得到的结果
+      if (workbookXml && ownDate1904 === null && /^\s*(?:<\?xml[\s\S]*?\?>\s*)?</.test(workbookXml.toString('utf8'))) {
+        throw new FileValidationError('FILE_READ', '工作簿的结构或命名空间无法识别，无法确定日期系统，请用 Excel 另存为 xlsx 后重新导入');
+      }
+      if (ownDate1904 !== null) workbookDate1904 = ownDate1904;
+    }
+    if (odsContent && exactIsoDates) {
+      if (!odsContent.dateSystem) {
+        throw new FileValidationError('FILE_READ', 'ODS 文件声明的日期基准不是 1899-12-30 或 1904-01-01（或其命名空间无法确定），无法确定日期，请用 Excel 另存为 xlsx 后重新导入');
+      }
+      workbookDate1904 = odsContent.dateSystem === '1904';
+    }
+    const scanned = isZipContainer && !odsContent && (exactIsoDates || scanFormulas)
+      ? scanXlsxSheetCells(filePath, workbook, targetSheetName, { isoDates: exactIsoDates, formulas: scanFormulas, date1904: workbookDate1904 })
+      : { isoDateCells: [], formulaCells: [], arrayFormulaRanges: [] };
+    // SpreadsheetML 2003：读取库丢弃没有缓存结果的公式单元格，按原文补出其坐标（有缓存的公式读取库带 f，已按公式标记）；
+    //   按原值换算日期时，DateTime 单元格按原文与工作簿日期系统换算（见 scanXlmlWorkbookCells）
+    if (container === 'text' && !odsContent && (scanFormulas || exactIsoDates)) {
+      const xlml = scanXlmlWorkbookCells(filePath, {
+        sheetNames: [targetSheetName], formulas: scanFormulas, isoDates: exactIsoDates, date1904: workbookDate1904
+      }).get(targetSheetName);
+      if (xlml) {
+        scanned.formulaCells = scanned.formulaCells.concat(xlml.formulaCells);
+        scanned.isoDateCells = scanned.isoDateCells.concat(xlml.isoDateCells);
+        scanned.arrayFormulaRanges = scanned.arrayFormulaRanges.concat(xlml.mergeRanges || []);
+      }
+    }
+    if (odsContent) {
+      const ods = scanOdsWorkbookCells(odsContent, {
+        sheetNames: [targetSheetName], formulas: scanFormulas, isoDates: exactIsoDates, date1904: workbookDate1904
+      }).get(targetSheetName);
+      if (ods) {
+        scanned.formulaCells = scanned.formulaCells.concat(ods.formulaCells);
+        scanned.isoDateCells = scanned.isoDateCells.concat(ods.isoDateCells);
+        // 自闭合单元格声明的合并范围与数组公式范围同样按不能单独填写的区域处理
+        scanned.arrayFormulaRanges = scanned.arrayFormulaRanges.concat(ods.mergeRanges || []);
+        // 自闭合单元格（日期、数值等只写在属性上）：读取库读成空，按原文补回，不当作空单元格（跨 Sheet 回填不能把它当成待回填的
+        //   空格、占用来源行）
+        if (exactIsoDates) restoreOdsSelfClosingCells(sheet, ods);
+      }
+    }
+    const isoDateCells = scanned.isoDateCells;
     const sheetRange = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null;
-    const specialCells = markErrorCells && sheetRange ? collectSpecialCells(sheet, sheetRange) : null;
-    if (specialCells) {
-      // 1904 日期系统：日期序号相同、实际日期不同，不与 1900 日期系统的文件互判重复
-      if (workbook.Workbook && workbook.Workbook.WBProps && workbook.Workbook.WBProps.date1904) {
+    // 不能单独填写的区域在 collectSpecialCells 删除占位单元格之前收集（没有缓存结果的数组公式锚点读成占位单元格）
+    // 不能单独填写的区域（合并单元格、数组公式）只供跨 Sheet 回填（markCells）使用，重复账单过滤不扫描
+    const unwritableRanges = markCells && sheetRange ? collectUnwritableRanges(sheet, scanned.arrayFormulaRanges) : null;
+    const specialCells = collectCellMarks && sheetRange ? collectSpecialCells(sheet, sheetRange) : null;
+    if (specialCells && markErrorCells) {
+      // 1904 日期系统：日期序号相同、实际日期不同，不与 1900 日期系统的文件互判重复。按映射实际采用的日期系统（xlsx 按
+      //   workbook.xml 原文、ODS 按声明的日期基准校正后的值），不按读取库的判断（第三十三轮审查）
+      if (workbookDate1904) {
         for (let r = sheetRange.s.r; r <= sheetRange.e.r; r += 1) specialCells.markRowDateSystem(r);
       }
       // 纵向合并单元格：只有首行存值，其余行的该格为空但实际属于同一值（如合并的流水号标识一笔交易及其费用行），
@@ -1344,7 +2668,6 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
         contentRowsWithin(sheet, Math.max(merge.s.r + 1, sheetRange.s.r), Math.min(merge.e.r, sheetRange.e.r))
           .forEach((r) => specialCells.markRowUnknown(r, '纵向合并单元格'));
       });
-      const container = detectWorkbookContainer(filePath);
       if (container === 'zip' || container === 'ole2') markNumberFormatCells(sheet, specialCells, { includeGeneral: container === 'ole2' });
       // XLS：读取库不解析 Excel 2007 起的条件格式记录（CondFmt12 / CF12 / CFEx，可以改数字格式），有这类记录时整张表不参与查重
       if (container === 'ole2' && hasBiffConditionalFormat12(filePath)) {
@@ -1363,23 +2686,68 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
         if (isMemoryLimitError(sourceTextError)) throw sourceTextError;
       }
     }
+    // headerOnly（网银模板读取表头）：只展开到第一个有值的行，不为有效范围内其后的空行构造行数组（见 rangeThroughFirstValueRow）
+    const rowRange = headerOnly && sheetRange ? rangeThroughFirstValueRow(sheet, sheetRange) : null;
     const rows = XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       blankrows,
-      defval: ''
+      defval: '',
+      ...(rowRange ? { range: rowRange } : {})
     });
     const result = rowLimit > 0 ? rows.slice(0, rowLimit) : rows;
+    // v3.2.21：原文没有缓存结果的公式按空值读取（读取库把其中的布尔公式读成 false，其他类型读成空白），与「空值」条件、
+    //   待回填行判定同一口径；该格同时带公式标记，跨 Sheet 回填按「没有结果的公式」跳过，不当成可填的空格
+    if (scanFormulas && sheetRange) {
+      scanned.formulaCells.forEach(({ r, c, cached }) => {
+        if (cached) return;
+        const row = result[r - sheetRange.s.r];
+        const column = c - sheetRange.s.c;
+        if (Array.isArray(row) && column >= 0 && column < row.length) row[column] = '';
+      });
+    }
     // v3.2.19：有效范围不从第 1 行开始（前几行完全为空）时，rows[0] 对应的 Excel 物理行号；
     //   保留空行读取时「下标 + firstRowNumber」即物理行号。只记偏移，不补出前面的空行。
     Object.defineProperty(result, 'firstRowNumber', { value: sheetRange ? sheetRange.s.r + 1 : 1, enumerable: false });
     // 同理，rows[i][0] 对应的物理列下标（A 列为 0）；只有查重按物理列对齐整行时使用
     Object.defineProperty(result, 'firstColumnIndex', { value: sheetRange ? sheetRange.s.c : 0, enumerable: false });
+    // v3.2.21：工作簿的全部 sheet 名（顺序同 listSheetNames），调用方据此核对来源 sheet，不再为表名重开工作簿
+    Object.defineProperty(result, 'sheetNames', { value: workbook.SheetNames.slice(), enumerable: false });
+    // v3.2.21：工作簿的日期单元格是否按 1904 日期系统读成序号（换算日期时需要）。文本容器（如 SpreadsheetML 2003 的 .xls）
+    //   的 DateTime 单元格以 ISO 文本存储，读取库一律换算成 1900 序号，同表的数值日期却是工作簿日期系统的序号：按原值换算
+    //   日期（exactIsoDates）时 DateTime 单元格已按原文换算成工作簿日期系统的序号，整表按工作簿日期系统；否则沿用读取库的值、按 1900
+    Object.defineProperty(result, 'date1904', {
+      value: workbookDate1904 && (container !== 'text' || Boolean(exactIsoDates)),
+      enumerable: false
+    });
+    // v3.2.21：数值是否可能由读取库从显示文本推断（见 textContainerValuesInferred；只在按原值换算日期时判断）
+    Object.defineProperty(result, 'valuesInferredFromText', {
+      value: Boolean(exactIsoDates) && container === 'text' && textContainerValuesInferred(filePath, odsContent),
+      enumerable: false
+    });
+    // v3.2.21：ISO 日期单元格（行下标 → 列下标 → { text, serial }，与 rows 同一相对坐标），见 scanXlsxSheetCells
+    if (isoDateCells.length && sheetRange) {
+      const byRow = new Map();
+      isoDateCells.forEach(({ r, c, text, serial }) => {
+        const rowIndex = r - sheetRange.s.r;
+        const columnIndex = c - sheetRange.s.c;
+        if (rowIndex < 0 || columnIndex < 0) return;
+        if (!byRow.has(rowIndex)) byRow.set(rowIndex, new Map());
+        byRow.get(rowIndex).set(columnIndex, { text, serial });
+      });
+      Object.defineProperty(result, 'isoDateCells', { value: byRow, enumerable: false });
+    }
     if (specialCells) {
       Object.defineProperty(result, 'excelErrorCells', { value: specialCells, enumerable: false });
+      Object.defineProperty(result, 'unwritableRanges', { value: unwritableRanges || [], enumerable: false });
     }
     if (sourceText) {
       Object.defineProperty(result, 'sourceText', { value: sourceText, enumerable: false });
     }
+    // v3.2.21：按原文找到的公式单元格（物理坐标，含读取库读成空白的共享公式从属格），跨 Sheet 回填不填这些格
+    if (markCells) Object.defineProperty(result, 'formulaCells', { value: scanned.formulaCells, enumerable: false });
+    // v3.2.21 跨 Sheet 回填：ODS 的工作表名与读取键（见 odsSheetNameEntries；不是 ODS 时为 null），按本次已载入的内容取，
+    //   核对来源 Sheet 时不再为判断格式整份重读文件（第三十一轮审查）
+    if (markCells) Object.defineProperty(result, 'odsSheetEntries', { value: odsContent ? odsSheetNameEntries(odsContent) : null, enumerable: false });
     return result;
   } catch (error) {
     if (error instanceof FileValidationError) {
@@ -1398,6 +2766,23 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
 
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
   }
+}
+
+// 有效范围从起始行到第一个有值的行（含）：网银模板读取表头只需这一段。有效范围可能因一个空样式格延伸到第 1048576 行，按
+//   保留空行展开全部会构造上百万个行数组（第三十五轮审查）。没有有值的行时只取起始行；不是按行存放的工作表时返回 null（不限制）
+function rangeThroughFirstValueRow(sheet, range) {
+  if (!Array.isArray(sheet)) return null;
+  const hasValue = (cell) => Boolean(cell) && cell.v !== undefined && cell.v !== null
+    && !(typeof cell.v === 'string' && cell.v.trim() === '');
+  let end = range.s.r;
+  for (let r = range.s.r; r <= range.e.r; r += 1) {
+    const row = sheet[r];
+    if (Array.isArray(row) && row.some((cell, c) => c >= range.s.c && c <= range.e.c && hasValue(cell))) {
+      end = r;
+      break;
+    }
+  }
+  return { s: { r: range.s.r, c: range.s.c }, e: { r: end, c: range.e.c } };
 }
 
 function readWorkbookRows(filePath, options = {}) {
@@ -1487,9 +2872,12 @@ function collectMatchedRows({
   matchedRowIndex,
   matchedColumnIndex,
   normalizedExpectedHeaders,
-  includeFullRows = false
+  includeFullRows = false,
+  includeHeaderRows = false
 }) {
   const expectedHeaderCount = normalizedExpectedHeaders.length;
+  // v3.2.21 跨 Sheet 回填：includeHeaderRows 时另给各分段表头的整行（模板表头范围以外的列也在内），核对规则引用的列是否重名
+  const headerRows = includeHeaderRows ? [meaningfulRows[matchedRowIndex].cells.slice()] : null;
   const rows = [];
   const rowNumbers = [];
   // v3.2.19 重复账单过滤：includeFullRows 时另给与 rows 同下标对齐的整行（含模板表头范围以外的列、Excel 错误值标记）
@@ -1520,6 +2908,7 @@ function collectMatchedRows({
     if (index > 0 && isRepeatedMatchedHeader(normalizedCells, normalizedExpectedHeaders)) {
       headerBreaks.push(row.rowNumber);
       if (fullRows) currentFullHeader = fullCellsOf(row);
+      if (headerRows) headerRows.push(row.cells.slice());
       continue;
     }
 
@@ -1559,7 +2948,8 @@ function collectMatchedRows({
     rowNumbers,
     headerBreaks,
     ...(longIntegerReadValues.some(Boolean) ? { longIntegerReadValues } : {}),
-    ...(fullRows ? { fullRows, fullHeaders } : {})
+    ...(fullRows ? { fullRows, fullHeaders } : {}),
+    ...(headerRows ? { headerRows } : {})
   };
 }
 
@@ -1603,15 +2993,46 @@ function findHeaderMatchPosition(rowsCells, normalizedExpectedHeaders) {
 
 // v2.1.16 PR#61 F4：可选第三参 { sheetName } 透传给 readWorkbookRows（缺省读第一个 sheet，行为不变）。
 function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
-  const { sheetName, readGuard, onWorkbookRows, includeFullRows = false, exactSourceText = false } = options;
-  const rawRows = readWorkbookRows(filePath, { blankrows: true, sheetName, readGuard, markErrorCells: includeFullRows, exactSourceText });
+  // allowEmpty（v3.2.21 跨 Sheet 回填读来源 sheet）：整张表没有有值的行时返回空结果，由调用方按表名与所需字段报错
+  // exactIsoDates（v3.2.21）：调用方按返回的 excelDateSystem 换算日期序号时传入，见 isoTextToSerial
+  // includeCellMarks（v3.2.21 跨 Sheet 回填）：只要逐格标记（cellMarks）与不能单独填写的区域（unwritableRanges），不构造查重整行
+  const {
+    sheetName, readGuard, onWorkbookRows, includeFullRows = false, includeCellMarks = false, allowEmpty = false, exactIsoDates = false,
+    onlyTargetSheet = false, blankUncachedFormulas = false,
+    // v3.2.21 跨 Sheet 回填：按表头定位时另给各分段表头的整行（headerRows，第 0 列的物理列下标为 headerColumnOffset）
+    includeHeaderRows = false,
+    // headerOnly（网银模板读取表头）：只读到第一个有值的行（见 rangeThroughFirstValueRow）
+    headerOnly = false,
+    // exactSourceText（v3.2.21 B112，网银账单生成）：数据行的长整数换成文件原文、CSV 取 Excel 显示值（见 readWorkbookRowsUnchecked）
+    exactSourceText = false
+  } = options;
+  const rawRows = readWorkbookRows(filePath, {
+    blankrows: true, sheetName, readGuard, markErrorCells: includeFullRows, markCells: includeCellMarks, exactIsoDates, onlyTargetSheet,
+    blankUncachedFormulas, headerOnly, exactSourceText
+  });
   // v3.2.21 B112：大账号识别拿到的行与 readRows 的 exactSourceText 一致：读取值另附长整数原文（sourceText），CSV 显示值不用
   const sourceTextByRow = rawRows.sourceText instanceof Map ? rawRows.sourceText : null;
-  if (typeof onWorkbookRows === 'function') onWorkbookRows(rawRows);
+  // v3.2.21：工作簿的全部 sheet 名（跨 Sheet 回填核对来源 sheet 与主表，不再为表名重开工作簿）
+  const sheetNames = Array.isArray(rawRows.sheetNames) ? rawRows.sheetNames : null;
+  // 跨 Sheet 回填：ODS 的工作表名与读取键（主表读取时一并取得）
+  const odsSheetEntries = rawRows.odsSheetEntries !== undefined ? { odsSheetEntries: rawRows.odsSheetEntries } : {};
+  // onWorkbookRows（大账号识别）：读完并定位表头后调用一次，headerRowNumbers 为正式映射命中的各分段表头的物理行号（不按
+  //   表头定位时为空；定位不到表头时不调用，随后报错）。识别按读取库的原值找表头，与正式映射的值不同（表头含原生日期、按
+  //   原文换算后）时据此定位（第三十一轮审查）
+  const notifyWorkbookRows = (headerRowNumbers = []) => {
+    if (typeof onWorkbookRows === 'function') onWorkbookRows(rawRows, { headerRowNumbers });
+  };
   const headerCandidates = buildExpectedHeaderCandidates(expectedHeaders);
   // 行号是 Excel 物理行号：有效范围不从第 1 行开始时加上起始偏移（与大账号分段识别同一口径）
   const firstRowNumber = Number(rawRows.firstRowNumber) > 0 ? Number(rawRows.firstRowNumber) : 1;
-  const errorCells = includeFullRows && rawRows.excelErrorCells instanceof Map ? rawRows.excelErrorCells : null;
+  const errorCells = (includeFullRows || includeCellMarks) && rawRows.excelErrorCells instanceof Map ? rawRows.excelErrorCells : null;
+  // v3.2.21：工作簿日期系统；CSV 等没有工作簿属性的按 1900（与原映射口径一致）
+  const excelDateSystem = rawRows.date1904 ? '1904' : '1900';
+  // v3.2.21：数值是否可能由读取库从显示文本推断（不可枚举，映射据此决定带小数的日期序号是否取日期部分）
+  const withReadFacts = (value) => Object.defineProperty(value, 'textInferredValues', {
+    value: Boolean(rawRows.valuesInferredFromText),
+    enumerable: false
+  });
   // 查重用的整行（只在 includeFullRows 时构造，普通映射不受影响）：Excel 错误值、没有缓存结果的公式记为标记对象
   //   （见 collectSpecialCells），指纹序列化时与任何文本、空白都不同。物理列偏移另行返回（fullColumnOffset），不展开空列。
   const buildFullCells = (cells, rawIndex) => {
@@ -1655,15 +3076,74 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
     });
     return readValues.size ? readValues : null;
   };
+  // v3.2.21：逐格标记（物理行号 → 物理列下标 → 标记），只含落在具体单元格上的标记（不含整行级标记）。
+  //   跨 Sheet 回填据此区分真正的空单元格与读成空值的 Excel 错误值 / 公式；整行数组不能按下标定位（行尾空格被裁掉后
+  //   追加的整行级标记会落在空列的下标上）。
+  const firstColumnIndex = Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0;
+  //   只为跨 Sheet 回填（includeCellMarks）构造；只启用重复账单过滤时查重用整行（fullRows），不另建这份索引
+  const cellMarks = includeCellMarks && errorCells ? new Map() : null;
+  if (cellMarks) {
+    errorCells.forEach((rowMarks, rawIndex) => {
+      const marks = new Map();
+      rowMarks.forEach((mark, columnIndex) => {
+        if (columnIndex >= 0) marks.set(columnIndex + firstColumnIndex, mark);
+      });
+      if (marks.size) cellMarks.set(rawIndex + firstRowNumber, marks);
+    });
+  }
+  // 按原文找到的公式单元格（物理坐标）：读取库读成空白的共享公式从属格等，同样不是可填的空单元格
+  if (cellMarks && Array.isArray(rawRows.formulaCells)) {
+    rawRows.formulaCells.forEach(({ r, c }) => {
+      const rowNumber = r + 1;
+      if (!cellMarks.has(rowNumber)) cellMarks.set(rowNumber, new Map());
+      const marks = cellMarks.get(rowNumber);
+      if (!marks.has(c)) marks.set(c, { unknownFormula: '工作表原文含公式' });
+    });
+  }
+  // 不能单独填写的区域（合并单元格、数组公式；物理坐标）：跨 Sheet 回填按目标坐标判断
+  const unwritableRanges = includeCellMarks && errorCells && Array.isArray(rawRows.unwritableRanges) ? rawRows.unwritableRanges : null;
+  // ISO 日期单元格：映射取值改成按原文换算的本工作簿日期系统序号；查重整行保持原值（见 isoTextToSerial）
+  const isoDateCells = rawRows.isoDateCells instanceof Map ? rawRows.isoDateCells : null;
+  // 读成无效数值的原生日期单元格的原文：行号 → Excel 物理列（A 列为 0）→ 原文，只供报错显示
+  const invalidDateTexts = new Map();
+  const physicalColumnBase = Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0;
   const meaningfulRows = rawRows
     .map((row, index) => {
-      const cells = trimTrailingEmptyCells(Array.isArray(row) ? row : []);
-      const fullCells = includeFullRows ? buildFullCells(cells, index) : null;
+      const originalCells = trimTrailingEmptyCells(Array.isArray(row) ? row : []);
+      const isoColumns = isoDateCells ? isoDateCells.get(index) : null;
+      // 按原文 ISO 换算的序号（不受本机时区影响）；写法无法识别时保持读取库的值（1904 工作簿减 1462，与同表日期序号同口径）
+      const cells = isoColumns
+        ? originalCells.map((value, column) => {
+          // 读取库读成 NaN 的日期（如 ODF 的 2026-09-25+00:00）同样优先取按原文换算的序号；读成文本的（SpreadsheetML 带时区
+          //   偏移的 DateTime，读取库读成原文末尾加 Z 的文本）同样如此（第三十一轮审查）
+          if (!isoColumns.has(column)) return value;
+          const { text, serial } = isoColumns.get(column);
+          if (Number.isFinite(serial)) return serial;
+          // 读取库读成非数值、原文为空（无从换算）时保持读取库的值
+          if (typeof value !== 'number' && serial === null) return value;
+          // 原文已判无效（日期不存在、整串校验不通过，如 2026-02-30、2026-09-25 12:30:00 (garbage)），或读取库读成无效值且
+          //   原文也无法换算：读成无效数值，状态一路带到日期映射与跨 Sheet 回填（映射按无效日期拒绝；回填不作配对键、回填值与
+          //   来源日期）。不返回原文：原文会被文本日期解析去掉时间及其后内容，按 2026-09-25 静默接受
+          if (Number.isNaN(serial) || !Number.isFinite(value)) {
+            const rowNumber = index + firstRowNumber;
+            if (!invalidDateTexts.has(rowNumber)) invalidDateTexts.set(rowNumber, new Map());
+            invalidDateTexts.get(rowNumber).set(physicalColumnBase + column, text);
+            return Number.NaN;
+          }
+          return rawRows.date1904 ? value - EXCEL_1904_DAY_OFFSET : value;
+        })
+        : originalCells;
+      const fullCells = includeFullRows ? (buildFullCells(originalCells, index) || (isoColumns ? originalCells : null)) : null;
+      // 读取库给出的原值（日期单元格按原文换算前）：升级前保存的模板表头含原生日期时按原值定位表头（见下方）
+      const legacyCells = cells !== originalCells && cells.some((value, column) => !Object.is(value, originalCells[column]))
+        ? originalCells
+        : null;
       const displayCells = buildDisplayCells(cells, index);
       const longIntegerReadValues = buildLongIntegerReadValues(cells, index);
       return {
         rowNumber: index + firstRowNumber,
         cells,
+        ...(legacyCells ? { legacyCells } : {}),
         ...(fullCells ? { fullCells } : {}),
         ...(displayCells ? { displayCells } : {}),
         ...(longIntegerReadValues ? { longIntegerReadValues } : {})
@@ -1672,49 +3152,94 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
     .filter((row) => isRowMeaningful(row.cells));
 
   if (!meaningfulRows.length) {
+    if (allowEmpty && !headerCandidates.length) {
+      notifyWorkbookRows();
+      return { rows: [], rowNumbers: [], columnOffset: 0, excelDateSystem, ...(sheetNames ? { sheetNames } : {}), ...odsSheetEntries };
+    }
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
   }
 
   if (!headerCandidates.length) {
+    notifyWorkbookRows();
     const longIntegerReadValues = meaningfulRows.map((row, index) => (index > 0 && row.longIntegerReadValues) || null);
-    return {
+    return withReadFacts({
       rows: meaningfulRows.map((row, index) => (index > 0 && row.displayCells ? row.displayCells : row.cells)),
       rowNumbers: meaningfulRows.map((row) => row.rowNumber),
       ...(longIntegerReadValues.some(Boolean) ? { longIntegerReadValues } : {}),
       // v3.2.21：rows[i][0] 对应的 Excel 物理列下标（A 列为 0），跨 Sheet 回填写出原始账单时定位单元格
       columnOffset: Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0,
+      excelDateSystem,
+      ...(sheetNames ? { sheetNames } : {}),
+      ...odsSheetEntries,
+      ...(cellMarks ? { cellMarks } : {}),
+      ...(unwritableRanges ? { unwritableRanges } : {}),
+      ...(invalidDateTexts.size ? { invalidDateTexts } : {}),
       // 不按表头定位时整行即全部列：查重的整行同样带错误值 / 未缓存公式标记与物理列偏移
       ...(includeFullRows ? {
         fullRows: meaningfulRows.map((row) => row.fullCells || row.cells),
         fullHeaders: meaningfulRows.map(() => meaningfulRows[0].fullCells || meaningfulRows[0].cells),
         fullColumnOffset: Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0
       } : {})
-    };
+    });
   }
 
   const meaningfulCells = meaningfulRows.map((row) => row.cells);
 
+  const finishMatch = (rowsForCollect, matchedRowIndex, matchedColumnIndex, normalizedExpectedHeaders) => {
+    const matched = collectMatchedRows({
+      meaningfulRows: rowsForCollect,
+      matchedRowIndex,
+      matchedColumnIndex,
+      normalizedExpectedHeaders,
+      includeFullRows,
+      includeHeaderRows
+    });
+    if (includeHeaderRows) matched.headerColumnOffset = Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0;
+    // v3.2.21：rows[i][0]（按表头截取后）对应的 Excel 物理列下标（A 列为 0），跨 Sheet 回填写出原始账单时定位单元格
+    matched.columnOffset = (Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0) + matchedColumnIndex;
+    matched.excelDateSystem = excelDateSystem;
+    if (sheetNames) matched.sheetNames = sheetNames;
+    Object.assign(matched, odsSheetEntries);
+    if (cellMarks) matched.cellMarks = cellMarks;
+    if (unwritableRanges) matched.unwritableRanges = unwritableRanges;
+    if (invalidDateTexts.size) matched.invalidDateTexts = invalidDateTexts;
+    // 整行第 0 个单元格对应的 Excel 物理列下标（A 列为 0），查重按物理列对齐时使用
+    if (includeFullRows) matched.fullColumnOffset = Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0;
+    notifyWorkbookRows([rowsForCollect[matchedRowIndex].rowNumber, ...matched.headerBreaks]);
+    return withReadFacts(matched);
+  };
+
+  // 升级前保存的模板（第三十一、三十二轮审查）：表头中的原生日期单元格当时按读取库的原值保存（1904 工作簿中差 1462 天、带
+  //   本机时区偏差等），与按原文换算后的值不同。表头定位与重复表头判定对每一行同时比较两种表示：按物理行序取最先命中的一行
+  //   （同一行两种都命中时取换算后的值），不因后面的分段先按换算后的值命中而漏掉前面的分段；命中的表头行按命中的表示取值
+  //   （与模板表头一致，字段按表头名绑定），数据行仍取换算后的值
+  const legacyHeaderCells = meaningfulRows.some((row) => row.legacyCells)
+    ? meaningfulRows.map((row) => row.legacyCells || row.cells)
+    : null;
   // 先按完整结构定位；命中的口径同时决定截取宽度与重复表头判定，保证取值下标与物理列一致。
   for (const normalizedExpectedHeaders of headerCandidates) {
-    const { matchedRowIndex, matchedColumnIndex } = findHeaderMatchPosition(
-      meaningfulCells,
-      normalizedExpectedHeaders
-    );
-
-    if (matchedRowIndex >= 0 && matchedColumnIndex >= 0) {
-      const matched = collectMatchedRows({
-        meaningfulRows,
-        matchedRowIndex,
-        matchedColumnIndex,
-        normalizedExpectedHeaders,
-        includeFullRows
-      });
-      // v3.2.21：rows[i][0]（按表头截取后）对应的 Excel 物理列下标（A 列为 0），跨 Sheet 回填写出原始账单时定位单元格
-      matched.columnOffset = (Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0) + matchedColumnIndex;
-      // 整行第 0 个单元格对应的 Excel 物理列下标（A 列为 0），查重按物理列对齐时使用
-      if (includeFullRows) matched.fullColumnOffset = Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0;
-      return matched;
-    }
+    const current = findHeaderMatchPosition(meaningfulCells, normalizedExpectedHeaders);
+    const legacy = legacyHeaderCells
+      ? findHeaderMatchPosition(legacyHeaderCells, normalizedExpectedHeaders)
+      : { matchedRowIndex: -1, matchedColumnIndex: -1 };
+    const useLegacy = legacy.matchedRowIndex >= 0 && legacy.matchedColumnIndex >= 0
+      && (current.matchedRowIndex < 0 || current.matchedColumnIndex < 0 || legacy.matchedRowIndex < current.matchedRowIndex);
+    const { matchedRowIndex, matchedColumnIndex } = useLegacy ? legacy : current;
+    if (matchedRowIndex < 0 || matchedColumnIndex < 0) continue;
+    if (!legacyHeaderCells) return finishMatch(meaningfulRows, matchedRowIndex, matchedColumnIndex, normalizedExpectedHeaders);
+    const width = normalizedExpectedHeaders.length;
+    const headerSliceOf = (cells) => {
+      const sliced = cells.slice(matchedColumnIndex, matchedColumnIndex + width);
+      while (sliced.length < width) sliced.push('');
+      return sliced;
+    };
+    const rowsForCollect = meaningfulRows.map((row, index) => {
+      if (!row.legacyCells || index < matchedRowIndex) return row;
+      if (index === matchedRowIndex) return useLegacy ? { ...row, cells: row.legacyCells } : row;
+      if (isRepeatedMatchedHeader(headerSliceOf(row.cells), normalizedExpectedHeaders)) return row;
+      return isRepeatedMatchedHeader(headerSliceOf(row.legacyCells), normalizedExpectedHeaders) ? { ...row, cells: row.legacyCells } : row;
+    });
+    return finishMatch(rowsForCollect, matchedRowIndex, matchedColumnIndex, normalizedExpectedHeaders);
   }
 
   throw new FileValidationError(
@@ -1791,8 +3316,21 @@ function xmlUnescapeName(s) {
     .replace(/&apos;/g, "'");
 }
 
-function extractHeaders(filePath) {
-  const rows = readRows(filePath);
+// exactIsoDates：表头取自网银账单导入同一读取结果（readRowsWithMetadata，见 file-service.js buildMappedRows：按原文校正 ODS
+//   只写在属性上的文本、ISO 日期按工作簿日期系统换算等），网银模板的创建、更新与按文件名匹配的预检都按这一口径
+//   （v3.2.21 第二十九、三十轮审查）
+//   按原值读取时只展开到第一个有值的行（第三十五轮审查）；该行经校正后仍没有值（如读取库读成 false 的无缓存公式）时改按整表读取
+function extractHeaders(filePath, { exactIsoDates = false } = {}) {
+  const readHeaderRows = (headerOnly) => readRowsWithMetadata(filePath, [], {
+    exactIsoDates: true, onlyTargetSheet: true, headerOnly, allowEmpty: headerOnly
+  }).rows;
+  let rows;
+  if (exactIsoDates) {
+    rows = readHeaderRows(true);
+    if (!rows.length || !isRowMeaningful(rows[0])) rows = readHeaderRows(false);
+  } else {
+    rows = readRows(filePath);
+  }
   const headerRow = rows[0];
 
   if (!isRowMeaningful(headerRow)) {
@@ -1900,6 +3438,24 @@ function listSheetNames(filePath) {
 }
 
 module.exports = {
+  xmlStartTagPattern,
+  isHtmlWorkbookFile,
+  normalizeOdsContentText,
+  normalizeXlsxSharedStringsBuffer,
+  odsWorkbookBuffer,
+  sharedStringItemSources,
+  xmlCharacterData,
+  loadOdsContent,
+  odsSheetNameEntries,
+  maskXmlMarkup,
+  decodeXmlAttributeValue,
+  normalizeXlmlWorkbookBuffer,
+  parseXlsxRelationships,
+  restoreOdsSelfClosingCells,
+  xlsxWorkbookDate1904,
+  xlsxWorkbookRootInfo,
+  xlsxWorkbookXmlOf,
+  xmlTagsHiddenInMarkup,
   collectMatchedRows,
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
@@ -1907,6 +3463,12 @@ module.exports = {
   findHeaderMatchPosition,
   // v3.0.8 BUG3：大文件全量读触顶内存类错误判定（导出供单测）
   isMemoryLimitError,
+  // v3.2.21 D12：ISO 日期单元格按原文换算（导出供单测）
+  isoTextToSerial,
+  scanOdsWorkbookCells,
+  scanXlmlWorkbookCells,
+  // v3.2.21：按工作表原文找 ISO 日期单元格（跨 Sheet 回填转换写出时统一日期系统）
+  scanXlsxSheetCells,
   listSheetNames,
   loadEnumValues,
   readMeaningfulRowsHead,

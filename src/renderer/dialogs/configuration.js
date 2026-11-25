@@ -5808,14 +5808,19 @@
         }));
       }
 
-      // v3.2.21：回填目标不能是发生额 / 余额 / 币种所用的源列（与主进程 collectCrossSheetBackfillExcludedTargets 同口径，按当前草稿取）
+      // v3.2.21：回填目标不能是发生额 / 余额 / 币种 / 账户所用的源列——这里按当前草稿的主映射先校验一遍；拆分、按字段区分
+      //   发生额等在各自弹窗保存的配置由主进程 collectCrossSheetBackfillExcludedTargets 在保存时一并校验
       function collectCrossSheetBackfillExcludedTargets() {
         const headerSet = new Set((payload.template.headers || []).map((header) => String(header ?? '').trim()).filter(Boolean));
         const amountFields = new Set(['Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId', '按正负号拆分的发生额']);
         const excluded = new Set();
         collectMappingDraftFromTable(tbody).forEach((mapping) => {
           if (!amountFields.has(mapping.templateField)) return;
-          [mapping.mappedField].concat(mapping.mappedFields || [])
+          // 字段筛选特征值：草稿中存的是特征值 id，实际读取的是该特征值的筛选字段（与主进程保存、生成时的排除规则一致）
+          const fields = mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD
+            ? [findFeatureFilterById(currentFeatureFilters, getFeatureFilterRef(mapping))?.sourceField]
+            : [mapping.mappedField].concat(mapping.mappedFields || []);
+          fields
             .map((value) => String(value ?? '').trim())
             .filter((value) => headerSet.has(value))
             .forEach((value) => excluded.add(value));
@@ -7450,12 +7455,14 @@
       )).join(' 且 ')).join('；或 ');
     }
 
-    // 返回 { rule, errors }：去首尾空白；本表字段与来源字段都为空的回填行忽略
+    // 返回 { rule, errors }：去首尾空白（来源 Sheet 名除外）；本表字段与来源字段都为空的回填行忽略
     function normalizeCrossSheetBackfillDraft(draft, { excludedTargetFields = [] } = {}) {
       const errors = [];
       const label = CROSS_SHEET_BACKFILL_LABEL;
+      // Sheet 名按原文保存（工作簿可同时有「USD」与「USD 」两张表，与主进程同口径），只有全为空白时视为未填写
+      const rawSheetName = String(draft.sourceSheetName || '');
       const rule = {
-        sourceSheetName: String(draft.sourceSheetName || '').trim(),
+        sourceSheetName: rawSheetName.trim() ? rawSheetName : '',
         rowRules: cloneRowFilterRules(draft.rowRules),
         matchMode: draft.matchMode,
         matchField: String(draft.matchField || '').trim(),

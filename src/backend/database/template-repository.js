@@ -1276,7 +1276,7 @@ function listTemplateBundleEntries(db) {
         : [],
       // v3.2.19（bundle v8）：原始账单预处理的过滤规则；「过滤账单」开关是映射行，已在 mappings 中
       preprocessRowFilterRules: normalizeRowFilterRules(template.preprocessRowFilterRules),
-      // v3.2.21（bundle v9）：原始账单预处理「跨 Sheet 回填」规则；开关是映射行，已在 mappings 中
+      // 跨 Sheet 回填（bundle v10）：原始账单预处理「跨 Sheet 回填」规则；开关是映射行，已在 mappings 中
       crossSheetBackfillRule: hasCrossSheetBackfillSettings(template.crossSheetBackfillRule)
         ? normalizeCrossSheetBackfillRule(template.crossSheetBackfillRule)
         : null,

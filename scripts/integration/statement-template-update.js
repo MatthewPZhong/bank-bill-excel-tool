@@ -186,6 +186,7 @@ function createMain(database, spies) {
     'findConflictingTemplateByHeaders',
     'buildTemplateFieldReferenceInput',
     'collectStaleTemplateFieldReferences',
+    'extractStatementTemplateHeaders',
     'prepareTemplateHeaderUpdate',
     'applyTemplateHeaderUpdate',
     'hasAmbiguousLogicValueFeatureCandidate',

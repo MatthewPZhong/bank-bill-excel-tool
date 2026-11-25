@@ -232,6 +232,7 @@ function createEnvironment(dir, label) {
 
   const mainDeps = {
     ...MAIN_CONSTANTS,
+    hasDetailExportRow: require('../../src/backend/file-service').hasDetailExportRow,
     // v3.2.18：生成配置的失效映射拦截
     templateHeaderUpdateTools: createTemplateHeaderUpdateTools(MAIN_CONSTANTS),
     database,
@@ -345,6 +346,7 @@ function createEnvironment(dir, label) {
     'generateMultiTemplateGroupFiles',
     'assertStatementBatchWritable',
     'assertStatementEntriesWritable',
+    'isAllTransactionsSkippedByBackfill',
     'planVirtualTemplateBalanceRegeneration',
     'assertVirtualTemplateBalanceOutputPaths',
     'regenerateVirtualTemplateBalanceFromSession',

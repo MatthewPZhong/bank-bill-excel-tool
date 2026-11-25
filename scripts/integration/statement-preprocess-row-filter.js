@@ -352,7 +352,8 @@ function verifyGeneration(dir, database, main) {
     rules: RULES,
     detail: [['2026-11-01', 100, ''], ['2026-11-02', 20, ''], ['2026-11-02', '', 30]],
     sourceRows: [2, 4, 6],
-    stats: { enabled: true, totalRows: 5, keptRows: 3, droppedTransactionRowNumbers: [3, 5] },
+    // v3.2.21：droppedAmountRowNumbers 为其中带发生额的行（多账户分段的直接匹配窗口只以这些行为界）
+    stats: { enabled: true, totalRows: 5, keptRows: 3, droppedTransactionRowNumbers: [3, 5], droppedAmountRowNumbers: [3, 5] },
     balances: [['2026-11-01', 1100], ['2026-11-02', 1090]]
   }, '③ 回读导出：只保留命中规则的行，行号为物理行号，按发生额计算的余额只计保留的行');
 

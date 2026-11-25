@@ -670,6 +670,79 @@ test('显式 settle 的 eager output 未形成时耐久记为 OUTPUT_NOT_PRODUCE
   }
 });
 
+test('v3.2.21 settle 声明 produced:false 的输出：路径上已有他人文件也不读取，记为 OUTPUT_NOT_PRODUCED；带摘要的输出只归档一致内容', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const outputPaths = ['detail.xlsx', 'a_回填.xlsx', 'b_回填.xlsx']
+      .map((name) => path.join(fixture.sourceDir, name));
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'declared-not-produced-task',
+      taskKey: 'toolbox:merge',
+      moduleId: 'toolbox',
+      parentRunId: 'declared-not-produced-parent',
+      operationKey: 'declared-not-produced-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [],
+      outputs: outputPaths.map((filePath) => ({ filePath, role: 'output', sourceOperation: 'toolbox:merge' }))
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'TOOLBOX',
+      moduleName: '工具箱'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId,
+      taskKey: task.taskKey,
+      moduleId: task.moduleId,
+      parentRunId: task.parentRunId,
+      operationKey: task.operationKey
+    };
+    await fixture.service.startFileTask(task.taskRunId, reserved.batch.id);
+    fs.writeFileSync(outputPaths[0], 'detail');
+    fs.writeFileSync(outputPaths[1], 'written');
+    // 第三份未写出，但路径被他人占用
+    fs.writeFileSync(outputPaths[2], 'occupant');
+    const written = Buffer.from('written');
+    const writtenSha256 = crypto.createHash('sha256').update(written).digest('hex');
+    const rejected = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [{ artifactKey: manifest.outputs[2].artifactKey, produced: false, expectedSha256: writtenSha256, expectedSizeBytes: written.length }]
+    });
+    // 未产出声明不能带摘要：整次结算拒绝（TypeError 对外脱敏为通用失败），各 artifact 不变
+    assert.equal(rejected.ok, false);
+    assert.deepEqual(
+      fixture.repository.listArtifacts(reserved.batch.id).map((artifact) => artifact.status),
+      ['pending', 'pending', 'pending']
+    );
+    const settled = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [
+        { artifactKey: manifest.outputs[0].artifactKey },
+        { artifactKey: manifest.outputs[1].artifactKey, expectedSha256: writtenSha256, expectedSizeBytes: written.length },
+        { artifactKey: manifest.outputs[2].artifactKey, produced: false }
+      ]
+    });
+    assert.equal(settled.ok, false);
+    assert.equal(settled.durable, true);
+    assert.deepEqual(settled.results.map((result) => [result.status, result.code || '']),
+      [['ready', ''], ['ready', ''], ['failed', 'ARCHIVE_OUTPUT_NOT_PRODUCED']]);
+    assert.deepEqual(
+      fixture.repository.listArtifacts(reserved.batch.id).map((artifact) => artifact.status),
+      ['ready', 'ready', 'failed']
+    );
+    assert.equal(fs.readFileSync(outputPaths[2], 'utf8'), 'occupant');
+  } finally {
+    fixture.close();
+  }
+});
+
 test('Bank Statement 多输出 graceful 子报表失败时其 artifact failed、其余 ready，业务仍 succeeded', async () => {
   const fixture = createFixture();
   try {

@@ -680,7 +680,7 @@ function verifyFeatureCandidates(dir, database, main) {
 
   // 模板包：写 v9；旧版（支持到 v8）整包拒绝；往返后生成结果一致
   const entry = database.listTemplateBundleEntries().find((item) => item.name === '逻辑取值特征值模板');
-  assertEq([main.resolveTemplateBundleVersion([entry]), CONSTANTS.SUPPORTED_BUNDLE_VERSION], [9, 9], '⑦ 模板包：候补含特征值时写 v9');
+  assertEq([main.resolveTemplateBundleVersion([entry]), CONSTANTS.SUPPORTED_BUNDLE_VERSION >= 9], [9, true], '⑦ 模板包：候补含特征值时写 v9');
   const bundlePath = path.join(dir, 'feature-bundle.json');
   fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');
   const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 8 });
