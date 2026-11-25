@@ -166,6 +166,7 @@ function loadRegenerateFunction(deps) {
     buildStatementGenerationConfig: deps.buildStatementGenerationConfig,
     buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: deps.statementGenerationHelpers.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: deps.statementGenerationHelpers.assertNoUnwritableRowText,
     FileValidationError
   });
   const assertVirtualTemplateBalanceOutputPaths = loadMainFunction('assertVirtualTemplateBalanceOutputPaths', {
@@ -276,7 +277,7 @@ async function verifyMergedScopeIsolation(dir) {
     buildDateRangeLabel,
     buildOutputFilePath,
     mergeGeneratedXlsxFiles: loadMainFunction('mergeGeneratedXlsxFiles', {
-      require, fs, path, applyWatermark: () => {}
+      require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
     }),
     getToday: () => today,
     path,
@@ -339,7 +340,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
     getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   });
   const mergeGeneratedXlsxFiles = loadMainFunction('mergeGeneratedXlsxFiles', {
-    require, fs, path, applyWatermark: () => {}
+    require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
   });
   const buildGenerationConfig = ({ template }) => ({
     template,
@@ -351,6 +352,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
   const imported = [];
   const step6TemplateConfig = (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] });
   const generateGroups = loadMainFunction('generateMultiTemplateGroupFiles', {
+    isAllTransactionsSkippedByBackfill: loadMainFunction('isAllTransactionsSkippedByBackfill', { hasDetailExportRow: require('../../src/backend/file-service').hasDetailExportRow }),
     groupStatementEntriesForGeneration: loadGroupingFunction(step6TemplateConfig),
     ...loadOutputNameConflictFunctions(templates),
     getEntryTemplateConfig: ({ entry }) => ({
@@ -365,7 +367,9 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
     rebuildMatchedTemplateFileEntries: ({ fileEntries: entries }) => entries,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: generation.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
     FileValidationError,
+    createStatementOutputJournal: require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,

@@ -74,7 +74,7 @@ function sourceMatch(workbook, fileName, definitions = SOURCE_DEFINITIONS) {
   return matches[0];
 }
 
-// bankSourceHeaders：银行对账单导入识别结构的当前用户版本（D17，与内置 46 / 49 列同时接受）。
+// bankSourceHeaders：银行对账单导入识别结构的当前用户版本（D17，与内置 46 列、平盘结果 20 列同时接受）。
 function bankMatch(workbook, fileName, bankSourceHeaders = null) {
   const sheet = workbook.Sheets[BANK_SHEET_NAME];
   if (!sheet) {
@@ -90,7 +90,7 @@ function bankMatch(workbook, fileName, bankSourceHeaders = null) {
   if (!structure) {
     throw new PositionReconciliationError(
       'position-bank-headers-invalid',
-      `银行对账单表头不符合 46/49 列契约${bankSourceHeaders ? '或当前版本' : ''}：${fileName}`,
+      `银行对账单表头不符合 46/20 列契约${bankSourceHeaders ? '或当前版本' : ''}：${fileName}`,
       bankHeaderMismatchLines(headers, bankSourceHeaders)
     );
   }

@@ -959,9 +959,6 @@
       const categoryWidth = isGatewayReconIdFixCompact ? '24.01%' : (isCompactView ? '29.87%' : '15.97%');
       const nameWidth = isGatewayReconIdFixCompact ? '30.96%' : (isCompactView ? '33%' : '38.03%');
       const actionsWidth = isGatewayReconIdFixCompact ? '26.02%' : (isCompactView ? '27.73%' : '15.97%');
-      // v2.1.15 W3：仅资金对账模块入口（filter 含 'gateway-recon-join'、非单类别 compact）显示「网关对账单修复-管理」入口；
-      //   ReconID 修复模块自身入口（compact，filter=['gateway-recon-id-fix']）随 wrapper 隐藏，避免重复/自指。
-      const showGatewayReconIdFixEntry = !isCompactView && Array.isArray(filter) && filter.includes('gateway-recon-join');
       const overlay = createOverlay();
       let detailGeneration = 0;
       const dialog = document.createElement('div');
@@ -985,11 +982,7 @@
               <select id="scenario-channel-filter" class="template-select small" data-role="channel-filter" data-channel-id="1" style="min-width: 160px;"></select>
             </div>
             <button class="secondary-btn small" type="button" data-action="manage-channels">管理</button>
-            <!-- v2.1.15 W3：「网关对账单修复」入口（仅资金对账模块入口显示）→ 打开 ReconID 修复模块的网关对账单场景管理 -->
-            <span class="gateway-recon-id-fix-entry" style="display: ${showGatewayReconIdFixEntry ? 'inline-flex' : 'none'}; align-items: center; gap: 8px; margin-left: 8px; transform: translateX(400px);">
-              <label class="select-label" style="white-space: nowrap;">网关对账单修复</label>
-              <button class="secondary-btn small" type="button" data-action="manage-gateway-recon-id-fix">管理</button>
-            </span>
+            <!-- v3.2.22：移除 v2.1.15 W3 的「网关对账单修复 [管理]」入口；网关修复场景改在对账单修复模块的【场景管理】维护。 -->
           </div>
           <button class="icon-close" type="button">×</button>
         </div>
@@ -1026,7 +1019,7 @@
           <div class="scenarios-footer-right-group">
             <button class="secondary-btn small" type="button" data-action="import-scenario-bundle">导入模板文件</button>
             <button class="secondary-btn small" type="button" data-action="export-scenario-bundle">导出模板文件</button>
-            <button class="primary-btn small" type="button" data-action="finish">完成</button>
+            <button class="primary-btn small" type="button" data-action="finish">返回</button>
           </div>
         </div>
       `;
@@ -1373,16 +1366,6 @@
               (() => { returnToModal(overlay); refreshChannelFilter(); refreshTable(); })();
             }
           }));
-        });
-      }
-
-      // v2.1.15 W3：「网关对账单修复-管理」→ 打开对账单 ReconID 修复模块的网关对账单场景管理
-      //   复用同一工厂：单类别白名单 ['gateway-recon-id-fix'] → compact 视图（与从 ReconID 模块主面板「场景管理」打开一致）
-      //   仅资金对账模块入口（showGatewayReconIdFixEntry=true）渲染该按钮；点击替换当前弹窗，关闭后回主界面（行为同 ReconID 入口）
-      const manageGatewayReconIdFixBtn = dialog.querySelector('[data-action="manage-gateway-recon-id-fix"]');
-      if (manageGatewayReconIdFixBtn) {
-        manageGatewayReconIdFixBtn.addEventListener('click', () => {
-          openModal(() => createScenariosManagerDialog(['gateway-recon-id-fix']));
         });
       }
 

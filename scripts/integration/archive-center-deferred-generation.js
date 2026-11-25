@@ -26,7 +26,7 @@ const { createTaskLifecycle } = require('../../src/main-process/archive-center/t
 const { createTaskPolicyRegistry } = require('../../src/main-process/execution-descriptors/composition');
 const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { artifactManifestFromFilePlan, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
-const { FileValidationError, extractHeaders, writeBalanceWorkbook } = require('../../src/backend/file-service');
+const { FileValidationError, assertBalanceRecordsWritable, extractHeaders, writeBalanceWorkbook } = require('../../src/backend/file-service');
 const { writeBalanceSeedRecords } = require('../../src/backend/balance-seed-store');
 const {
   ALL_BANKS_TEMPLATE_SCOPE,
@@ -65,6 +65,7 @@ function mainSection(startText, endText) {
 const MAIN_FRAGMENT = [
   mainSection('function sanitizeFileName(', '\n// v2.1.9 N7 (Phase 7 T29)'),
   mainSection('function buildOutputFilePath(', 'function buildStatementOutputFilePath('),
+  mainSection('function createDetailedErrorResult(', 'function createStatementChannelErrorResult('),
   mainSection("trackedIpcHandle('monthly-balance:assemble'", '// v1.5.3 R1 (T1.4)：月度余额另存为'),
   mainSection("trackedIpcHandle('new-account:generate'", "trackedIpcHandle('new-account:export'")
 ].join('\n');
@@ -75,7 +76,7 @@ function loadMainHandlers({ storageRoot, database }) {
   const errorResults = [];
   const scope = {
     fs, path, artifactManifestFromFilePlan, normalizeFilePlanV1,
-    FileValidationError, extractHeaders, writeBalanceWorkbook,
+    FileValidationError, assertBalanceRecordsWritable, extractHeaders, writeBalanceWorkbook,
     ALL_BANKS_TEMPLATE_SCOPE, assembleMonthlyBalance, toBalanceRows,
     NEW_ACCOUNT_EXPORT_NAME, normalizeNewAccountAccounts, prepareNewAccountGeneration, validateNewAccountAccounts,
     trackedIpcHandle: (channel, _moduleKey, _functionKey, contract) => contracts.set(channel, contract),
@@ -92,11 +93,13 @@ function loadMainHandlers({ storageRoot, database }) {
     formatDateLabel: (value) => String(value),
     createErrorResult: (options) => {
       errorResults.push(options);
-      return { status: 'error', errorCode: options.errorCode, message: options.message };
+      // 与生产 createErrorResult 的返回形状一致：不含 errorCode / detailLines（报告里才有）
+      return { status: 'error', message: options.message, errorReportReady: true, errorReportFileName: 'report.txt' };
     }
   };
-  Function(...Object.keys(scope), `${MAIN_FRAGMENT}\nreturn null;`)(...Object.values(scope));
-  return { contracts, activity, errorResults };
+  // 导出缓存经 getter 取：新开账户成功时会整体替换 lastGeneratedExports
+  const getExports = Function(...Object.keys(scope), `${MAIN_FRAGMENT}\nreturn () => lastGeneratedExports;`)(...Object.values(scope));
+  return { contracts, activity, errorResults, getExports };
 }
 
 function createLifecycle(service, controller) {
@@ -200,13 +203,15 @@ async function run() {
     const lifecycle = createLifecycle(service, controller);
     const policyRegistry = createTaskPolicyRegistry();
     const templates = [{ id: 7, name: '测试银行-上海' }];
+    // Step 3b 起模板多一个账号含无法写入 Excel 字符的大账号（月度余额的账号取自模板大账号）
+    const extraBigAccounts = [];
     const database = {
       listTemplates: () => templates,
       getTemplateBigAccounts: (templateId) => (templateId === 7
-        ? [{ merchantId: '6222000011112222', currency: 'USD' }]
+        ? [{ merchantId: '6222000011112222', currency: 'USD' }, ...extraBigAccounts]
         : [])
     };
-    const { contracts, activity, errorResults } = loadMainHandlers({ storageRoot, database });
+    const { contracts, activity, errorResults, getExports } = loadMainHandlers({ storageRoot, database });
     const balanceHeaders = extractHeaders(path.resolve(__dirname, '../../assets/余额账单模版.xlsx'));
     const accountColumn = balanceHeaders.indexOf('银行账号');
     const balanceColumn = balanceHeaders.indexOf('期末余额');
@@ -258,6 +263,35 @@ async function run() {
       assertNoBatch(service, { label, taskRunId, batchContext: run2.batchContext, initialPlan: run2.initialPlan });
     }
 
+    // Step 2b（v3.2.22 B113）：新开账户一条记录的银行名称含无法写入 Excel 的字符——按位置拒绝，报错文件不含任一条完整账号
+    {
+      const label = 'Step2b.新开账户含无法写入的字符';
+      const taskRunId = 'deferred-new-account-unwritable';
+      const before = errorResults.length;
+      const opening = new Date();
+      opening.setDate(opening.getDate() - 3);
+      const openingDate = `${opening.getFullYear()}-${String(opening.getMonth() + 1).padStart(2, '0')}-${String(opening.getDate()).padStart(2, '0')}`;
+      const run = await runDeferred({
+        lifecycle, policyRegistry, contracts, taskRunId,
+        channel: 'new-account:generate',
+        payload: { accounts: [
+          { bankName: '测试银行', location: '上海', bankAccount: '622200007777', openingDate, isMultiCurrency: false, currency: 'USD', currencies: [] },
+          { bankName: '测试\uFFFF银行', location: '上海', bankAccount: '622200008888', openingDate, isMultiCurrency: false, currency: 'USD', currencies: [] }
+        ] }
+      });
+      assertEq(run.result && run.result.status, 'error', `${label}.返回错误`);
+      const errorOptions = errorResults[before] || {};
+      assertEq([errorResults.length - before, errorOptions.errorCode], [1, 'FILE_READ'], `${label}.按业务错误记录`);
+      assertTrue(/含无法写入 Excel 的字符/.test(String(errorOptions.message)), `${label}.消息说明原因`);
+      const recorded = JSON.stringify({ ...errorOptions, originalError: undefined });
+      assertTrue(!recorded.includes('622200007777') && !recorded.includes('622200008888'), `${label}.报错内容不含任一条完整账号`);
+      assertEq(errorOptions.context, { accountCount: 2, moduleName: NEW_ACCOUNT_EXPORT_NAME }, `${label}.报错文件只记账号行数`);
+      const exportDir = path.join(storageRoot, 'exports', '2026-11-10', 'new-account');
+      assertEq(fs.existsSync(exportDir) ? fs.readdirSync(exportDir).length : 0, 1, `${label}.不新增导出文件`);
+      // 校验失败不建批、不占号（预留归档批次前预检最终记录）
+      assertNoBatch(service, { label, taskRunId, batchContext: run.batchContext, initialPlan: run.initialPlan });
+    }
+
     // Step 3：月度余额「装配」——同一 deferred 注册，有种子时晋升并写出
     {
       const label = 'Step3.月度余额装配';
@@ -284,6 +318,61 @@ async function run() {
         assertEq(String(rows[1] && rows[1][accountColumn]), '6222000011112222', `${label}.账号`);
         assertEq(Number(rows[1] && rows[1][balanceColumn]), 1234.56, `${label}.期末余额`);
       }
+    }
+
+    // Step 3a（v3.2.22 B113，Codex 第七轮）：装配直接返回错误（月份无效）时同样失效上一期的待导出引用，再恢复为本期
+    {
+      const label = 'Step3a.装配直接返回错误';
+      assertTrue(Boolean(getExports().monthlyBalance), `${label}.前置：Step3 装配成功后有待导出的月度余额`);
+      const invalid = await runDeferred({
+        lifecycle, policyRegistry, contracts, taskRunId: 'deferred-monthly-invalid',
+        channel: 'monthly-balance:assemble',
+        payload: { templateScope: 'single', templateName: '测试银行-上海', year: 2026, month: 13 }
+      });
+      assertEq(invalid.result && invalid.result.errorCode, 'MONTHLY_BALANCE_INVALID_INPUT', `${label}.月份无效`);
+      assertEq(getExports().monthlyBalance, null, `${label}.不再保留上一期的待导出文件`);
+      const again = await runDeferred({
+        lifecycle, policyRegistry, contracts, taskRunId: 'deferred-monthly-again',
+        channel: 'monthly-balance:assemble',
+        payload: { templateScope: 'single', templateName: '测试银行-上海', year: 2026, month: 9 }
+      });
+      assertEq(again.result && again.result.status, 'ready', `${label}.重新装配成功`);
+    }
+
+    // Step 3b（v3.2.22 B113）：余额记录含无法写入 Excel 的字符（如早期版本写入种子的账号）——按业务校验错误返回消息与逐处位置，
+    //   不改报「装配月度余额账单失败」系统错误；不留下输出文件
+    {
+      const label = 'Step3b.月度余额含无法写入的字符';
+      assertTrue(Boolean(getExports().monthlyBalance), `${label}.前置：Step3 装配成功后有待导出的月度余额`);
+      extraBigAccounts.push({ merchantId: '62220000\uFFFF', currency: 'USD' });
+      writeBalanceSeedRecords(storageRoot, '测试银行', [
+        { merchantId: '6222000011112222', currency: 'USD', billDate: '2026-09-30', endBalance: 1234.56,
+          templateName: '测试银行-上海' },
+        { merchantId: '62220000\uFFFF', currency: 'USD', billDate: '2026-10-31', endBalance: 1,
+          templateName: '测试银行-上海' }
+      ]);
+      const before = errorResults.length;
+      const taskRunId = 'deferred-monthly-unwritable';
+      const run = await runDeferred({
+        lifecycle, policyRegistry, contracts, taskRunId,
+        channel: 'monthly-balance:assemble',
+        payload: { templateScope: 'single', templateName: '测试银行-上海', year: 2026, month: 10 }
+      });
+      const result = run.result || {};
+      assertEq(result.status, 'error', `${label}.返回错误`);
+      assertEq(result.errorCode, 'FILE_READ', `${label}.按业务校验错误返回`);
+      assertTrue(/含无法写入 Excel 的字符/.test(String(result.message)), `${label}.消息说明原因（${result.message}）`);
+      assertEq(Array.isArray(result.detailLines) && result.detailLines.length, 1, `${label}.给出 1 处位置`);
+      assertEq(result.detailLines, ['第 3 行「银行账号」列'], `${label}.位置为行号与列名（第 2 行是正常账号）`);
+      const errorOptions = errorResults[before] || {};
+      assertEq([errorResults.length - before, errorOptions.errorCode, errorOptions.errorType], [1, 'FILE_READ', undefined], `${label}.报错文件按业务错误记录`);
+      assertEq(errorOptions.detailLines, result.detailLines, `${label}.报错文件列出同样的位置`);
+      const exportsDir = path.join(storageRoot, 'exports', '2026-11-10', 'balance');
+      const leftovers = fs.existsSync(exportsDir) ? fs.readdirSync(exportsDir).filter((name) => /2026-10|202610/.test(name)) : [];
+      assertEq(leftovers, [], `${label}.不留下输出文件`);
+      assertNoBatch(service, { label, taskRunId, batchContext: run.batchContext, initialPlan: run.initialPlan });
+      assertEq(getExports().monthlyBalance, null, `${label}.装配失败后不再保留上一期的待导出文件`);
+      extraBigAccounts.length = 0;
     }
 
     // Step 4：月度余额无记录——零输出，不预留 Batch

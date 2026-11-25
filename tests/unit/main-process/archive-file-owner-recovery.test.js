@@ -348,3 +348,62 @@ test('已下线模块：启动保留原收口责任与流程绑定意图，到�
   assert.ok(f.service.repository.getBatch(owner.batchContext.batchId), '缺收口凭证的旧版批次不在新版清理');
   assert.deepEqual(evidence(), before);
 });
+
+// v3.2.22（🔴 资金红线·存档血缘）：业务失败时声明的「未产出」，在存档盘结算时暂时离线的情况下也要随终态意图落盘、
+//   恢复后先重放结算再收口。否则未结算的输出以普通业务失败结束、存档中心允许按原路径重试，会把用户原有的同名文件
+//   （如选择覆盖的旧主文件）归档成本批产物。真实 ArchiveService + Controller + outbox + TaskLifecycle 验证。
+test('业务失败 + 存档盘离线：未产出声明随失败终态落盘，恢复后重放结算，批次只能重新执行业务', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-failed-offline-'));
+  const db = new DatabaseSync(path.join(directory, 'archive.sqlite'));
+  const rootDir = path.join(directory, 'archive');
+  const service = createArchiveService({ database: db, rootDir });
+  await service.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false });
+  const outboxStore = createArchiveOutboxStore(path.join(directory, 'outbox'));
+  const controller = createArchiveCenterController({
+    database: { getSetting: () => null, setSetting() {} }, service, outboxStore
+  });
+  t.after(async () => { await service.pauseBackgroundMaterialization(); db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const policy = createTaskPolicyRegistry().require('bank-statement:export');
+  const lifecycle = createTaskLifecycle({ archiveService: service,
+    businessOperationRegistry: { begin: () => ({ accepted: true, token: 'export-operation' }), end() {} },
+    flowResolver: { resolve: async () => ({ parentRunId: 'export-parent', source: 'new', identity: null }),
+      bind: async () => [], persistBindIntent: async () => ({ ok: true }) },
+    operationTracker: { appendOperationFiles: async () => ({ ok: true }) },
+    persistTerminalIntent: (payload) => controller.persistTaskTerminalIntent(payload)
+  });
+  // 用户在保存框里选择覆盖的旧主文件
+  const mainPath = path.join(directory, 'out', '处理结果.xlsx');
+  fs.mkdirSync(path.dirname(mainPath), { recursive: true });
+  fs.writeFileSync(mainPath, 'OLD-MAIN');
+  const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [],
+    outputs: [{ filePath: mainPath, role: 'output', sourceOperation: policy.channel }] });
+  const offlineRoot = `${rootDir}.offline`;
+  const result = await lifecycle.runFileTask({ policy, meta: { channel: policy.channel },
+    taskRunId: 'export-task', operationKey: 'export-operation',
+    filePlanResolver: () => plan,
+    execute: async (_context, controls) => {
+      fs.renameSync(rootDir, offlineRoot); // 主文件写失败的同时存档盘离线
+      const settled = await controls.settleArtifacts({ files: controls.fileEvidence.filePlan.outputs
+        .map((item) => ({ artifactKey: item.artifactKey, produced: false })) });
+      assert.notEqual(settled.durable, true, '离线时结算未耐久');
+      return { status: 'failed', message: '主文件写失败' };
+    }
+  });
+  assert.equal(result.status, 'failed');
+  const [record] = outboxStore.list();
+  assert.ok(record, '失败终态意图已落盘');
+  assert.deepEqual(record.payload.settleFiles.map((file) => file.produced), [false]);
+
+  fs.renameSync(offlineRoot, rootDir); // 存档盘恢复
+  const flushed = await controller.flushOutbox();
+  assert.equal(flushed.remaining, 0, JSON.stringify(flushed));
+  const batch = service.repository.getBatchByOperationKey(policy.scopeId, 'export-operation');
+  assert.equal(service.repository.getTaskRun(batch.taskRunId).status, 'failed');
+  const [artifact] = service.repository.listArtifacts(batch.id);
+  assert.equal(artifact.status, 'failed');
+  assert.equal(artifact.lastErrorCode, 'ARCHIVE_OUTPUT_NOT_PRODUCED', '🔴 记为未产出，不是可重试的普通失败');
+  const view = await controller.getBatch(batch.id);
+  assert.equal(view.batch.canRetry, false);
+  assert.equal(view.batch.retryMode, 'rerun-business');
+  assert.equal(fs.readFileSync(mainPath, 'utf8'), 'OLD-MAIN');
+});

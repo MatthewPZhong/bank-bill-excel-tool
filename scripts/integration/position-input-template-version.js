@@ -19,8 +19,7 @@ const { AppDatabase } = require('../../src/backend/database');
 const { createTemplateResourceService } = require('../../src/main-process/template-resources/service');
 const { INPUT_STRUCTURES } = require('../../src/main-process/template-resources/input-structures');
 const { createPositionReconciliationService } = require('../../src/main-process/position-reconciliation/service');
-const { dispatchPositionLargeImportSchemaMigration } = require('../../src/main-process/position-reconciliation/import-dispatch');
-const { SOURCE_DEFINITIONS, SOURCE_TYPES } = require('../../src/main-process/position-reconciliation/constants');
+const { SOURCE_DEFINITIONS, SOURCE_REQUIRED_FIELDS, SOURCE_TYPES } = require('../../src/main-process/position-reconciliation/constants');
 const { STAGING_RELATIVE_PATH } = require('../../src/main-process/position-reconciliation/input-staging');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -78,17 +77,9 @@ async function run() {
     resolveSourceStructures,
     authorizeStreamingSourceApply: async (ready) => {
       const baseCheckpoint = position.persistenceCheckpoint();
-      const schema = await dispatchPositionLargeImportSchemaMigration({
-        engine: 'streaming',
-        userDataDir: userData,
-        sideDbPath: position.store.dbPath,
-        expectedCheckpoint: baseCheckpoint,
-        batchContext: BATCH_CONTEXT
-      }).promise;
       return {
         operationToken: `integration-apply-${++sequence}`,
         archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schema.fingerprint,
         baseCheckpoint
       };
     }
@@ -127,7 +118,7 @@ async function run() {
       const leftovers = fs.existsSync(stagingRoot) ? fs.readdirSync(stagingRoot) : [];
       assert.deepEqual(leftovers, []);
     }],
-    ['导入并启用新结构后同一文件导入成功，原始表导出按新结构出列', async () => {
+    ['导入并启用新结构后同一文件导入成功，原始表导出只含必用列与原始版本号 / 行号', async () => {
       templates.rememberPickedFile(templateFile);
       const prepared = await templates.prepareImport({ resourceId: 'position-gateway-raw-in', filePath: templateFile });
       assert.equal(prepared.status, 'success', prepared.message);
@@ -143,8 +134,11 @@ async function run() {
       const rawPath = path.join(files, 'raw.xlsx');
       await position.exportRaw(SOURCE_TYPES.GATEWAY_INBOUND, rawPath);
       const rows = XLSX.utils.sheet_to_json(XLSX.readFile(rawPath).Sheets['中台网关原始入账订单'], { header: 1, defval: '' });
-      assert.deepEqual(rows[0], RENAMED);
-      assert.equal(rows[1][RENAMED.indexOf('fileId')], 'IT-FILE-1');
+      // v3.2.22：入库与导出只含必用列，外加原始版本号 / 行号；改名的非必用列不保存。
+      const required = SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.GATEWAY_INBOUND];
+      assert.deepEqual(rows[0], [...required, '原始版本号', '原始行号']);
+      assert.equal(rows[1][required.indexOf('bizId')], 'IT-IN-1');
+      assert.deepEqual(rows[1].slice(-2), [1, 2]);
     }],
     ['重建服务（模拟重启）后启用状态保持；恢复默认后同一文件再次被拒', async () => {
       templates = createTemplates();

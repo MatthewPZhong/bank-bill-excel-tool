@@ -18,6 +18,7 @@ const path = require('node:path');
 
 const { CLEANUP_TEMPLATE_HEADERS } = require('../constants/platform-cleanup-template-fields');
 const { applyWatermark } = require('./workbook-watermark');
+const { encodeDecodedExcelJsCellText, encodeWorkbookCellTexts } = require('./exceljs-writer');
 
 // sheet 名（剔除模板单 sheet，与模板 assets/中台加款单剔除模板.xlsx 一致）
 const CLEANUP_SHEET_NAME = 'Sheet1';
@@ -57,10 +58,15 @@ async function writePlatformCleanupOutput(cleanupRows, savePath) {
   sheet.getRow(1).font = { bold: true, size: 10 };
 
   // 数据行：按 CLEANUP_TEMPLATE_HEADERS 顺序投影（缺列 → ''）
+  //   v3.2.22（🔴 资金红线）：与同次导出的主输出同口径按已解码文本编码（见 exceljs-writer encodeBankRowCellValue），
+  //   同一银行行的对账ID 在两份文件中读回相同（按原文写出时 `RID_x0041_` 会读回 `RIDA`）。
   for (const row of cleanupRows) {
-    const values = CLEANUP_TEMPLATE_HEADERS.map((h) => (row && row[h] !== undefined && row[h] !== null ? row[h] : ''));
+    const values = CLEANUP_TEMPLATE_HEADERS.map((h) => (
+      row && row[h] !== undefined && row[h] !== null ? encodeDecodedExcelJsCellText(row[h]) : ''
+    ));
     sheet.addRow(values);
   }
+  encodeWorkbookCellTexts(workbook);
 
   applyWatermark(workbook);
 

@@ -319,3 +319,25 @@ test.describe('Payment v3.1.7 失败与运行状态', () => {
     assert.deepEqual(rows.map((row) => row.ReconID), ['KEEP', 'KEEP-2']);
   });
 });
+
+test.describe('Payment v3.2.22 含转义写法的同值告警', () => {
+  test('调拨对账单 ReconID 与银行当前值文字相同且含 _xHHHH_ 写法 → 不改写，告警人工核对；不含写法的同值不告警', () => {
+    const recon = reconRow({ reconId: 'RID_x000D_X' });
+    const bank = bankRow({ reconId: 'RID_x000D_X' });
+    const result = runRound5PaymentOfflineAllocationBackfill([bank], [recon], OPT);
+    assert.deepEqual(result.modifications, []);
+    assert.equal(bank.ReconciliationId, 'RID_x000D_X');
+    const escape = result.warnings.filter((w) => w.code === 'linked-value-escape-same-value-ambiguous');
+    assert.equal(escape.length, 1);
+    assert.equal(escape[0].rowId, 'b1');
+    assert.equal(escape[0].engine, 'r5-payment-offline-allocation-backfill');
+    assert.match(escape[0].message, /调拨对账单 ReconID（尾号「0D_X」，共 11 个字符，含 Excel 转义写法：⟨U\+000D⟩）与银行行/);
+    assert.ok(!escape[0].message.includes('RID'), '告警不写完整值');
+
+    const plainRecon = reconRow({ reconId: 'RID-PLAIN' });
+    const plainBank = bankRow({ reconId: 'RID-PLAIN' });
+    const plain = runRound5PaymentOfflineAllocationBackfill([plainBank], [plainRecon], OPT);
+    assert.deepEqual(plain.modifications, []);
+    assert.equal(plain.warnings.some((w) => w.code === 'linked-value-escape-same-value-ambiguous'), false);
+  });
+});

@@ -511,11 +511,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     importBankInfo: (templateId) => ipcRenderer.invoke('big-account:import-bank-info', templateId),
     saveOwnAccounts: (payload) => ipcRenderer.invoke('big-account:save-own-accounts', payload),
     // v1.5.3 R2：拉含自有账号的完整大账号列表（维护大账号对话框 / G1 月度余额弹窗）
-    getWithOwn: (templateId) => ipcRenderer.invoke('big-account:get-with-own', templateId),
-    loadMode: (templateId) => ipcRenderer.invoke('big-account-mode:load', templateId),
-    saveMode: (payload) => ipcRenderer.invoke('big-account-mode:save', payload),
-    loadOrder: (templateId) => ipcRenderer.invoke('big-account-order:load', templateId),
-    saveOrder: (payload) => ipcRenderer.invoke('big-account-order:save', payload)
+    getWithOwn: (templateId) => ipcRenderer.invoke('big-account:get-with-own', templateId)
   },
   balanceAdjustment: {
     list: (templateName) => ipcRenderer.invoke('balance-adjustment:list', templateName),

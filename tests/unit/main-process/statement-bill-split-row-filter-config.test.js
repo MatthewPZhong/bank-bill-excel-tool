@@ -81,6 +81,7 @@ const fns = loadMainFunctions([
   'resolveStatementFeatureFilters',
   'isPreprocessRowFilterEnabled',
   'isDuplicateRowFilterEnabled',
+  'isCrossSheetBackfillEnabled',
   'buildPreprocessRowFilterRules'
 ], {
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,

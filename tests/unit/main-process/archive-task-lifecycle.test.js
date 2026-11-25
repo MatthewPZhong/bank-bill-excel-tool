@@ -2145,3 +2145,91 @@ test('失败终态优先持久化业务结果的脱敏摘要 logMessage，界面
     assert.equal(calls.find((call) => call[0] === 'fail')[2].message, '普通失败');
   }
 });
+
+// v3.2.22：结算失败项含「未产出」时按未产出告警（存档中心对这类批次只给「重新执行业务」，不能提示重试存档）；
+//   区分业务声明未生成与存档时已找不到文件，混有其他存档失败时一并计数。
+for (const [title, results, expected] of [
+  ['只有业务声明未产出', [{ ok: true, status: 'ready' }, { ok: false, code: 'ARCHIVE_OUTPUT_NOT_PRODUCED', declaredNotProduced: true }],
+    { code: 'ARCHIVE_OUTPUT_NOT_PRODUCED', declaredNotProducedCount: 1, missingAtArchiveCount: 0, otherArchiveFailureCount: 0 }],
+  ['存档时找不到文件（未声明）', [{ ok: false, code: 'ARCHIVE_OUTPUT_NOT_PRODUCED' }],
+    { code: 'ARCHIVE_OUTPUT_NOT_PRODUCED', declaredNotProducedCount: 0, missingAtArchiveCount: 1, otherArchiveFailureCount: 0 }],
+  ['未产出与存档失败并存', [{ ok: false, code: 'ARCHIVE_OUTPUT_NOT_PRODUCED', declaredNotProduced: true }, { ok: false, code: 'ARCHIVE_COPY_FAILED' }],
+    { code: 'ARCHIVE_OUTPUT_NOT_PRODUCED', declaredNotProducedCount: 1, missingAtArchiveCount: 0, otherArchiveFailureCount: 1 }],
+  ['只有存档失败', [{ ok: false, code: 'ARCHIVE_COPY_FAILED' }], { code: 'ARCHIVE_TASK_SETTLE_FAILED' }]
+]) {
+  test(`file 结算告警分类：${title}`, async (t) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-settle-warning-'));
+    t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+    const inputPath = path.join(tempDir, 'input.xlsx');
+    fs.writeFileSync(inputPath, 'input');
+    const { lifecycle, warnings } = createHarness({
+      reserveFileTask(payload) {
+        return {
+          ok: true,
+          batch: {
+            id: 35,
+            batchNumber: '2026-11-24-035',
+            taskRunId: payload.taskRun.taskRunId,
+            taskKey: payload.taskRun.taskKey,
+            moduleId: payload.taskRun.moduleId,
+            parentRunId: payload.taskRun.parentRunId,
+            operationKey: payload.taskRun.operationKey
+          }
+        };
+      },
+      settleManifestResult: { ok: false, durable: true, results }
+    });
+    await lifecycle.runFileTask({
+      policy: FILE_POLICY,
+      flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: null }),
+      filePlanResolver: () => normalizedToolboxPlan(inputPath, path.join(tempDir, 'out.xlsx')),
+      execute: () => ({ status: 'success' })
+    });
+    assert.equal(warnings.length, 1);
+    for (const [key, value] of Object.entries(expected)) assert.equal(warnings[0][key], value, key);
+    if (expected.code === 'ARCHIVE_OUTPUT_NOT_PRODUCED') assert.match(warnings[0].message, /只能重新执行业务/);
+  });
+}
+
+// v3.2.22（🔴 资金红线·存档血缘）：业务失败且结算未耐久（如存档盘暂时离线）时，业务声明的「未产出」不能只留在内存——
+//   直接按失败终态收口会把未结算的输出记成普通业务失败、可在存档中心按原路径重试，把用户原有的同名文件归成本批产物。
+for (const [title, files, expectsIntent] of [
+  ['带未产出声明 → 随失败终态落盘结算证据', (key) => [{ artifactKey: key, produced: false }], true],
+  ['无未产出声明 → 照旧直接收口', (key) => [{ artifactKey: key }], false]
+]) {
+  test(`File Task 业务失败且结算未耐久：${title}`, async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-failed-not-durable-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const outputPath = path.join(root, 'result.xlsx');
+    fs.writeFileSync(outputPath, 'OLD-USER-FILE');
+    const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [],
+      outputs: [{ filePath: outputPath, role: 'output', sourceOperation: FILE_POLICY.channel }] });
+    const { calls, lifecycle } = createHarness({
+      reserveFileTask({ taskRun }) {
+        return { ok: true, batch: { ...taskRun, id: 41, batchNumber: '2026-11-24-041' } };
+      },
+      settleManifestResult: { ok: false, retryable: true, code: 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE', message: '存档位置离线或暂时不可用' }
+    });
+    const settleFiles = files(plan.outputs[0].artifactKey);
+    const result = await lifecycle.runFileTask({ policy: FILE_POLICY,
+      flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: null }),
+      filePlanResolver: () => plan,
+      execute: async (_context, controls) => {
+        await controls.settleArtifacts({ files: settleFiles });
+        return { status: 'failed', message: '主文件写失败' };
+      }
+    });
+    assert.equal(result.status, 'failed');
+    const intents = calls.filter((call) => call[0] === 'persist-terminal-intent');
+    if (expectsIntent) {
+      assert.equal(intents.length, 1);
+      assert.equal(intents[0][1].terminalOutcome.taskStatus, 'failed');
+      assert.deepEqual(intents[0][1].settleFiles, settleFiles, '未产出声明随终态意图落盘');
+      assert.equal(calls.some((call) => call[0] === 'finish-file-task'), false, '不在结算前直接收口');
+    } else {
+      assert.equal(intents.length, 0);
+      assert.equal(calls.filter((call) => call[0] === 'finish-file-task').length, 1);
+    }
+    assert.equal(fs.readFileSync(outputPath, 'utf8'), 'OLD-USER-FILE');
+  });
+}

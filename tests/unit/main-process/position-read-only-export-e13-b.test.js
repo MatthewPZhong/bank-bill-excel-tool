@@ -9,21 +9,21 @@ const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 
 const { BANK_STATEMENT_FIELDS } = require('../../../src/constants/bank-statement-fields');
+const { insertBankRowFixture } = require('../../helpers/position-bank-rows');
+const { insertFilteredSourceFixture } = require('../../helpers/position-source-rows');
 const {
-  DETAIL_META_HEADERS
+  detailHeadersFor
 } = require('../../../src/backend/position-reconciliation-import/anomaly-report');
 const {
   createPositionReconciliationService
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
   createPositionReconciliationStore,
-  serializeJson
 } = require('../../../src/main-process/position-reconciliation/store');
 const {
   BANK_SHEET_NAME,
   MATCH_TYPES,
-  POSITION_BANK_HEADERS,
-  SOURCE_DEFINITIONS,
+  SOURCE_REQUIRED_FIELDS,
   SOURCE_TYPES
 } = require('../../../src/main-process/position-reconciliation/constants');
 const {
@@ -148,15 +148,12 @@ async function writeFilteredReport(filePath) {
   summary.addRow(['文件名', '来源类型', '过滤行数']).commit();
   summary.addRow(['transfer.xlsx', SOURCE_TYPES.FUND_TRANSFER, 1]).commit();
   summary.commit();
-  const headers = [
-    ...DETAIL_META_HEADERS,
-    ...SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers
-  ];
+  // 异常报告明细：过滤信息（含原始版本号）+ 该来源保存下来的必用列。
+  const headers = detailHeadersFor(SOURCE_TYPES.FUND_TRANSFER);
+  const requiredFields = SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.FUND_TRANSFER];
   const detail = workbook.addWorksheet('调拨异常明细');
   detail.addRow(headers).commit();
-  const raw = Object.fromEntries(
-    SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers.map((header) => [header, ''])
-  );
+  const raw = Object.fromEntries(requiredFields.map((header) => [header, '']));
   Object.assign(raw, {
     调拨单号: 'E13-B-FILTERED-1',
     调拨状态: '付款失败',
@@ -170,8 +167,8 @@ async function writeFilteredReport(filePath) {
     'position-e13-b-report-row', 'transfer.xlsx', 'Sheet1', 2,
     SOURCE_TYPES.FUND_TRANSFER, raw.调拨单号, raw.渠道流水号,
     'FT_NON_SUCCESS_EVIDENCE_INCOMPLETE', '非成功调拨缺少付款金额',
-    '2026-08-20', '2026-08',
-    ...SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers.map((header) => raw[header])
+    '2026-08-20', '2026-08', 1,
+    ...requiredFields.map((header) => raw[header])
   ]).commit();
   detail.commit();
   await workbook.commit();
@@ -190,27 +187,15 @@ async function createFilteredFixture() {
     },
     operationTokenProvider: () => 'position-filtered-e13-b-operation'
   });
-  const inserted = store.db.prepare(`
-    INSERT INTO position_filtered_source_rows(
-      report_row_key, source_type, business_key, recon_id,
-      event_date, month_key, error_code, error_reason,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      row_hash, import_operation_token, archive_operation_key,
-      report_key, report_artifact_key, report_file_path, report_file_name,
-      report_sha256, report_size_bytes
-    ) VALUES (
-      'position-e13-b-report-row', ?, 'E13-B-FILTERED-1', 'RID-E13-B-FILTERED-1',
-      '2026-08-20', '2026-08', 'FT_FILTER', '测试过滤',
-      '/tmp/source.xlsx', 'source.xlsx', 'Sheet1', 2,
-      'position-e13-b-row-hash', 'operation', 'archive-operation',
-      'position-e13-b-report', 'position-e13-b-artifact', ?, 'report.xlsx', ?, ?
-    )
-  `).run(
-    SOURCE_TYPES.FUND_TRANSFER,
-    reportPath,
-    reportEvidence.sha256,
-    reportEvidence.sizeBytes
-  );
+  const inserted = insertFilteredSourceFixture(store.db, {
+    reportRowKey: 'position-e13-b-report-row', sourceType: SOURCE_TYPES.FUND_TRANSFER,
+    businessKey: 'E13-B-FILTERED-1', reconId: 'RID-E13-B-FILTERED-1',
+    eventDate: '2026-08-20', monthKey: '2026-08', errorCode: 'FT_FILTER', errorReason: '测试过滤',
+    filePath: '/tmp/source.xlsx', rowNumber: 2, rowHash: 'position-e13-b-row-hash',
+    reportKey: 'position-e13-b-report', reportArtifactKey: 'position-e13-b-artifact',
+    reportFilePath: reportPath, reportSha256: reportEvidence.sha256,
+    reportSizeBytes: reportEvidence.sizeBytes
+  });
   const scope = {
     channels: ['DBS'],
     months: ['2026-08'],
@@ -221,26 +206,13 @@ async function createFilteredFixture() {
     sourceTypes: [SOURCE_TYPES.FUND_TRANSFER],
     includeMapping: true
   });
-  const row = Object.fromEntries(BANK_STATEMENT_FIELDS.map((header) => [header, '']));
-  Object.assign(row, bankRow({ FundType: 'FundTransfer-in' }));
-  store.db.prepare(`
-    INSERT INTO position_bank_rows(
-      biz_id, channel, month_key, bill_date, status,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      import_order, original_fund_type, working_fund_type,
-      original_json, working_json
-    ) VALUES (?, ?, ?, ?, '未处理', '/tmp/bank.xlsx', 'bank.xlsx',
-              '渠道对账单', 2, 0, ?, ?, ?, ?)
-  `).run(
-    row.BizId,
-    row.Channel,
-    '2026-08',
-    '2026-08-20',
-    row.FundType,
-    row.FundType,
-    serializeJson(row),
-    serializeJson(row)
-  );
+  insertBankRowFixture(store.db, {
+    fields: bankRow({ FundType: 'FundTransfer-in' }),
+    monthKey: '2026-08',
+    billDate: '2026-08-20'
+  });
+  // 运行行保存的是银行行的交互字段（含原始版本号 / 行号），与库里读出的一致。
+  const [{ originalRow: row }] = store.getBankRows({ channels: ['DBS'], months: ['2026-08'] });
   const summary = {
     inputRows: 1,
     changedRows: 0,
@@ -292,7 +264,7 @@ async function createFilteredFixture() {
       }
     }],
     filteredSources: [{
-      id: Number(inserted.lastInsertRowid),
+      id: inserted.id,
       reportKey: 'position-e13-b-report',
       reportArtifactKey: 'position-e13-b-artifact',
       archiveOperationKey: 'archive-operation',

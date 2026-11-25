@@ -1,10 +1,16 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { getBalanceSeedFileIdentity } = require('../backend/balance-seed-store');
+const { getBalanceSeedFileIdentity, getBalanceSeedFilePath } = require('../backend/balance-seed-store');
 
 const { mapEachCollectingCurrencyBigAccountIssues } = require('../backend/file-service/currency-big-account');
 const { isZeroOrBlankAmount, parseDateValue } = require('../backend/file-service/normalizers');
-const { FileValidationError: BillDateValidationError, normalizeCell: normalizeBillDateCell } = require('../backend/file-service/common');
+const {
+  FileValidationError: BillDateValidationError,
+  assertNoUnwritableRowText,
+  collectUnwritableRowText,
+  noteUnwritableRowText,
+  normalizeCell: normalizeBillDateCell
+} = require('../backend/file-service/common');
 
 // 账单日期的必填口径（parseRequiredBillDates 与写出前的只读校验共用）：表头须有 BillDate 列；
 //   单元格为空时跳过，有值但无法解析时报错；整批没有任何有效日期时报错。
@@ -98,6 +104,13 @@ function dateRangeBounds(dates) {
   return first === last ? [first] : [first, last];
 }
 
+// v3.2.22 B45：分组生成（传 writeOutput）时包住余额文件 / 种子的写出异常，穿过余额的业务告警分支原样抛给调用方
+class StatementOutputWriteFailure {
+  constructor(cause) {
+    this.cause = cause;
+  }
+}
+
 function createStatementGenerationHelpers(deps) {
   const {
     appendActivityLogEntry,
@@ -157,6 +170,25 @@ function createStatementGenerationHelpers(deps) {
     return seenManualBalanceSeedsByFile.get(fileIdentity);
   }
 
+  // v3.2.21：跨 Sheet 回填跳过了全部交易时，生成在找不到有效账单日期时失败，告警分支走不到——失败报告仍逐行列出
+  //   回填跳过与日期提示（报错文件带配对值；活动日志只记行号与原因）。
+  function withCrossSheetBackfillDetailLines(error, warnings) {
+    const backfillWarnings = (Array.isArray(warnings) ? warnings : []).filter((warning) => (
+      warning && String(warning.type || '').startsWith('cross-sheet-backfill-')
+    ));
+    if (!backfillWarnings.length || !(error instanceof FileValidationError)) return error;
+    const skippedCount = backfillWarnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped').length;
+    const message = skippedCount
+      ? `${error.message}（「跨 Sheet 回填」跳过了${skippedCount}行，请导出报错文件核对）`
+      : error.message;
+    return new FileValidationError(error.code, message, {
+      detailLines: error.detailLines.concat(buildImportWarningDetailLines(backfillWarnings)),
+      logDetailLines: (Array.isArray(error.logDetailLines) ? error.logDetailLines : error.detailLines)
+        .concat(buildImportWarningDetailLines(backfillWarnings, { forLog: true })),
+      context: error.context
+    });
+  }
+
   // E09-P0 现状取证接缝：production Main 委托到此同一函数；依赖注入不改变
   // 现有 storage、writer 与 balance 的所有权。
   function buildSimultaneousAmountError(simultaneousAmountRows, { config, inputFilePaths = [] }) {
@@ -183,13 +215,16 @@ function createStatementGenerationHelpers(deps) {
   //   账单日期，出余额时组配置须映射 MerchantId），只扫描、不复制明细行。多组生成（导入、补录重算、「导出全部」）在写出
   //   任何组、移除旧会话条目之前逐组调用，避免前几组的明细、余额与当日种子已落盘，后一组才失败。
   //   detailRowsList 按 mergeMappedDetailRows 的口径合并（首段表头为准，行号取合并后的 rowMetas）。
+  //   unwritableText 可选（v3.2.22 B113，Codex 第六轮）：多组校验共用的计数，传入时只记下无法写入的字符、不在本组抛出，
+  //   由调用方在各组校验完后一并拒绝（列出全批前 20 处与总数，修完一组才看到下一组的问题）
   function assertStatementRowsWritable({
     config,
     detailRowsList = [],
     inputFilePaths = [],
     balanceRequested = false,
     balanceModeByAccount = null,
-    includeBalance = null
+    includeBalance = null,
+    unwritableText: sharedUnwritableText = null
   }) {
     const segments = detailRowsList.filter((rows) => Array.isArray(rows) && rows.length > 0);
     const headerRow = segments.length && Array.isArray(segments[0][0]) ? segments[0][0] : [];
@@ -210,13 +245,17 @@ function createStatementGenerationHelpers(deps) {
       metaSegments.push({ start: metaOffset, metas: rows.rowMetas });
       metaOffset += rows.rowMetas.length;
     }
+    // 调用方按递增的合并下标查询（下方逐行遍历），沿段游标前进，不必每行从第一段找起（每条导出行都要取行号核对字符）
+    let metaCursor = 0;
     const mergedRowMeta = (mergedIndex) => {
-      for (const { start, metas } of metaSegments) {
-        if (mergedIndex < start + metas.length) return mergedIndex >= start ? metas[mergedIndex - start] : undefined;
-      }
-      return undefined;
+      while (metaCursor < metaSegments.length
+        && mergedIndex >= metaSegments[metaCursor].start + metaSegments[metaCursor].metas.length) metaCursor += 1;
+      const segment = metaSegments[metaCursor];
+      return segment && mergedIndex >= segment.start ? segment.metas[mergedIndex - segment.start] : undefined;
     };
     const exported = { hasRow: false, hasValidDate: false, dateError: null };
+    // v3.2.22 B113：导出行里无法原样写入工作表的文本（按最终明细，含回填的大账号），与 generateStatementFiles 写出前同口径
+    const unwritableText = sharedUnwritableText || { total: 0, labels: [] };
     const all = { hasValidDate: false, dateError: null };
     const checkDate = (state, raw) => {
       if (state.dateError || billDateIndex === undefined) return;
@@ -246,6 +285,7 @@ function createStatementGenerationHelpers(deps) {
         }
         exported.hasRow = true;
         checkDate(exported, billDate);
+        noteUnwritableRowText(unwritableText, row, headerRow, mergedRowMeta(rowIndex));
       }
     }
     if (simultaneousAmountRows.length) {
@@ -255,6 +295,7 @@ function createStatementGenerationHelpers(deps) {
     const dateState = exported.hasRow ? exported : all;
     if (dateState.dateError) throw dateState.dateError;
     if (!dateState.hasValidDate) throw noValidBillDateError();
+    if (!sharedUnwritableText) assertNoUnwritableRowText(unwritableText);
     const shouldGenerateBalance = includeBalance === null
       ? Boolean(balanceRequested)
       : Boolean(includeBalance) && Boolean(balanceRequested);
@@ -264,37 +305,47 @@ function createStatementGenerationHelpers(deps) {
   }
 
   // 已构建的批次（导入多组生成、补录重算）
-  function assertStatementBatchWritable({ config, preparedBatch, includeBalance = null }) {
+  function assertStatementBatchWritable({ config, preparedBatch, includeBalance = null, unwritableText = null }) {
     assertStatementRowsWritable({
       config,
       detailRowsList: [preparedBatch.detailRows],
       inputFilePaths: preparedBatch.inputFilePaths || [],
       balanceRequested: preparedBatch.balanceRequested,
       balanceModeByAccount: preparedBatch.balanceModeByAccount || null,
-      includeBalance
+      includeBalance,
+      unwritableText
     });
   }
 
   // 尚未构建批次的条目（「导出全部」执行时的校验）：与 buildPreparedStatementBatchFromEntries 加
   //   balancePlan（resolveEntryBalancePlan 的结果，null 表示不按账户分方式）构建出的批次同口径
-  function assertStatementEntriesWritable({ config, fileEntries = [], balancePlan = null, includeBalance = null }) {
+  function assertStatementEntriesWritable({ config, fileEntries = [], balancePlan = null, includeBalance = null, unwritableText = null }) {
     assertStatementRowsWritable({
       config,
       detailRowsList: fileEntries.map((entry) => entry.detailRows),
       inputFilePaths: fileEntries.map((entry) => entry.filePath),
       balanceRequested: balancePlan ? balancePlan.hasEffectiveRow : config.balanceRequested,
       balanceModeByAccount: balancePlan ? balancePlan.modeByAccount : null,
-      includeBalance
+      includeBalance,
+      unwritableText
     });
   }
 
+  // writeOutput(filePath, write)：v3.2.22 B45，写出明细 / 余额文件、写余额种子文件都经它执行（多模板分组生成据此记下
+  //   原状态与写后身份，失败时回滚）。传入时，余额文件与种子的写出失败原样抛出、由调用方整批回滚，不再转成
+  //   「余额生成失败」告警（否则前组已写的种子留在盘上、余额汇总缺组）；补录、断档等待确认等业务告警不变。
+  //   checkOutputTarget(filePath)：同时传入，首次读取余额种子前检查种子路径是否为普通文件。
   function generateStatementFiles({
     config,
     preparedBatch,
     scope = 'current',
     includeDetail = true,
-    includeBalance = null
+    includeBalance = null,
+    writeOutput = null,
+    checkOutputTarget = null
   }) {
+    const journaled = typeof writeOutput === 'function';
+    const writeThrough = (filePath, write) => (journaled ? writeOutput(filePath, write) : write());
     const warnings = Array.isArray(preparedBatch.warnings) ? preparedBatch.warnings.slice() : [];
     const detailRows = cloneRowsWithMetadata(preparedBatch.detailRows);
     const detailExportRows = buildDetailExportRows(detailRows);
@@ -312,6 +363,17 @@ function createStatementGenerationHelpers(deps) {
       throw buildSimultaneousAmountError(simultaneousAmountRows, { config, inputFilePaths: preparedBatch.inputFilePaths });
     }
 
+    // v3.2.21：明细没有可导出的交易、且有行被跨 Sheet 回填跳过（交易全部被跳过，如只剩带日期、收支为空的期初余额行）时，
+    //   在写出文件、替换会话之前报错并逐行列出跳过原因（不靠取不到账单日期；没有回填跳过时沿用原行为）
+    if (detailExportRows.length <= 1 && warnings.some((warning) => warning && warning.type === 'cross-sheet-backfill-skipped')) {
+      throw withCrossSheetBackfillDetailLines(new FileValidationError('FILE_READ', '导入文件中没有账号存在交易数据', {
+        context: {
+          inputFilePath: (Array.isArray(preparedBatch.inputFilePaths) ? preparedBatch.inputFilePaths : []).join(';'),
+          templateName: statementOutputName(config)
+        }
+      }), warnings);
+    }
+
     skippedDetailRows.forEach((row) => {
       warnings.push({
         type: 'detail-row-skipped',
@@ -321,9 +383,14 @@ function createStatementGenerationHelpers(deps) {
       });
     });
 
-    const billDates = detailExportRows.length > 1
-      ? parseRequiredBillDates(detailExportRows)
-      : parseRequiredBillDates(detailRows);
+    let billDates;
+    try {
+      billDates = detailExportRows.length > 1
+        ? parseRequiredBillDates(detailExportRows)
+        : parseRequiredBillDates(detailRows);
+    } catch (error) {
+      throw withCrossSheetBackfillDetailLines(error, warnings);
+    }
     const dateRangeLabel = buildDateRangeLabel(billDates);
     const internalSuffix = scope === 'all' ? 'all' : '';
     const outputMerchantId = scope === 'all' ? '' : preparedBatch.selectedMerchantId;
@@ -345,6 +412,14 @@ function createStatementGenerationHelpers(deps) {
         : []
     };
 
+    const shouldGenerateBalance = includeBalance === null
+      ? Boolean(preparedBatch.balanceRequested)
+      : Boolean(includeBalance) && Boolean(preparedBatch.balanceRequested);
+
+    // v3.2.22 B113：写出任何文件前按最终明细（已回填或选择的大账号）核对文本能否原样写入，报源行号。余额记录的取值来自明细行；
+    //   余额账单模板随程序发布（assets），其文字可原样写出由单测确认，不在运行时读取核对
+    assertNoUnwritableRowText(collectUnwritableRowText(effectiveDetailRows, { rowMetas: effectiveDetailRows.rowMetas || [] }));
+
     if (includeDetail) {
       const detailOutput = buildStatementOutputFilePath({
         kind: 'detail',
@@ -355,10 +430,10 @@ function createStatementGenerationHelpers(deps) {
         internalSuffix
       });
 
-      writeWorkbookRows({
+      writeThrough(detailOutput.outputFilePath, () => writeWorkbookRows({
         rows: detailExportRows,
         outputFilePath: detailOutput.outputFilePath
-      });
+      }));
 
       result.detail = {
         filePath: detailOutput.outputFilePath,
@@ -369,10 +444,6 @@ function createStatementGenerationHelpers(deps) {
         billDates: dateRangeBounds(billDates)
       };
     }
-
-    const shouldGenerateBalance = includeBalance === null
-      ? Boolean(preparedBatch.balanceRequested)
-      : Boolean(includeBalance) && Boolean(preparedBatch.balanceRequested);
 
     if (shouldGenerateBalance) {
       // v3.2.21（D2）：渠道组内余额方式不同（带 balanceModeByAccount）时，组配置模板可能不出余额，
@@ -407,12 +478,27 @@ function createStatementGenerationHelpers(deps) {
           balanceDetailRows = selectBalanceAccountRows(effectiveDetailRows, preparedBatch.balanceModeByAccount);
         }
 
+        const templateBankName = splitTemplateName(statementOutputName(config)).bankName;
+        // v3.2.22 B45：分组生成时先检查本组的余额种子路径（下面首次读取种子）：是文件夹等非普通文件时整批回滚，
+        //   不转成「余额生成失败」告警（否则前组的新种子与缺组的余额汇总会提交）
+        if (journaled && typeof checkOutputTarget === 'function') {
+          try {
+            checkOutputTarget(getBalanceSeedFilePath(ensureStorageRoot(), templateBankName));
+          } catch (targetError) {
+            // 已确认的不安全目标（文件夹、快捷方式等）才整批回滚；检查本身失败（如目录没有遍历权限 EACCES，此时尚未写种子）
+            //   与原流程一样按「余额生成失败」处理本组余额、保留明细（Codex 第十一轮）
+            if (targetError && targetError.code === 'STATEMENT_OUTPUT_TARGET_UNSAFE') throw new StatementOutputWriteFailure(targetError);
+            // 系统错误的消息带种子文件路径（文件名可能是完整账号），只保留错误码再交给下面写日志（Codex 第十二轮）
+            const code = targetError && targetError.code ? String(targetError.code) : '';
+            throw Object.assign(new Error(`余额种子路径检查失败${code ? `（${code}）` : ''}`), { code });
+          }
+        }
+
         balanceSeedStatus = scanBalanceSeedStatus({
           detailRows: balanceDetailRows,
           templateName: statementOutputName(config)
         });
 
-        const templateBankName = splitTemplateName(statementOutputName(config)).bankName;
         const balanceAdjustments = readBalanceAdjustments(
           ensureStorageRoot(),
           templateBankName
@@ -458,25 +544,48 @@ function createStatementGenerationHelpers(deps) {
         if (Array.isArray(balanceResult.confirmedBalanceSeedReplacements) && balanceResult.confirmedBalanceSeedReplacements.length) {
           warnings.push({ type: 'balance-seed-replace-confirmed', replacements: balanceResult.confirmedBalanceSeedReplacements });
         }
-        const balanceOutput = buildStatementOutputFilePath({
-          kind: 'balance',
-          templateName: statementOutputName(config),
-          merchantId: outputMerchantId,
-          outputTag: 'BALANCE',
-          dateRangeLabel: buildDateRangeLabel(balanceResult.billDates),
-          internalSuffix
-        });
-
-        writeBalanceWorkbook({
-          templateFilePath: balanceTemplatePath,
-          records: balanceResult.records,
-          templateFields: balanceTemplateFields,
-          outputFilePath: balanceOutput.outputFilePath
-        });
-        storeGeneratedBalanceSeeds({
-          templateName: statementOutputName(config),
-          seedRecords: balanceResult.seedRecords
-        });
+        let balanceOutput;
+        try {
+          // 路径准备会建导出目录（ensureStorageRoot），与写出同样经下面的异常处理：分组生成时失败整批回滚，
+          //   不转成「余额生成失败」告警提交前组的种子（spec D3，Codex 第十七轮 P1）
+          balanceOutput = buildStatementOutputFilePath({
+            kind: 'balance',
+            templateName: statementOutputName(config),
+            merchantId: outputMerchantId,
+            outputTag: 'BALANCE',
+            dateRangeLabel: buildDateRangeLabel(balanceResult.billDates),
+            internalSuffix
+          });
+          // 读余额模板失败按模板不可读报出（spec D3；只在账单生成这里归类，见 writers.js）
+          writeThrough(balanceOutput.outputFilePath, () => writeBalanceWorkbook({
+            templateFilePath: balanceTemplatePath,
+            records: balanceResult.records,
+            templateFields: balanceTemplateFields,
+            outputFilePath: balanceOutput.outputFilePath,
+            reportTemplateReadFailure: true
+          }));
+          const seedRecords = Array.isArray(balanceResult.seedRecords) ? balanceResult.seedRecords : [];
+          if (journaled && seedRecords.length) {
+            // 逐笔写种子（每笔都重读、重写同一份 JSON）：每笔都经写出记录，写前核对身份、写后记下，
+            //   前一笔写成后种子被其他程序替换时不再写入（spec D5）
+            const seedFilePath = getBalanceSeedFilePath(seedStorageRoot, templateBankName);
+            seedRecords.forEach((record) => writeThrough(seedFilePath, () => storeGeneratedBalanceSeeds({
+              templateName: statementOutputName(config),
+              seedRecords: [record]
+            })));
+          } else {
+            storeGeneratedBalanceSeeds({
+              templateName: statementOutputName(config),
+              seedRecords
+            });
+          }
+        } catch (writeError) {
+          // 读取失败（FILE_READ：余额模板不可读、逐笔写种子前重读种子失败）发生在本次写入之前，与初次读取种子失败一样
+          //   按「余额生成失败」告警处理，不整批回滚（spec D3，Codex 第六轮）
+          const readFailure = writeError instanceof FileValidationError && writeError.code === 'FILE_READ';
+          if (journaled && !readFailure) throw new StatementOutputWriteFailure(writeError);
+          throw writeError;
+        }
         // 已确认替换的人工补录写入后不再按它比对：用户已同意替换（D11）。
         (balanceResult.confirmedBalanceSeedReplacementKeys || []).forEach((key) => seenManualBalanceSeeds.delete(key));
 
@@ -489,6 +598,7 @@ function createStatementGenerationHelpers(deps) {
         };
         result.message = includeDetail ? '明细账单可导出，余额账单可导出' : '余额账单可导出';
       } catch (error) {
+        if (error instanceof StatementOutputWriteFailure) throw error.cause;
         if (error instanceof FileValidationError) {
           if (error.code === 'BALANCE_SEED_REQUIRED') {
             const promptMerchantId = normalizeCell(error.context?.merchantId);
@@ -782,6 +892,25 @@ function createStatementGenerationHelpers(deps) {
     return result;
   }
 
+  // v3.2.21：等待余额处理的结果（补录、断档、余额差异、替换确认；含按文件名映射逐组处理余额时的后续提示，见 main.js
+  //   regenerateVirtualTemplateBalanceFromSession 的调用方）不经 createWarningResult，但明细已可导出：提示中带上
+  //   「跨 Sheet 回填」跳过的笔数（用户导出明细前即可知道有交易未写入），并另记活动日志（只记行号与原因，不含配对值）。
+  //   余额处理完成后重新生成的结果带完整的逐行报错文件。
+  function attachCrossSheetBackfillSkipped(result, warnings) {
+    const skipped = (Array.isArray(warnings) ? warnings : []).filter((warning) => (
+      warning && warning.type === 'cross-sheet-backfill-skipped'
+    ));
+    if (!skipped.length || !result || typeof result !== 'object') return result;
+    result.crossSheetBackfillSkippedRowCount = skipped.length;
+    result.message = `${result.message}；「跨 Sheet 回填」${skipped.length}行未配上，已跳过、未写入明细，处理余额后可导出报错文件逐行核对`;
+    if (typeof appendActivityLogEntry === 'function') appendActivityLogEntry({
+      level: 'warning',
+      message: '跨 Sheet 回填：部分行未配上，已跳过',
+      details: buildImportWarningDetailLines(skipped, { forLog: true })
+    });
+    return result;
+  }
+
   function buildImportResultFromGeneratedFiles({
     generatedFiles,
     templateId,
@@ -821,7 +950,10 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         manualResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return attachDuplicateDropped(manualResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
+      return attachCrossSheetBackfillSkipped(
+        attachDuplicateDropped(manualResult, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+        generatedFiles.warnings
+      );
     }
 
     const balanceGaps = extractBalanceGapConfirmGaps(generatedFiles.warnings);
@@ -836,7 +968,10 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         gapResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return attachDuplicateDropped(gapResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
+      return attachCrossSheetBackfillSkipped(
+        attachDuplicateDropped(gapResult, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+        generatedFiles.warnings
+      );
     }
 
     const balanceMismatches = extractBalanceMismatchConfirmItems(generatedFiles.warnings);
@@ -851,7 +986,10 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         mismatchResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return attachDuplicateDropped(mismatchResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
+      return attachCrossSheetBackfillSkipped(
+        attachDuplicateDropped(mismatchResult, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+        generatedFiles.warnings
+      );
     }
 
     const balanceSeedReplacements = extractBalanceSeedReplaceConfirmItems(generatedFiles.warnings);
@@ -866,7 +1004,10 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         replaceResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return attachDuplicateDropped(replaceResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
+      return attachCrossSheetBackfillSkipped(
+        attachDuplicateDropped(replaceResult, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+        generatedFiles.warnings
+      );
     }
 
     if (generatedFiles.warnings.length) {
@@ -884,6 +1025,7 @@ function createStatementGenerationHelpers(deps) {
         detailReady,
         balanceReady,
         detailLines: buildImportWarningDetailLines(generatedFiles.warnings),
+        logDetailLines: buildImportWarningDetailLines(generatedFiles.warnings, { forLog: true }),
         context: {
           templateId,
           inputFilePath,
@@ -1097,6 +1239,8 @@ function createStatementGenerationHelpers(deps) {
   return {
     assertStatementBatchWritable,
     assertStatementEntriesWritable,
+    assertNoUnwritableRowText,
+    attachCrossSheetBackfillSkipped,
     attachDuplicateDropped,
     buildImportResultFromGeneratedFiles,
     buildPreparedBatchFromStatementSession,

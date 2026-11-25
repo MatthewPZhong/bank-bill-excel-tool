@@ -13,6 +13,7 @@ const test = require('node:test');
 const XLSX = require('xlsx');
 
 const { buildMappedRows } = require('../../../../src/backend/file-service');
+const { collectUnwritableRowText } = require('../../../../src/backend/file-service/common');
 const {
   assertFeeFieldOutputWritable,
   normalizeFeeFieldMappings,
@@ -393,24 +394,19 @@ test('resolveFeeFieldMappingValue：按类型取值', () => {
   assert.equal(resolveFeeFieldMappingValue({ valueType: 'field', value: '参考号' }, () => 'ref\ud83d\ude00'), 'ref\ud83d\ude00');
 });
 
-test('assertFeeFieldOutputWritable：取自源列的输出值含无法写入 Excel 的字符或超过 32767 个字符时拒绝，列出源行、源列与目标字段', () => {
+test('assertFeeFieldOutputWritable：取自源列的输出值超过 32767 个字符时拒绝，列出源行、源列与目标字段；无法写入的字符留给生成前的检查', () => {
   const item = { templateField: 'Customer Ref', valueType: 'field', value: '参考号' };
+  // v3.2.22 B113（Codex 第七轮）：含无法写入 Excel 的字符的值不在映射时逐个拒绝，由生成前按最终明细汇总全批位置
   for (const bad of ['REF\uFFFE01', 'REF\uFFFF', 'ref\ud83d']) {
-    assert.throws(() => assertFeeFieldOutputWritable(item, bad, { sourceRowNumber: 5 }), /第 5 行「参考号」列的值含无法写入 Excel 的字符.*Customer Ref/);
+    assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, bad, { sourceRowNumber: 5 }));
   }
   assert.throws(() => assertFeeFieldOutputWritable(item, 'x'.repeat(32768), { sourceRowNumber: 6 }), /第 6 行「参考号」列的值超过 32767 个字符.*Customer Ref/);
   assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, 'x'.repeat(32767), { sourceRowNumber: 6 }));
   assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, 'ref\ud83d\ude00'));
   assert.doesNotThrow(() => assertFeeFieldOutputWritable({ ...item, valueType: 'input' }, 'REF\uFFFE'), '固定值已在规范化时拦截，这里只校验源列取值');
-  // 形如 _xHHHH_ 的字面文本写出后会被还原成其他字符：源列取值与固定文本都拒绝（x 与十六进制不分大小写）；不构成转义的照常
-  //   与回车等控制字符相连时，控制字符写出编码（如回车为 _x000d_）会补全前面的 _xHHHH，同样被改写
-  for (const bad of ['FEE_x0041_', 'a_X00e9_b', 'REF_x0041\r\nB', 'REF_x0041\u0001']) {
-    assert.throws(() => assertFeeFieldOutputWritable(item, bad, { sourceRowNumber: 7 }), /第 7 行「参考号」列的值含写入 Excel 后会被改写的文本.*Customer Ref/);
-    assert.throws(() => validateFeeFieldMappings([{ templateField: 'Customer Ref', valueType: 'input', value: bad }]),
-      /第 1 行：「Customer Ref」的映射值含写入 Excel 后会被改写的文本/);
-  }
-  for (const ok of ['FEE_x004_', 'FEE_x00G1_', 'FEE_0041_x', 'REF\r\nB']) {
-    assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, ok));
+  // v3.2.22 B113：写出边界已转义字面 _xHHHH_（writers.js），这类文本原样写出、读回，源列取值与固定文本都照常接受
+  for (const ok of ['FEE_x0041_', 'a_X00e9_b', 'REF_x0041\r\nB', 'REF_x0041\u0001', 'FEE_x004_', 'FEE_x00G1_', 'FEE_0041_x', 'REF\r\nB']) {
+    assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, ok, { sourceRowNumber: 7 }));
     assert.doesNotThrow(() => validateFeeFieldMappings([{ templateField: 'Customer Ref', valueType: 'input', value: ok }]));
   }
 });
@@ -437,8 +433,10 @@ test('源列取值校验只针对实际写出的费用账单行：合计行、�
     feeFieldMappings
   });
   assert.equal(mergedRows.length, 2, '合并为一行照常生成');
-  // 单独输出的费用账单行：拒绝并列出源行与列
-  assert.throws(() => mapFile(mergedCsv, { feeFieldMappings }), /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*Payee Name/);
+  // 单独输出的费用账单行：值原样留在明细行，由生成前按最终明细的检查列出源行与写进的列（v3.2.22 B113，Codex 第七轮）
+  const separateRows = mapFile(mergedCsv, { feeFieldMappings });
+  assert.deepEqual(collectUnwritableRowText(separateRows, { rowMetas: separateRows.rowMetas }),
+    { total: 1, labels: ['第 2 行写进「Payee Name」列的值'] });
   const longCsv = writeCsv('long.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', 'R'.repeat(32768)]]);
   assert.throws(() => mapFile(longCsv, { feeFieldMappings }), /第 2 行「记账日期」列的值超过 32767 个字符.*Payee Name/);
   // ValueDate 取源列：在实际写出的行上先校验原值（超长值不进入日期解析）再规范化；费用行作合并代表行时同样规范化
@@ -451,8 +449,9 @@ test('源列取值校验只针对实际写出的费用账单行：合计行、�
     feeFieldMappings: valueDateMappings
   });
   assert.deepEqual(feeRepresentativeRows.slice(1).map((row) => [row[2], row[6]]), [['98.5', '']], '合并代表行为费用行：ValueDate 无法识别时输出空（同主映射口径）');
-  // ValueDate 取源列：日期规范化会丢掉非法字符，须按规范化前的源值校验
+  // ValueDate 取源列：日期规范化会丢掉非法字符，含这类字符的原值不规范化、原样留给生成前的检查
   const dateCsv = writeCsv('date.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', '2026-11-03T10:00:00\uFFFE']]);
-  assert.throws(() => mapFile(dateCsv, { feeFieldMappings: [{ templateField: 'ValueDate', valueType: 'field', value: '记账日期' }] }),
-    /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*ValueDate/);
+  const dateRows = mapFile(dateCsv, { feeFieldMappings: [{ templateField: 'ValueDate', valueType: 'field', value: '记账日期' }] });
+  assert.deepEqual(collectUnwritableRowText(dateRows, { rowMetas: dateRows.rowMetas }),
+    { total: 1, labels: ['第 2 行写进「ValueDate」列的值'] });
 });

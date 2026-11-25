@@ -36,7 +36,7 @@
       ui: { createOverlay, createAlertDialog, createConfirmDialog, escapeHtml, pushAlert }
     });
 
-    const { looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createDuplicateRowsReviewDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog } = global.ConfigurationDialogs.createConfigurationDialogs({
+    const { looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createDuplicateRowsReviewDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog } = global.ConfigurationDialogs.createConfigurationDialogs({
       services: configurationServices, api: configurationApi, modalBridge,
       ui: { createOverlay, escapeHtml, createAlertDialog, createConfirmDialog, pushAlert, setStatus, applyStatementResult, applyManualBalancePromptStatus, createFeedbackScope },
       constants: { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, MERCHANT_ID_CURRENCY_ONLY_OPTION, ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, FEATURE_FILTER_MAPPING_FIELD, LOGIC_VALUE_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION }
@@ -187,7 +187,7 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>中台调拨单账户号</th>
+                <th>链接表账户号</th>
                 <th>清结算系统银行账号</th>
                 <th>执行操作</th>
               </tr>
@@ -944,7 +944,7 @@
           <div class="linked-table-footer-spacer" style="flex: 1 1 auto;"></div>
           <button class="secondary-btn small" type="button" data-action="delete-range">删除</button>
           <button class="primary-btn small" type="button" data-action="import">导入</button>
-          <button class="secondary-btn small" type="button" data-action="exit">退出</button>
+          <button class="secondary-btn small" type="button" data-action="exit">返回</button>
         </div>
       `;
       const tbody = dialog.querySelector('tbody');
@@ -1747,7 +1747,6 @@
       createBigAccountSelectionDialog,
       createBigAccountManagerDialog,
       createCurrencyBigAccountMappingDialog,
-      createRememberOrderMismatchDialog,
       // v3.2.19 重复账单提醒（导入预检发现重复账单时由主面板打开）
       createDuplicateRowsReviewDialog,
       renderTemplateTableRows,

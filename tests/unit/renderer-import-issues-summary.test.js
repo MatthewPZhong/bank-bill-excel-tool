@@ -221,6 +221,21 @@ describe('buildLinkedImportSummary — 行为（v3.0.7 需求2d）', () => {
     assert.strictEqual(r, '已存入链接表 1 个:\n网关.xlsx → 网关对账单表库（7 行）');
   });
 
+  test('v3.2.22：中台调拨订单派生提醒（如账户号转义歧义）随文件行显示；派生失败或无提醒时不显示', () => {
+    const warning = '调拨对账单有 2 行的账户号含 Excel 转义写法（_xHHHH_），请人工核对账户号与账户映射。';
+    const r = buildLinkedImportSummary([
+      { status: 'ok', outcome: 'linked', tableKey: 'mid-allocation', fileName: '调拨.xlsx', rowCount: 8,
+        fundTransferReconDerive: { created: true, total: 16, ambiguousMappedAccountCount: 2, warning } },
+      { status: 'ok', outcome: 'linked', tableKey: 'mid-allocation', fileName: '调拨2.xlsx', rowCount: 1,
+        fundTransferReconDerive: { created: false, error: 'x', warning: '不应显示' } },
+      { status: 'ok', outcome: 'linked', tableKey: 'gateway-bill', fileName: '网关.xlsx', rowCount: 3,
+        fundTransferReconDerive: { created: true, warning: '不应显示' } }
+    ]);
+    assert.strictEqual(r, `已存入链接表 3 个:\n调拨.xlsx → 中台调拨订单表库（8 行）\n调拨对账单提醒: ${warning}\n` +
+      '调拨2.xlsx → 中台调拨订单表库（1 行）\n网关.xlsx → 网关对账单表库（3 行）');
+    assert.ok(!r.includes('：'), '不含全角冒号（状态框按全角冒号强制换行）');
+  });
+
   test('未知 tableKey 回落到 tableKey 字面；rowCount 非数字回落 0', () => {
     const r = buildLinkedImportSummary([
       { status: 'ok', outcome: 'linked', tableKey: 'unknown-table', fileName: 'U.xlsx' }
@@ -325,3 +340,120 @@ describe('linked-only 导入后状态刷新护栏（v3.0.7 F2）', () => {
     assert.match(harness.controls['#bankStatementStatusBox'].textContent, /已存入链接表 1 个/);
   });
 });
+
+// v3.2.22：导出时附属报表写失败（主文件已生成）在状态框逐条提示，不再只记日志。
+describe('formatSideReportFailures — 附属报表未生成的提示（v3.2.22）', () => {
+  const formatSideReportFailures = loadFn('formatSideReportFailures');
+  test('无失败 / 非数组 → 空串（状态框照旧显示已导出）', () => {
+    for (const input of [[], null, undefined, 'x']) assert.strictEqual(formatSideReportFailures(input), '');
+  });
+  test('每条失败一行，带报表名与原因（含单元格诊断）', () => {
+    const text = formatSideReportFailures([
+      { label: '中台回填文件', message: '工作表「回填模板」单元格 F2 的文本有 32846 个字符，超过上限' },
+      { label: '加款单剔除文件', message: '' }
+    ]);
+    assert.strictEqual(text,
+      '\n中台回填文件未生成：工作表「回填模板」单元格 F2 的文本有 32846 个字符，超过上限\n加款单剔除文件未生成：未知原因');
+  });
+  test('导出 ok 带附属报表失败：状态框同时显示主文件与失败原因、转为错误样式，日志只记报表类型', async (t) => {
+    const harness = await loadSideFailureController(t);
+    harness.resolveExport(SIDE_FAILURE_RESULT);
+    await harness.exportDone;
+    const box = harness.controls['#bankStatementStatusBox'];
+    assert.match(box.textContent, /已导出：6222000011112222-主文件\.xlsx/);
+    assert.match(box.textContent, /中台回填文件未生成：工作表「回填模板」单元格 F2 的文本有 32846 个字符/);
+    assert.strictEqual(box.dataset.tone, 'error');
+    const logMessage = harness.lastOptions && harness.lastOptions.logMessage;
+    assert.ok(typeof logMessage === 'string' && logMessage.includes('中台回填文件'), '日志摘要写明未生成的报表');
+    assert.ok(!logMessage.includes('6222000011112222') && !logMessage.includes('回填模板'), '日志摘要不含文件名与异常原文');
+  });
+  test('导出期间离页：主文件成功、附属报表失败的结果保存在领域状态，重入后状态框照样显示', async (t) => {
+    const harness = await loadSideFailureController(t);
+    assert.strictEqual(harness.controller.leave().status, 'left');
+    harness.resolveExport(SIDE_FAILURE_RESULT);
+    await harness.exportDone;
+    const box = harness.controls['#bankStatementStatusBox'];
+    assert.doesNotMatch(box.textContent, /已导出/, '离页时不更新 DOM');
+    await harness.controller.enter();
+    assert.match(box.textContent, /已导出：6222000011112222-主文件\.xlsx[\s\S]*中台回填文件未生成/);
+    assert.strictEqual(box.dataset.tone, 'error');
+  });
+  test('导出期间离页、主文件导出失败：失败原因保存在领域状态，重入后显示，日志不含原因原文', async (t) => {
+    const harness = await loadSideFailureController(t);
+    harness.controller.leave();
+    harness.resolveExport({ status: 'failed', message: '工作表「命中场景」单元格 D2 的文本有 33800 个字符，超过 Excel 单元格 32767 个字符的上限' });
+    await harness.exportDone;
+    await harness.controller.enter();
+    const box = harness.controls['#bankStatementStatusBox'];
+    assert.match(box.textContent, /^导出失败：工作表「命中场景」单元格 D2/);
+    assert.strictEqual(box.dataset.tone, 'error');
+    assert.ok(!harness.lastOptions.logMessage.includes('D2'), '日志不含原因原文');
+    assert.strictEqual(harness.exportCalls, 1, '不重发导出');
+  });
+  test('导出期间离页、导出 IPC 被拒：原因同样保存，重入后显示，不重发导出', async (t) => {
+    const harness = await loadSideFailureController(t);
+    harness.controller.leave();
+    harness.rejectExport(new Error('EACCES: permission denied, mkdir'));
+    await harness.exportDone;
+    await harness.controller.enter();
+    const box = harness.controls['#bankStatementStatusBox'];
+    assert.match(box.textContent, /^导出失败：EACCES: permission denied, mkdir/);
+    assert.strictEqual(box.dataset.tone, 'error');
+    assert.strictEqual(harness.exportCalls, 1, '不重发导出');
+  });
+  test('导出期间离页、Main 因升级或存储维护返回 busy：保存「导出未执行」与原因，重入后显示，不重发导出', async (t) => {
+    const harness = await loadSideFailureController(t);
+    harness.controller.leave();
+    harness.resolveExport({ status: 'busy', message: '存档中心正在维护存储位置，请稍后再试' });
+    await harness.exportDone;
+    await harness.controller.enter();
+    const box = harness.controls['#bankStatementStatusBox'];
+    assert.match(box.textContent, /^导出未执行：存档中心正在维护存储位置/);
+    assert.strictEqual(box.dataset.tone, 'error');
+    assert.match(harness.lastOptions.logMessage, /导出未执行/);
+    assert.ok(!harness.lastOptions.logMessage.includes('维护存储位置'), '日志不含原因原文');
+    assert.strictEqual(harness.exportCalls, 1, '不重发导出');
+  });
+  test('在页时 Main 返回 busy：弹窗提示「导出未执行」，不报未知导出状态', async (t) => {
+    const harness = await loadSideFailureController(t);
+    const alerts = [];
+    harness.ui.alert = (message) => { alerts.push(message); };
+    harness.ui.modalHost = { openRoot: (build) => build(), closeOwner: () => ({ ok: true }) };
+    harness.resolveExport({ status: 'busy', message: '正在升级' });
+    await harness.exportDone;
+    assert.deepStrictEqual(alerts, ['导出未执行：正在升级']);
+  });
+});
+
+const SIDE_FAILURE_RESULT = Object.freeze({
+  status: 'ok',
+  mainFileName: '6222000011112222-主文件.xlsx',
+  sideReportFailures: [{ label: '中台回填文件', message: '工作表「回填模板」单元格 F2 的文本有 32846 个字符，超过 Excel 单元格 32767 个字符的上限' }]
+});
+// 导出返回可延后（模拟导出期间离页）；ui.status 记录最后一次的日志选项。
+async function loadSideFailureController(t) {
+  const { createBankStatementController } = require('../../src/renderer/controllers/bank-statement');
+  const controls = {};
+  let resolveExport;
+  let rejectExport;
+  const exportResult = new Promise((resolve, reject) => { resolveExport = resolve; rejectExport = reject; });
+  const harness = {
+    controls, lastOptions: undefined, exportCalls: 0,
+    resolveExport: (value) => resolveExport(value), rejectExport: (error) => rejectExport(error)
+  };
+  harness.ui = { status(element, text, tone, options) { element.textContent = text; element.dataset.tone = tone; harness.lastOptions = options; } };
+  harness.controller = createBankStatementController({
+    panel: { querySelector(selector) { return controls[selector] ||= { textContent: '', dataset: {}, disabled: false, addEventListener() {}, removeEventListener() {} }; } },
+    api: {
+      async sessionStatus() { return { status: 'ok', hasBankStatement: true, bankStatementFileName: '银行.xlsx', hasProcessingResult: true }; },
+      export: () => { harness.exportCalls += 1; return exportResult; }
+    },
+    config: { scenarios: { list: async () => ({ status: 'ok', scenarios: [] }) } },
+    sharedReconSession: { sessionStatus: async () => ({ status: 'ok', hasFile: false, hasResult: false }), subscribe: () => () => {} },
+    ui: harness.ui
+  });
+  t.after(() => harness.controller.dispose());
+  await harness.controller.enter();
+  harness.exportDone = harness.controller.commands.export();
+  return harness;
+}

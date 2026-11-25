@@ -62,20 +62,15 @@ function fatalError(message) {
   return error;
 }
 
+// 未提交导入的暂存目录：只认暂存根目录下的直接子目录，避免误删其他位置。
 function uncommittedJobRoot(input, jobId, preflightReady) {
   const userDataDir = String(input && input.userDataDir || '').trim();
   if (!userDataDir) return '';
   const stagingRoot = path.resolve(userDataDir, STAGING_RELATIVE_PATH);
-  const ledgerPath = String(
-    preflightReady
-    && preflightReady.ledgerEvidence
-    && preflightReady.ledgerEvidence.ledgerPath
-    || ''
-  ).trim();
+  const declared = String(preflightReady && preflightReady.jobRoot || '').trim();
   let candidate;
-  if (ledgerPath) {
-    if (path.basename(ledgerPath) !== 'job-ledger.sqlite') return '';
-    candidate = path.dirname(path.resolve(ledgerPath));
+  if (declared) {
+    candidate = path.resolve(declared);
   } else {
     let batchId;
     try {
@@ -132,7 +127,6 @@ function dispatchPositionImportPreflight(input = {}) {
   }
   const jobId = String(input.jobId || crypto.randomUUID());
   const dispatchStartedAt = monotonicNowMs();
-  const schemaOnly = input.command === POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES;
   const batchContext = input.batchContext || null;
   const operationContext = input.operationContext || null;
   if (batchContext && operationContext) {
@@ -169,10 +163,7 @@ function dispatchPositionImportPreflight(input = {}) {
   let heartbeatTimer = null;
   let lastProgressMessage = null;
   let lastProgressForwardedAt = 0;
-  let applyGrantPayload = (
-    input.command === POSITION_IMPORT_COMMANDS.BANK_APPLY
-    || input.command === POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY
-  ) ? {
+  let applyGrantPayload = input.command === POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY ? {
       preflightOnly: false,
       baseCheckpoint: input.expectedCheckpoint,
       operationToken: input.operationToken
@@ -231,7 +222,6 @@ function dispatchPositionImportPreflight(input = {}) {
               baseCheckpoint: applyGrantPayload.baseCheckpoint,
               operationToken: applyGrantPayload.operationToken,
               preflightReady,
-              workerError: error,
               command: input.command
             })
           : null;
@@ -377,20 +367,12 @@ function dispatchPositionImportPreflight(input = {}) {
         operationToken: input.operationToken || '',
         payload: input.payload || {},
         contractOptions: input.contractOptions || {},
-        featureFlags: {
-          ...(input.featureFlags || {}),
-          ...(schemaOnly
-            ? { schemaOnly: true }
-            : {
-                preflightOnly:
-                  !input.featureFlags || input.featureFlags.preflightOnly !== false
-              })
-        }
+        featureFlags: { ...(input.featureFlags || {}) }
       };
-      if (input.command !== POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY
-          && batchContext) {
-        startMessage.batchContext = batchContext;
-      }
+      // 单遍导入（银行对账单、链接原始表）的批次归属随写入授权（APPLY_GRANTED）下发，启动消息不带。
+      const grantedImport = input.command === POSITION_IMPORT_COMMANDS.BANK_IMPORT
+        || input.command === POSITION_IMPORT_COMMANDS.SOURCE_IMPORT;
+      if (!grantedImport && batchContext) startMessage.batchContext = batchContext;
       if (operationContext) startMessage.operationContext = operationContext;
       sendToWorker(startMessage);
     } catch (error) {
@@ -417,19 +399,10 @@ function dispatchPositionImportPreflight(input = {}) {
   };
 }
 
-function dispatchPositionLargeImportSchemaMigration(input = {}) {
-  return dispatchPositionImportPreflight({
-    ...input,
-    command: POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES,
-    files: []
-  });
-}
-
 module.exports = {
   WORKER_ENTRY,
   cleanupUncommittedImportArtifacts,
   dispatchPositionImportPreflight,
-  dispatchPositionLargeImportSchemaMigration,
   fatalError,
   uncommittedJobRoot,
   workerExitedError

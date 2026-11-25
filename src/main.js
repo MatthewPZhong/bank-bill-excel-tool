@@ -119,6 +119,8 @@ const {
 } = require('./main-process/archive-center/source-snapshot');
 const {
   artifactManifestFromFilePlan,
+  assertFilePlanFresh,
+  assertFilePlanInputsFreshAsync,
   normalizeFilePlanV1
 } = require('./main-process/archive-center/file-plan');
 const {
@@ -136,6 +138,7 @@ const {
 } = require('./main-process/archive-center/position-owned-delete-sources');
 const { createPositionReportDeleteProtection } = require('./main-process/position-reconciliation/archive-report-delete-protection');
 const {
+  findArchivedPositionReportArtifact,
   positionInputFilePlanEvidence
 } = require('./main-process/position-reconciliation/archive-file-plan-evidence');
 const {
@@ -231,15 +234,16 @@ const {
   createPositionSourceImportTaskContract
 } = require('./main-process/position-reconciliation/interactive-task-preflight');
 const {
-  dispatchPositionLargeImportSchemaMigration
-} = require('./main-process/position-reconciliation/import-dispatch');
-const {
   hashFileSha256Async
 } = require('./main-process/position-reconciliation/input-staging');
 const {
   POSITION_SIDE_DB_CHECKPOINT_SETTING,
-  POSITION_SIDE_DB_BOOTSTRAP_SETTING
+  POSITION_SIDE_DB_BOOTSTRAP_SETTING,
+  POSITION_SIDE_DB_PENDING_SETTING
 } = require('./main-process/position-reconciliation/constants');
+const {
+  discardOutdatedPositionSideDb
+} = require('./main-process/position-reconciliation/store');
 const {
   authorizePositionImportApply,
   positionPersistentStagingProtectionPaths,
@@ -312,11 +316,12 @@ const {
   rebuildAdmDerivation,
   rebuildBankDepositBocDerivation,
   rebuildFxBocDerivation,
-  rebuildFundTransferReconDerivation
+  rebuildFundTransferReconDerivation,
+  prepareRunFundTransferReconDerivation
 } = require('./main-process/linked-derive-rebuild');
 // v3.0.6 需求1（T3）：调拨对账单派生纯函数（mid-allocation 导入触发 → in/out 两行落 linked_fund_transfer_recon）。
 const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
-const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
+const { createStoredCellAssert, streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 // v3.2.18：链接表按数据日期统计 / 删除 + 派生联动的共享实现（手工删除与链接表过期清理共用，禁复制 = R-5）。
 const {
   isLinkedDeleteTable,
@@ -375,6 +380,10 @@ const {
 const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
 // v3.0.0 需求3：退款候选预检只读 helper（统计银行侧 FundType=Ach Return 候选行，与 countC3BankCandidates 对称）
 const { countRefundBankCandidates } = require('./main-process/scenario-engines/r5-refund-order-backfill');
+const {
+  buildR5ChannelMissingDiagnosticPrefilter,
+  createR5ChannelMissingDiagnosticSource
+} = require('./main-process/scenario-engines/r5-fund-transfer-backfill');
 // v3.0.5 OPEN-7（T5b-2）：跨期重复命中提醒纯函数（export 阶段判定 + 注入回填行「匹配命中详情」；引擎不读库，库读在 main 侧）
 //   独立 require 语句（与上行单标识符 require 分开，保留既有「main.js 接线 countRefundBankCandidates」断言正则不破）。
 const {
@@ -405,6 +414,7 @@ const {
   readGatewayRecon,
   writeBankStatementMainOutput,
   writeErrorReportOutputToPath,
+  cleanupInterruptedErrorReportTemporaryFiles,
   buildMainOutputFileName,
   buildTimestamp,
   buildTimestampMinuteUnderscore,
@@ -504,6 +514,7 @@ const {
   toolboxRecoveryOutputFiles: toolboxFinalOutputFiles
 } = require('./main-process/toolbox-archive-recovery');
 const {
+  normalizeTargetAliasKey,
   pathsAlias
 } = require('./main-process/toolbox-target-identity');
 const {
@@ -580,6 +591,7 @@ const {
 } = require('./main-process/manual-balance-seed-settlement');
 const { parseBankAccountExcel } = require('./backend/bank-account-import');
 const {
+  balanceImportAccountsForPrompt,
   matchBalanceSeedImport,
   parseBalanceSeedImportRows,
   readBalanceSeedImportFile
@@ -590,14 +602,13 @@ const {
   writeBalanceAdjustments,
   resolveBalanceAdjustment
 } = require('./backend/balance-adjustment-store');
-const { readBigAccountOrder, writeBigAccountOrder } = require('./backend/big-account-order-store');
-const { readBigAccountMode, writeBigAccountMode } = require('./backend/big-account-mode-store');
 const {
   appendCurrencyBigAccountIssues,
   calculateEndingBalanceFromAmounts,
   buildDetailExportRows,
   buildExpectedHeaderCandidates,
   buildMappedRows,
+  hasDetailExportRow,
   buildCurrencyBigAccountUnmappedError,
   compileRegexLiteral,
   FileValidationError,
@@ -620,6 +631,13 @@ const {
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   normalizeRowFilterRules,
   validateRowFilterRules,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule,
+  allocateCrossSheetBackfillOutputPaths,
+  computeFileFingerprint,
+  readFingerprintedFile,
+  writeCrossSheetBackfillWorkbook,
   buildFeatureFilterToken,
   buildLogicValueToken,
   describeDuplicateKeeperReplacementConflicts,
@@ -639,8 +657,10 @@ const {
   LEGACY_FEATURE_FILTER_ID,
   parseDateValue,
   parseNumericValue,
+  prepareWorkbookTextForWrite,
   readRows,
   readRowsWithMetadata,
+  assertBalanceRecordsWritable,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('./backend/file-service');
@@ -670,6 +690,7 @@ const {
   createStatementGenerationHelpers,
   selectBalanceAccountRows
 } = require('./main-process/statement-generation');
+const { createStatementOutputJournal, isStatementOutputsRestored } = require('./main-process/statement-output-rollback');
 const {
   DUPLICATE_REVIEW_STATUS,
   createStatementDuplicateReview,
@@ -716,9 +737,6 @@ const {
   showImportOpenDialog: showRememberedImportOpenDialog
 } = require('./main-process/import-dialog-state');
 const {
-  findSavedOrderFileRowMismatches,
-  hasUnidentifiedTransactionRows,
-  matchImportFilesToSavedOrder,
   matchMerchantIds,
   normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
@@ -1618,6 +1636,10 @@ const PREPROCESS_ROW_FILTER_ENABLED_OPTION = '是';
 //   经用户确认后只保留第一行（spec §8.3）。开关存为映射行，没有规则。
 const DUPLICATE_ROW_FILTER_MAPPING_FIELD = '重复账单过滤';
 const DUPLICATE_ROW_FILTER_ENABLED_OPTION = '是';
+// v3.2.21：原始账单预处理「跨 Sheet 回填」——勾选时生成前把命中待回填行条件的源行与同一工作簿来源 sheet 的行一对一配对，
+//   回填空单元格；配不上的行跳过。开关存为映射行，规则存 templates.cross_sheet_backfill_rule_json。
+const CROSS_SHEET_BACKFILL_MAPPING_FIELD = '跨 Sheet 回填';
+const CROSS_SHEET_BACKFILL_ENABLED_OPTION = '是';
 // v1.5.2 需求 3（G3-6，决策 ③A）：保持 v4 不升 v5；新增的 `filenameFixedField` 为 v4 schema 下的透明扩展字段。
 // - `buildTemplateLibraryPayload` 通过 `listTemplateBundleEntries` 透传该字段（template-repository.js:856）
 // - `readTemplateBundleFile` 对未知字段采用显式解构式解析（:1221-1243），v1.5.1 旧应用读 v1.5.2 导出的 bundle 时自然忽略该字段
@@ -1635,10 +1657,13 @@ const DUPLICATE_ROW_FILTER_ENABLED_OPTION = '是';
 // v3.2.21：「逻辑取值」候补含特征值，或用到费用账单「字段映射特殊处理」（勾选或存有设置）时写 v9，v3.2.20 及更早版本
 //   整包按版本拒绝（旧版会把特征值 token 当成源字段名，报「映射字段不存在」跳过该模板；或忽略覆盖，费用账单行静默输出
 //   原映射的字段值）；两项同在 v3.2.21 首次出现，共用 v9。未用到时按上面的规则写 v5～v8。
-const SUPPORTED_BUNDLE_VERSION = 9;
+const SUPPORTED_BUNDLE_VERSION = 10;
 // v3.2.21 功能首次出现的包版本（固定；SUPPORTED_BUNDLE_VERSION 只表示能读取的最高版本）
 const LOGIC_VALUE_FEATURE_BUNDLE_VERSION = 9;
 const FEE_FIELD_MAPPING_BUNDLE_VERSION = 9;
+// 跨 Sheet 回填（v10）：用到原始账单预处理「跨 Sheet 回填」（勾选或存有规则）时写 v10，v3.2.21 及更早版本整包拒绝（旧版会忽略
+//   回填，换汇等行以空日期输出）；未用到时按上面的规则写 v5～v9。
+const CROSS_SHEET_BACKFILL_BUNDLE_VERSION = 10;
 // v3.2.19：拆分账单「费用账单」、两类过滤、重复账单过滤或「逻辑取值」的包版本
 const LOGIC_VALUE_BUNDLE_VERSION = 8;
 const FEATURE_FILTER_BUNDLE_VERSION = 7;
@@ -1669,7 +1694,8 @@ const BILL_SPLIT_GROUP_FIELDS = [
 // v3.2.19：映射关系管理「原始账单预处理」分组（位于「个性化映射设置」之前）
 const PREPROCESS_FIELDS = [
   PREPROCESS_ROW_FILTER_MAPPING_FIELD,
-  DUPLICATE_ROW_FILTER_MAPPING_FIELD
+  DUPLICATE_ROW_FILTER_MAPPING_FIELD,
+  CROSS_SHEET_BACKFILL_MAPPING_FIELD
 ];
 // v3.2.18 模板管理【更新】：引用源字段的位置收集与生成前失效引用拦截（与保存校验同一组标记常量）
 const templateHeaderUpdateTools = createTemplateHeaderUpdateTools({
@@ -1688,6 +1714,8 @@ const templateHeaderUpdateTools = createTemplateHeaderUpdateTools({
   PREPROCESS_ROW_FILTER_MAPPING_FIELD,
   PREPROCESS_ROW_FILTER_ENABLED_OPTION,
   DUPLICATE_ROW_FILTER_MAPPING_FIELD,
+  CROSS_SHEET_BACKFILL_MAPPING_FIELD,
+  CROSS_SHEET_BACKFILL_ENABLED_OPTION,
   SIGNED_AMOUNT_MAPPING_FIELD,
   AMOUNT_BASED_NAME_MAPPING_FIELD,
   AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -1924,6 +1952,11 @@ function ensureStorageRoot() {
   const storageRoot = getStorageRoot();
   fs.mkdirSync(storageRoot, { recursive: true });
   return storageRoot;
+}
+
+// v3.2.22：错误报告临时文件归属登记目录（应用私有，见 exceljs-writer cleanupInterruptedErrorReportTemporaryFiles）。
+function getErrorReportTemporaryMarkerDir() {
+  return path.join(app.getPath('userData'), 'error-report-temporary-files');
 }
 
 function getBackgroundAssetsDir() {
@@ -2550,7 +2583,7 @@ function buildBalanceMismatchConfirmResult(mismatches, generatedFiles) {
   };
 }
 
-function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks, bigAccounts = [], fixedAssignments = [], templateId } = {}) {
+function buildBigAccountSelectionRequiredResult({ rows = [], bigAccounts = [], fixedAssignments = [], templateId } = {}) {
   const mapRow = (row, index) => ({
     index: Number.isInteger(row.index) ? row.index : index,
     label: `${index + 1}.`,
@@ -2563,7 +2596,6 @@ function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks
     selectionMode: 'multi-row',
     templateId,
     rows: rows.map(mapRow),
-    rowsWithEmptyBlocks: (rowsWithEmptyBlocks || rows).map(mapRow),
     bigAccounts: bigAccounts.map((item) => ({
       merchantId: normalizeCell(item.merchantId),
       currencies: Array.isArray(item.currencies)
@@ -2590,10 +2622,7 @@ function buildBigAccountPreviewResult(result, contextId) {
   return {
     ...result,
     contextId,
-    rows: sanitizeRows(result && result.rows),
-    rowsWithEmptyBlocks: sanitizeRows(
-      result && (result.rowsWithEmptyBlocks || result.rows)
-    )
+    rows: sanitizeRows(result && result.rows)
   };
 }
 
@@ -2610,10 +2639,8 @@ function normalizePendingBigAccountSelection(pendingContext, payload = {}) {
           : (Number.isInteger(item.rowIndex) ? item.rowIndex : index)
       }))
     : [];
-  const isFixedMode = payload.mode === 'fixed';
-  const expectedRows = isFixedMode
-    ? (pendingContext.rowsWithEmptyBlocks || pendingContext.rows)
-    : pendingContext.rows;
+  // v3.2.22：账号顺序固定已去掉，只按不含无交易空段的预览行（账号顺序不固定口径）核对。
+  const expectedRows = Array.isArray(pendingContext.rows) ? pendingContext.rows : [];
   if (!assignments.length || assignments.length !== expectedRows.length) {
     const error = new FileValidationError(
       'BIG_ACCOUNT_SELECTION_INVALID',
@@ -2662,18 +2689,14 @@ function normalizePendingBigAccountSelection(pendingContext, payload = {}) {
       rowIndex: assignment.rowIndex
     };
   }).sort((left, right) => left.rowIndex - right.rowIndex);
-  return { isFixedMode, normalizedAssignments };
+  return { normalizedAssignments };
 }
 
-function selectPendingBigAccountRows(pendingContext, mode, rowIndexes = []) {
+function selectPendingBigAccountRows(pendingContext, rowIndexes = []) {
   const requestedRowIndexes = new Set(
     (Array.isArray(rowIndexes) ? rowIndexes : []).filter(Number.isInteger)
   );
-  const serverRows = mode === 'fixed'
-    ? (pendingContext && (
-        pendingContext.rowsWithEmptyBlocks || pendingContext.rows
-      ))
-    : (pendingContext && pendingContext.rows);
+  const serverRows = pendingContext && pendingContext.rows;
   return (Array.isArray(serverRows) ? serverRows : [])
     .filter((row) => requestedRowIndexes.has(Number(row.index)));
 }
@@ -2914,12 +2937,26 @@ function rebuildMatchedTemplateFileEntries({
   });
 }
 
+// v3.2.22：原表只有表头、表头以下没有任何非空行（按映射时记下的 sourceDataRowCount 判断：读取器在截取模板列宽、
+//   遇汇总行截断之前统计）。
+//   原表有数据、只是处理后没有输出的文件不算（如「过滤账单」全部过滤、拆分合并后零输出：沿用原流程与原有提示），
+//   只有余额行等有数据行的文件也不算；没有记下原表行数时按不是只有表头处理。
+function isHeaderOnlyDetailRows(detailRows) {
+  return Array.isArray(detailRows) && detailRows.length <= 1 && detailRows.sourceDataRowCount === 0;
+}
+
 function identifyAccountBlocks(detailRows, options = {}) {
   const { includeEmptyBlocks = false } = options;
   const headerRow = detailRows[0] || [];
   const dataRows = detailRows.slice(1);
   const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
   const headerBreaks = Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks : [];
+
+  // v3.2.22：原表只有表头（没有任何数据行）的文件在不含空段的口径下没有账号块，选择窗口与分配执行都不为它留位置；
+  //   有数据行但没有借贷的文件（可能只有余额行）、数据行全被预处理过滤掉的文件仍按原口径处理
+  if (!includeEmptyBlocks && isHeaderOnlyDetailRows(detailRows)) {
+    return [];
+  }
 
   if (!headerBreaks.length) {
     return [{
@@ -3042,37 +3079,54 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
 //   长整数换成文件原文（readRows 的不可枚举属性 sourceText：Map<行下标, Map<列下标, 原文>>），账号按原文匹配。
 //   生成时的识别依据（buildBigAccountRecognitionBasis）在窗口内逐行取原文，口径相同。
 //   headerRowNumbers 为 findHeaderRowNumbersInRawRows 的结果（下标 + 1）。返回新数组，保留 firstRowNumber。
+//   v3.2.22（B133 审查）：没有原文、仍是读取库读成的超出安全整数范围的数字（二进制 .xls、原文无法核对的 XLSX 等）末几位
+//   可能已变，可能精确命中维护列表里的另一个账号，不作为识别的依据：换成空值，并记下所在行（不可枚举属性
+//   unverifiedRowIndexes）。识别窗口里有这样的数字时，无法排除它就是本段的账号，整段不自动识别（精确、模糊命中与账户映射
+//   桥接都不用），由用户选择大账号（buildBigAccountRecognitionBasis 同一口径，见 resolveDirectBigAccountRecognition）。
+//   判定就地内联（测试夹具按函数源码加载，不另加自由标识符）
 function applyBigAccountRecognitionSourceText(rawRows, headerRowNumbers) {
   const sourceText = rawRows && rawRows.sourceText instanceof Map ? rawRows.sourceText : null;
-  if (!sourceText || !sourceText.size) return rawRows;
   const headerIndexes = new Set((headerRowNumbers || []).map((rowNumber) => rowNumber - 1));
+  const unverifiedRowIndexes = new Set();
   const rows = rawRows.map((row, index) => {
-    const rowText = headerIndexes.has(index) ? null : sourceText.get(index);
-    if (!rowText || !Array.isArray(row)) return row;
-    const next = row.slice();
-    rowText.forEach((text, columnIndex) => {
-      if (columnIndex < next.length) next[columnIndex] = text;
+    if (headerIndexes.has(index) || !Array.isArray(row)) return row;
+    const rowText = sourceText ? sourceText.get(index) : null;
+    return row.map((cell, columnIndex) => {
+      if (rowText && rowText.has(columnIndex)) return rowText.get(columnIndex);
+      if (!(typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell))) return cell;
+      unverifiedRowIndexes.add(index);
+      return '';
     });
-    return next;
   });
   if (rawRows.firstRowNumber !== undefined) {
     Object.defineProperty(rows, 'firstRowNumber', { value: rawRows.firstRowNumber, enumerable: false });
   }
+  Object.defineProperty(rows, 'unverifiedRowIndexes', { value: unverifiedRowIndexes, enumerable: false });
   return rows;
 }
+
 
 function buildBigAccountRecognitionBasis({
   rawRows,
   expectedSourceHeaders,
-  accountMappingByBankId = {}
+  accountMappingByBankId = {},
+  matchedHeaderRowNumbers = []
 }) {
   const rows = Array.isArray(rawRows) ? rawRows : [];
-  const headerRowNumbers = findHeaderRowNumbersInRawRows(rows, expectedSourceHeaders);
   // v3.2.21 B112：表头按读取库的值定位（同上），窗口内各行的长整数换成文件原文（rawRows.sourceText，见 readers.js）
   const sourceText = rows.sourceText instanceof Map ? rows.sourceText : null;
   // v3.2.19：工作表有效范围不从第 1 行开始时，rows 下标与物理行号差一个偏移；记录的行号与
   //   readRowsWithMetadata 的源行号同为物理行号（finalizeBigAccountRecognitionBasis 按行号比较两者）。
   const rowNumberOffset = Number(rows.firstRowNumber) > 1 ? Number(rows.firstRowNumber) - 1 : 0;
+  // v3.2.21 第三十一、三十二轮审查：识别窗口取正式映射命中的各分段表头（物理行号），与正式映射的分段一一对应（分段按
+  //   fileBlockOrdinal 对应识别窗口）。按读取库原值另找表头可能只命中其中几段（表头含原生日期，正式映射按原文换算后的值或
+  //   原值定位），分段错位会把一段的账户用于另一段。调用方没有提供时按原值查找
+  const formalHeaderRowNumbers = (Array.isArray(matchedHeaderRowNumbers) ? matchedHeaderRowNumbers : [])
+    .map((rowNumber) => Number(rowNumber) - rowNumberOffset)
+    .filter((rowNumber) => Number.isInteger(rowNumber) && rowNumber >= 1);
+  const headerRowNumbers = formalHeaderRowNumbers.length
+    ? formalHeaderRowNumbers
+    : findHeaderRowNumbersInRawRows(rows, expectedSourceHeaders);
   const bridgeMappings = Object.entries(accountMappingByBankId || {})
     .map(([bankId, mapping]) => ({
       bankId: normalizeCell(bankId),
@@ -3084,14 +3138,22 @@ function buildBigAccountRecognitionBasis({
     const previousBoundary = index === 0 ? 0 : headerRowNumbers[index - 1];
     const startIndex = Math.max(previousBoundary, headerRowNumber - 10);
     const endIndex = headerRowNumber - 2;
+    let unverifiedLongNumber = false;
     const candidateRowsWithSource = rows
       .slice(startIndex, Math.max(startIndex, endIndex + 1))
       .map((row, candidateIndex) => {
         const rowText = sourceText && sourceText.get(startIndex + candidateIndex);
         return {
           sourceRow: startIndex + candidateIndex + 1 + rowNumberOffset,
+          // v3.2.22（B133 审查）：没有原文、无法核对原值的长整数不参与识别，有这样的数字时整段不自动识别、不按账户映射
+          //   桥接（与 applyBigAccountRecognitionSourceText 同一口径）
           cells: (Array.isArray(row) ? row : [])
-            .map((cell, columnIndex) => normalizeCell(rowText && rowText.has(columnIndex) ? rowText.get(columnIndex) : cell))
+            .map((cell, columnIndex) => {
+              if (rowText && rowText.has(columnIndex)) return normalizeCell(rowText.get(columnIndex));
+              if (!(typeof cell === 'number' && Number.isInteger(cell) && !Number.isSafeInteger(cell))) return normalizeCell(cell);
+              unverifiedLongNumber = true;
+              return '';
+            })
             .filter((cell) => cell !== '')
         };
       });
@@ -3100,7 +3162,7 @@ function buildBigAccountRecognitionBasis({
     const exactBridgeCandidates = [];
     const fuzzyBridgeCandidates = [];
     const seenBridgeCandidates = new Set();
-    for (let rowIndex = candidateRowsWithSource.length - 1; rowIndex >= 0; rowIndex -= 1) {
+    for (let rowIndex = unverifiedLongNumber ? -1 : candidateRowsWithSource.length - 1; rowIndex >= 0; rowIndex -= 1) {
       const candidateRow = candidateRowsWithSource[rowIndex];
       for (const cellText of candidateRow.cells) {
         for (const mapping of bridgeMappings) {
@@ -3121,7 +3183,10 @@ function buildBigAccountRecognitionBasis({
       headerRowNumber: headerRowNumber + rowNumberOffset,
       candidateRows: Object.freeze(candidateRowsWithSource.map(
         (candidateRow) => Object.freeze(candidateRow.cells)
-      ))
+      )),
+      ...(unverifiedLongNumber ? { unverifiedLongNumber: true } : {}),
+      // v3.2.21：各候选行的物理行号（与 candidateRows 同序），定稿时按上一段被过滤 / 跳过的交易行收窄直接匹配窗口
+      candidateSourceRows: Object.freeze(candidateRowsWithSource.map((candidateRow) => candidateRow.sourceRow))
     });
   });
   return Object.freeze({
@@ -3142,13 +3207,37 @@ function finalizeBigAccountRecognitionBasis(basis, mappedRows) {
     ? mappedRows.rowMetas
     : [];
   const preprocessStats = mappedRows && mappedRows.preprocessRowFilterStats;
-  const droppedTransactionRowNumbers = preprocessStats && Array.isArray(preprocessStats.droppedTransactionRowNumbers)
-    ? preprocessStats.droppedTransactionRowNumbers
-    : [];
+  // v3.2.21：跨 Sheet 回填跳过的交易行与「过滤账单」过滤掉的交易行同样仍属于上一段
+  const crossSheetBackfillStats = mappedRows && mappedRows.crossSheetBackfillStats;
+  const droppedTransactionRowNumbers = []
+    .concat(preprocessStats && Array.isArray(preprocessStats.droppedTransactionRowNumbers)
+      ? preprocessStats.droppedTransactionRowNumbers
+      : [])
+    .concat(crossSheetBackfillStats && Array.isArray(crossSheetBackfillStats.skippedTransactionRowNumbers)
+      ? crossSheetBackfillStats.skippedTransactionRowNumbers
+      : []);
+  // v3.2.21：直接匹配窗口只以带发生额的交易行为界（被过滤的说明行如带账期日期和下一段账号、收支为空，不截断窗口）
+  const droppedAmountRowNumbers = []
+    .concat(preprocessStats && Array.isArray(preprocessStats.droppedAmountRowNumbers)
+      ? preprocessStats.droppedAmountRowNumbers
+      : [])
+    .concat(crossSheetBackfillStats && Array.isArray(crossSheetBackfillStats.skippedTransactionRowNumbers)
+      ? crossSheetBackfillStats.skippedTransactionRowNumbers
+      : []);
   const blocks = identifyAccountBlocks(mappedRows || [], { includeEmptyBlocks: true });
   const blockByOrdinal = new Map(
     blocks.map((block) => [Number(block.blockOrdinal), block])
   );
+  // 上一段表头与本段表头之间、被过滤 / 跳过的最后一笔交易行（没有时为 0）：它及之前的行属于上一段
+  const lastDroppedTransactionRowBefore = (blockOrdinal, rowNumbers = droppedTransactionRowNumbers) => {
+    if (blockOrdinal <= 0) return 0;
+    const previousHeaderRow = Number(headerWindows[blockOrdinal - 1]?.headerRowNumber);
+    const currentHeaderRow = Number(headerWindows[blockOrdinal]?.headerRowNumber);
+    if (!Number.isInteger(previousHeaderRow) || !Number.isInteger(currentHeaderRow)) return 0;
+    return rowNumbers.reduce((last, rowNumber) => (
+      rowNumber > previousHeaderRow && rowNumber < currentHeaderRow && rowNumber > last ? rowNumber : last
+    ), 0);
+  };
 
   const bridgeClearingIdsByBlock = headerWindows.map((window, blockOrdinal) => {
     const currentHeaderRow = Number(window && window.headerRowNumber);
@@ -3174,12 +3263,9 @@ function finalizeBigAccountRecognitionBasis(basis, mappedRows) {
       }
     }
 
-    // v3.2.19：原始账单预处理过滤掉的交易行仍属于上一段：界线不早于其中最后一行，避免把其中的账号当成本段账号。
-    if (blockOrdinal > 0) {
-      droppedTransactionRowNumbers.forEach((rowNumber) => {
-        if (rowNumber > lowerExclusive && rowNumber < currentHeaderRow) lowerExclusive = rowNumber;
-      });
-    }
+    // v3.2.19：原始账单预处理过滤掉（v3.2.21 起含跨 Sheet 回填跳过）的交易行仍属于上一段：界线不早于其中最后一行，
+    //   避免把其中的账号当成本段账号。
+    lowerExclusive = Math.max(lowerExclusive, lastDroppedTransactionRowBefore(blockOrdinal));
 
     const candidates = Array.isArray(bridgeCandidatesByBlock[blockOrdinal])
       ? bridgeCandidatesByBlock[blockOrdinal]
@@ -3193,9 +3279,23 @@ function finalizeBigAccountRecognitionBasis(basis, mappedRows) {
     return normalizeCell(ownedCandidate && ownedCandidate.clearingAccountId);
   });
 
+  // v3.2.21：直接匹配窗口同样不含上一段被过滤 / 跳过的交易行及其之前的行，其中的账号不当成本段账号；只以带发生额的
+  //   交易行为界（不带发生额的说明行仍可作为本段账号的候选）。没有这类行时窗口不变（不带行号的旧窗口也不变）。
+  const directWindows = headerWindows.map((window, blockOrdinal) => {
+    const boundary = lastDroppedTransactionRowBefore(blockOrdinal, droppedAmountRowNumbers);
+    const sourceRows = window && Array.isArray(window.candidateSourceRows) ? window.candidateSourceRows : null;
+    if (!boundary || !sourceRows || !Array.isArray(window.candidateRows)) return window;
+    const keep = sourceRows.map((sourceRow) => Number(sourceRow) > boundary);
+    return Object.freeze({
+      ...window,
+      candidateRows: Object.freeze(window.candidateRows.filter((_row, index) => keep[index])),
+      candidateSourceRows: Object.freeze(sourceRows.filter((_row, index) => keep[index]))
+    });
+  });
+
   return Object.freeze({
     version: 1,
-    headerWindows,
+    headerWindows: Object.freeze(directWindows),
     bridgeClearingIdsByBlock: Object.freeze(bridgeClearingIdsByBlock)
   });
 }
@@ -3208,17 +3308,19 @@ function identifyAccountsFromRecognitionBasis({
   const headerWindows = basis && Array.isArray(basis.headerWindows)
     ? basis.headerWindows
     : [];
-  const matches = headerWindows.map((window) => findBigAccountMatchInRows(
+  // v3.2.22（B133 审查）：窗口里有无法核对原值的长整数时该段不自动识别（见 applyBigAccountRecognitionSourceText）
+  const matches = headerWindows.map((window) => (window.unverifiedLongNumber ? null : findBigAccountMatchInRows(
       window.candidateRows,
       0,
       window.candidateRows.length - 1,
       allMerchantIds,
       allowSubstringMatch
-    ));
+    )));
   return {
     accounts: matches.filter(Boolean),
     isSingleAccount: headerWindows.length <= 1,
-    matches
+    matches,
+    hasUnverifiedLongNumber: headerWindows.some((window) => window.unverifiedLongNumber === true)
   };
 }
 
@@ -3275,6 +3377,11 @@ function identifyAccountsFromFile({
 
   const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
+  let hasUnverifiedLongNumber = false;
+  // 下标区间内是否有无法核对原值的长整数（见 applyBigAccountRecognitionSourceText）
+  const unverifiedIndexes = rawRows.unverifiedRowIndexes instanceof Set ? Array.from(rawRows.unverifiedRowIndexes) : [];
+  const hasUnverifiedRecognitionRow = (startIndex, endIndex) => unverifiedIndexes
+    .some((index) => index >= startIndex && index <= endIndex);
 
   headerRowNumbers.forEach((headerRowNum, idx) => {
     // 只搜索 header 前面有限行（避免搜到上一个账户的交易数据行里的账户号）
@@ -3282,6 +3389,10 @@ function identifyAccountsFromFile({
     const prevBoundary = idx === 0 ? 0 : headerRowNumbers[idx - 1];
     const narrowStart = Math.max(prevBoundary, headerRowNum - 10);
     const candidateEndIdx = headerRowNum - 2;
+    if (hasUnverifiedRecognitionRow(narrowStart, candidateEndIdx)) {
+      hasUnverifiedLongNumber = true;
+      return;
+    }
     const match = findBigAccountMatchInRows(
       rawRows,
       narrowStart,
@@ -3295,19 +3406,23 @@ function identifyAccountsFromFile({
   });
 
   if (headerRowNumbers.length === 0) {
-    const match = findBigAccountMatchInRows(
-      rawRows,
-      0,
-      rawRows.length - 1,
-      allMerchantIds,
-      allowSubstringMatch
-    );
-    if (match) {
-      identified.push(match);
+    if (hasUnverifiedRecognitionRow(0, rawRows.length - 1)) {
+      hasUnverifiedLongNumber = true;
+    } else {
+      const match = findBigAccountMatchInRows(
+        rawRows,
+        0,
+        rawRows.length - 1,
+        allMerchantIds,
+        allowSubstringMatch
+      );
+      if (match) {
+        identified.push(match);
+      }
     }
   }
 
-  return { accounts: identified, isSingleAccount };
+  return { accounts: identified, isSingleAccount, hasUnverifiedLongNumber };
 }
 
 function isMultiBigAccountMapping(mappings = []) {
@@ -3316,6 +3431,14 @@ function isMultiBigAccountMapping(mappings = []) {
       && normalizeCell(mapping && mapping.mappedField)
         === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
   });
+}
+
+// v3.2.22：MerchantId 由大账号决定（保存为多大账号标记，或映射配置里显示为「自己输入」），导入时需要识别或分配大账号
+function usesBigAccountMerchantMapping(mappings = []) {
+  return isMultiBigAccountMapping(mappings) || (Array.isArray(mappings) ? mappings : []).some((mapping) => (
+    normalizeCell(mapping && mapping.templateField) === 'MerchantId'
+    && normalizeCell(mapping && mapping.mappedField) === MERCHANT_ID_SELF_INPUT_OPTION
+  ));
 }
 
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」— 逐行按币种回填，不参与大账号识别与选择
@@ -3378,6 +3501,11 @@ function resolveDirectBigAccountRecognition({
   }
 
   for (const entry of (Array.isArray(fileEntries) ? fileEntries : [])) {
+    // v3.2.22：原表只有表头的文件没有交易、不需要大账号（与手动选择时不占位置同一口径），不参与识别；
+    //   调用方仍按完整的文件清单生成
+    if (isHeaderOnlyDetailRows(entry && entry.detailRows)) {
+      continue;
+    }
     const entryTemplateConfig = getEntryTemplateConfig({
       entry,
       fallbackTemplateConfig,
@@ -3402,13 +3530,26 @@ function resolveDirectBigAccountRecognition({
       (fileResult.accounts || []).map((account) => account.merchantId)
     );
 
-    if (identifiedMerchantIds.length === 0) {
-      return resolveRecognizedBigAccount({
+    // v3.2.22（B133 审查）：账号位置上有无法核对原值的长数字时，该文件按未识别处理（本函数只在至多一个维护选项时调用，
+    //   与普通未识别一样报错，不套用唯一选项；多个选项时由调用方的选择流程处理，该块不自动识别），不按其他段的识别结果
+    //   代替；报错时说明原因。不另走人工选择：选择窗口会覆盖同批每个文件、每个账号块的账号与币种，且结果会随文件顺序
+    //   变化（Codex 第四轮）
+    if (identifiedMerchantIds.length === 0 || fileResult.hasUnverifiedLongNumber) {
+      const unrecognized = resolveRecognizedBigAccount({
         extractedMerchantId: '',
         maintainedBigAccounts,
         sourceFileName: fileName,
         templateName
       });
+      if (!fileResult.hasUnverifiedLongNumber || unrecognized.status !== 'failed') return unrecognized;
+      return {
+        ...unrecognized,
+        // 只能确定识别窗口里有无法核对的长数字，不能确定它就是账号（可能是批次号等），提示不断言账号失真（Codex 第十二轮）
+        message: '账单表头上方的识别范围内有超出精度范围的数字（超过 15 位且存成了数字），无法核对原值，不能确认哪个值是账号，'
+          + '未自动识别大账号。文件里存的已可能是近似值，另存或改单元格格式都无法恢复：请从银行原系统把账号及表头上方的长编号按文本'
+          + '重新导出后重新导入。',
+        detailLines: Array.isArray(unrecognized.detailLines) ? unrecognized.detailLines.slice() : []
+      };
     }
 
     if (identifiedMerchantIds.length > 1) {
@@ -3473,18 +3614,6 @@ function resolvePreparedDirectBigAccountRecognition({ prepared, recognitionArgs 
   const decision = resolveDirectBigAccountRecognition(recognitionArgs);
   if (prepared.previewOnly) {
     prepared.directBigAccountRecognitionDecision = decision;
-  }
-  return decision;
-}
-
-function resolvePreparedFixedBigAccountAutoMatchDecision(prepared, resolveDecision) {
-  if (!prepared.previewOnly
-      && Object.hasOwn(prepared, 'fixedBigAccountAutoMatchDecision')) {
-    return prepared.fixedBigAccountAutoMatchDecision;
-  }
-  const decision = resolveDecision();
-  if (prepared.previewOnly) {
-    prepared.fixedBigAccountAutoMatchDecision = decision;
   }
   return decision;
 }
@@ -3603,6 +3732,10 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
     if (Array.isArray(nextRows.headerBreaks)) filteredRows.headerBreaks = [];
     if (Array.isArray(nextRows.skippedRows)) filteredRows.skippedRows = nextRows.skippedRows;
     if (Array.isArray(nextRows.simultaneousRows)) filteredRows.simultaneousRows = nextRows.simultaneousRows;
+    // v3.2.21：跨 Sheet 回填的统计与补丁按源文件整份记录，不随大账号分段筛选变化（导出回填后的原始账单用）
+    if (nextRows.crossSheetBackfillStats) filteredRows.crossSheetBackfillStats = nextRows.crossSheetBackfillStats;
+    if (Array.isArray(nextRows.crossSheetBackfillPatches)) filteredRows.crossSheetBackfillPatches = nextRows.crossSheetBackfillPatches;
+    if (nextRows.crossSheetBackfillSource) filteredRows.crossSheetBackfillSource = nextRows.crossSheetBackfillSource;
 
     return {
       filePath: entry.filePath,
@@ -3635,6 +3768,71 @@ function createErrorReport(payload) {
   return report;
 }
 
+// v3.2.21：「导入文件中没有账号存在交易数据」的出口。交易行全部因「跨 Sheet 回填」未配上而被移除时，与生成阶段的
+//   失败报告一样附上逐行跳过原因（报错文件保留配对值，活动日志不写，见 buildImportWarningDetailLines 的 forLog）。
+//   导入预检（prepare）阶段不生成报错文件：结果带 detailLines，由界面弹窗逐行列出，并可点击状态框再次查看
+//   （statement 控制器 applyStatementResult；离页期间返回的不弹窗，回到页面后点击状态框查看）。
+// v3.2.21：跨 Sheet 回填把全部交易都跳过（各文件没有会写入明细的行：只剩表头，或只剩收支都为空 / 0 的期初余额等说明行，
+//   与明细导出同一判定 hasDetailExportRow；收、支同时有值的行不算跳过，留给生成阶段报出原有的校验错误）时，大账号预检不再
+//   按「一个空分段」要求选择账户，直接按没有交易数据返回逐行跳过原因
+function isAllTransactionsSkippedByBackfill(fileEntries) {
+  const entries = Array.isArray(fileEntries) ? fileEntries : [];
+  return entries.length > 0
+    && entries.every((entry) => !(entry && Array.isArray(entry.detailRows) && hasDetailExportRow(entry.detailRows, { includeBothAmounts: true })))
+    && entries.some((entry) => Array.isArray(entry && entry.detailRows && entry.detailRows.issues)
+      && entry.detailRows.issues.some((issue) => issue && issue.type === 'cross-sheet-backfill-skipped'));
+}
+
+// v3.2.21：按文件名映射一次导入多个模板时，任一模板组的交易全部被「跨 Sheet 回填」跳过（组内各文件只剩表头）则整批取消
+//   （用户决定，2026-11-22：整组交易都配不上多半是规则或文件有误，修正后重新导入；不只跳过该组，避免空组参与大账号聚合、
+//   混合模式判定，以及余额补录后丢失其逐行原因）。逐行列出这些组的回填跳过（报错文件带配对值；活动日志只记行号与原因）
+function createBackfillEmptiedGroupsErrorResult(emptiedGroups, templateName) {
+  const fileEntries = (Array.isArray(emptiedGroups) ? emptiedGroups : []).flatMap((group) => (
+    Array.isArray(group && group.entries) ? group.entries : []
+  ));
+  const backfillWarnings = collectCrossSheetBackfillWarnings(fileEntries);
+  return createErrorResult({
+    step: '导入网银明细文件',
+    message: buildBackfillEmptiedGroupsMessage(fileEntries, backfillWarnings),
+    errorCode: 'NO_TRANSACTION_DATA',
+    detailLines: buildImportWarningDetailLines(backfillWarnings),
+    logDetailLines: buildImportWarningDetailLines(backfillWarnings, { forLog: true }),
+    templateName
+  });
+}
+
+function buildBackfillEmptiedGroupsMessage(fileEntries, backfillWarnings) {
+  const skippedCount = backfillWarnings.filter((warning) => warning && warning.type === 'cross-sheet-backfill-skipped').length;
+  const fileNames = (Array.isArray(fileEntries) ? fileEntries : []).map((entry) => path.basename(String((entry && entry.filePath) || '')));
+  const operationContext = archiveOperationContext.getStore();
+  const reviewHint = operationContext && operationContext.phase === 'prepare' ? '请点击状态框查看逐行原因' : '请点击状态框导出报错文件核对';
+  return `以下文件的交易全部被「跨 Sheet 回填」跳过（共${skippedCount}行），已取消本次导入，请核对规则或文件后重新导入（${reviewHint}）：${fileNames.join('、')}`;
+}
+
+function collectCrossSheetBackfillWarnings(fileEntries) {
+  return (Array.isArray(fileEntries) ? fileEntries : []).flatMap((entry) => {
+    const issues = entry && entry.detailRows && Array.isArray(entry.detailRows.issues) ? entry.detailRows.issues : [];
+    return issues.filter((issue) => issue && String(issue.type || '').startsWith('cross-sheet-backfill-'));
+  });
+}
+
+function createNoTransactionDataErrorResult(fileEntries, templateName) {
+  const backfillWarnings = collectCrossSheetBackfillWarnings(fileEntries);
+  const skippedCount = backfillWarnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped').length;
+  const operationContext = archiveOperationContext.getStore();
+  const reviewHint = operationContext && operationContext.phase === 'prepare' ? '请点击状态框查看逐行原因' : '请点击状态框导出报错文件核对';
+  return createErrorResult({
+    step: '导入网银明细文件',
+    message: skippedCount
+      ? `导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了${skippedCount}行，${reviewHint}）`
+      : '导入文件中没有账号存在交易数据',
+    errorCode: 'NO_TRANSACTION_DATA',
+    detailLines: backfillWarnings.length ? buildImportWarningDetailLines(backfillWarnings) : [],
+    logDetailLines: backfillWarnings.length ? buildImportWarningDetailLines(backfillWarnings, { forLog: true }) : null,
+    templateName
+  });
+}
+
 // persistedDetailLines：写入错误报告与活动日志的明细，默认同 detailLines。展示明细含账号等不宜落盘的内容时另给
 //   （v3.2.21：渠道余额方式冲突的错误对象带 persistedDetailLines，只记渠道、账户数与子模板）。
 // logMaskValues：落盘时须整体脱敏的已知账号（如渠道余额冲突的实际 MerchantId，含不是纯数字的账号）；不给时取 originalError 上的。
@@ -3646,6 +3844,8 @@ function createErrorResult({
   detailLines = [],
   persistedDetailLines = null,
   logMaskValues = null,
+  // v3.2.21：写入活动日志的明细（不传时取 originalError.logDetailLines，再没有时同 detailLines）
+  logDetailLines = null,
   context = {},
   templateName = '',
   originalError = null
@@ -3703,7 +3903,9 @@ function createErrorResult({
       `模板名：${recordedTemplateName || recordedContext.templateName || recordedContext.moduleName || 'N/A'}`,
       `错误摘要：${recordedMessage}`,
       `错误代码：${errorCode}`,
-      ...recordedDetailLines
+      ...(Array.isArray(logDetailLines)
+        ? logDetailLines
+        : (originalError && Array.isArray(originalError.logDetailLines) ? originalError.logDetailLines : recordedDetailLines))
     ]
   });
 
@@ -3743,6 +3945,53 @@ function markContinuationPrepareRejection(outcome, { keepErrorCodes = [] } = {})
   return { ...outcome, result: { ...outcome.result, preservesSession: true } };
 }
 
+// v3.2.22：只有表头的文件不再占账号块后，「没有交易数据」在预检阶段也会出现：此时未开始导入，
+//   标记 preservesSession，界面只提示原因、保留上一批的导出与补录入口。
+//   fileEntries 带有「跨 Sheet 回填」的逐行原因时按 v3.2.21 的方式报错（状态框可查看、导出逐行原因），不按未开始的拒绝只弹提示
+function createNoTransactionDataResult(templateName, prepared, fileEntries = []) {
+  if (collectCrossSheetBackfillWarnings(fileEntries).length) return createNoTransactionDataErrorResult(fileEntries, templateName);
+  const result = createErrorResult({
+    step: '导入网银明细文件',
+    message: '导入文件中没有账号存在交易数据',
+    errorCode: 'NO_TRANSACTION_DATA',
+    templateName
+  });
+  return prepared && prepared.previewOnly ? { ...result, preservesSession: true } : result;
+}
+
+// v3.2.22：整批文件的原表都只有表头（没有任何数据行）时没有可识别或分配大账号的交易
+function allEntriesHeaderOnly(fileEntries) {
+  return Array.isArray(fileEntries) && fileEntries.length > 0
+    && fileEntries.every((entry) => isHeaderOnlyDetailRows(entry && entry.detailRows));
+}
+
+// v3.2.22：不需要映射结果时判断整批原表是否都只有表头：逐文件按模板表头读原表（与映射同一读取口径：表头定位、
+//   表头以下非空行数 rowsBelowHeader，见 isHeaderOnlyDetailRows；同一文件变更检查），不映射、不还原长数字原文；
+//   见到第一份表头以下有数据的文件即返回 false。读取或表头定位失败（FileValidationError）时无法判断，返回 null，
+//   交给原路径按原口径报告；文件在确认期间变化等其他错误照常抛出
+function probeSourceFilesHeaderOnly({ template, inputFilePaths = [] }) {
+  const filePaths = normalizeInputFilePaths(inputFilePaths, { dedupe: false });
+  if (!filePaths.length) return false;
+  for (const inputFilePath of filePaths) {
+    let source;
+    try {
+      // 只用表头定位与表头以下的行数（都按读取库的值），不还原长数字原文
+      source = readRowsWithMetadata(inputFilePath, (template && template.headers) || [], {
+        readGuard: createStatementWorkbookReadGuard(inputFilePath)
+      });
+    } catch (error) {
+      if (!(error instanceof FileValidationError) || error.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) throw error;
+      return null;
+    }
+    const rows = Array.isArray(source && source.rows) ? source.rows : [];
+    const rowsBelowHeader = Number.isInteger(source && source.rowsBelowHeader)
+      ? source.rowsBelowHeader
+      : Math.max(0, rows.length - 1);
+    if (rowsBelowHeader > 0) return false;
+  }
+  return true;
+}
+
 function createBigAccountRecognitionErrorResult(resolution, context = {}) {
   return createErrorResult({
     step: '识别大账号',
@@ -3760,6 +4009,8 @@ function createWarningResult({
   detailReady = false,
   balanceReady = false,
   detailLines = [],
+  // v3.2.21：写入活动日志的明细（不传时同 detailLines）；报错文件保留核对所需原值，日志可只记行号与原因
+  logDetailLines = null,
   context = {},
   errorCode = 'BUSINESS_WARNING',
   errorType = '业务校验错误',
@@ -3775,12 +4026,12 @@ function createWarningResult({
     templateName
   });
   appendActivityLogEntry({
-    level: 'warn',
+    level: 'warning',
     message: `${step}告警`,
     details: [
       `模板名：${templateName || context.templateName || context.moduleName || 'N/A'}`,
       `告警摘要：${message}`,
-      ...detailLines
+      ...(Array.isArray(logDetailLines) ? logDetailLines : detailLines)
     ]
   });
 
@@ -3903,14 +4154,7 @@ function buildTemplateLibraryPayload() {
   const templates = database.listTemplateBundleEntries().map((entry) => {
     const template = database.getTemplateByKey(entry.templateKey) || database.getTemplateByName(entry.name);
     if (template) {
-      const orderConfig = readBigAccountOrder(ensureStorageRoot(), template.id);
-      if (orderConfig && Array.isArray(orderConfig.files) && orderConfig.files.length > 0) {
-        entry.bigAccountOrderConfig = orderConfig;
-      }
-      const mode = readBigAccountMode(ensureStorageRoot(), template.id);
-      if (mode === 'fixed') {
-        entry.bigAccountMode = mode;
-      }
+      // v3.2.22：账号顺序固定已去掉，模板包不再带大账号解析模式（bigAccountMode）与记住的顺序（bigAccountOrderConfig）。
       // v1.5.1: 导出账户映射；v3.2.15：渠道子模板的账户映射在渠道层，条目不带。
       if (!entry.channelName) {
         entry.accountMappings = database.listAccountMappings({ templateId: template.id }).map(toBundleAccountMapping);
@@ -3937,11 +4181,20 @@ function buildTemplateLibraryPayload() {
   };
 }
 
-// v3.2.21：逻辑取值候补含特征值，或用到费用账单「字段映射特殊处理」时写 v9；
+// 跨 Sheet 回填：用到原始账单预处理「跨 Sheet 回填」时写 v10；
+// v3.2.21：否则逻辑取值候补含特征值，或用到费用账单「字段映射特殊处理」时写 v9；
 // v3.2.19：否则用到拆分账单「费用账单」、两类过滤、重复账单过滤或逻辑取值时写 v8；否则任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v7；
 //   只用到「原始账单仅有币种无账户号」时写 v6；都未用到时写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
 function resolveTemplateBundleVersion(templates) {
   const entries = Array.isArray(templates) ? templates : [];
+  // 跨 Sheet 回填（v10）：原始账单预处理「跨 Sheet 回填」（开关是映射行，规则在条目 crossSheetBackfillRule）
+  const usesCrossSheetBackfill = entries.some((entry) => (
+    isCrossSheetBackfillEnabled(entry && entry.mappings)
+      || hasCrossSheetBackfillSettings(entry && entry.crossSheetBackfillRule)
+  ));
+  if (usesCrossSheetBackfill) {
+    return CROSS_SHEET_BACKFILL_BUNDLE_VERSION;
+  }
   const usesFeeFieldMapping = entries.some((entry) => {
     const meta = entry && entry.billSplitMeta;
     return Boolean(meta && (meta.feeFieldMappingEnabled === true || normalizeFeeFieldMappings(meta.feeFieldMappings).length > 0));
@@ -4165,6 +4418,8 @@ function readTemplateBundleFile(filePath) {
     featureFilters: upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : item.featureFilter),
     // v3.2.19（v8）：原始账单预处理的过滤规则（只规范化；开关在 mappings 中，生成前再校验）
     preprocessRowFilterRules: normalizeRowFilterRules(item.preprocessRowFilterRules),
+    // 跨 Sheet 回填（v10）：原始账单预处理「跨 Sheet 回填」规则（只规范化；开关在 mappings 中，生成前再校验）
+    crossSheetBackfillRule: normalizeCrossSheetBackfillRule(item.crossSheetBackfillRule),
     // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
     channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
     isParent: bundleVersion < 5 && Boolean(item.isParent),
@@ -4417,6 +4672,14 @@ function isPreprocessRowFilterEnabled(mappings) {
   ));
 }
 
+// v3.2.21：原始账单预处理「跨 Sheet 回填」是否勾选（开关是映射行）
+function isCrossSheetBackfillEnabled(mappings) {
+  return (Array.isArray(mappings) ? mappings : []).some((mapping) => (
+    normalizeCell(mapping && mapping.templateField) === CROSS_SHEET_BACKFILL_MAPPING_FIELD
+      && normalizeCell(mapping && mapping.mappedField) === CROSS_SHEET_BACKFILL_ENABLED_OPTION
+  ));
+}
+
 // v3.2.19：原始账单预处理「重复账单过滤」是否勾选（开关是映射行）
 function isDuplicateRowFilterEnabled(mappings) {
   return (Array.isArray(mappings) ? mappings : []).some((mapping) => (
@@ -4449,7 +4712,8 @@ function getBalanceTemplatePath() {
   return path.join(appRoot, 'assets', '余额账单模版.xlsx');
 }
 
-function buildImportWarningDetailLines(warnings) {
+// forLog：写入活动日志的版本——跨 Sheet 回填的配对值（可能是账号、订单号或含客户信息的描述）不写入，只记行号与原因
+function buildImportWarningDetailLines(warnings, { forLog = false } = {}) {
   const detailLines = [];
   const currencyWarnings = warnings.filter((warning) => warning.type === 'currency-unmapped');
   const skippedDetailWarnings = warnings.filter((warning) => warning.type === 'detail-row-skipped');
@@ -4471,6 +4735,81 @@ function buildImportWarningDetailLines(warnings) {
     detailLines.push('以下行的账单日期列是账单自带的合计标签，按合计行处理，未写入导出的明细账单：');
     summaryRowWarnings.forEach((warning) => {
       detailLines.push(`第${warning.rowNumber}行，账单日期列="${warning.rawValue || '(空)'}"`);
+    });
+  }
+
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」——未能回填而跳过的行、回填日期不在相邻交易日期之间的行
+  const crossSheetBackfillSkippedWarnings = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped');
+  const crossSheetBackfillDateWarnings = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-date-out-of-range');
+  const crossSheetBackfillMatchedEmptyWarnings = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-matched-empty');
+  // 各行前标明所属文件（行号是各文件自己的物理行号；一批多个文件、或会话中先后导入的文件，都能据此找到要核对的账单）。
+  //   forLog 只去掉配对值（可能是含客户信息的描述、订单号、对方账号）；文件名与 Sheet 名与活动日志其他条目同一口径保留
+  //   （导入成功记源文件路径、补录余额记银行账号），用于定位要核对的账单
+  //   同名文件（不同目录下的 Statement.xlsx）按路径末尾足以区分的几级标明（如「九月/Statement.xlsx」），不写完整路径（第三十轮审查）
+  const crossSheetBackfillFilePaths = [...new Set([
+    ...crossSheetBackfillSkippedWarnings, ...crossSheetBackfillMatchedEmptyWarnings, ...crossSheetBackfillDateWarnings
+  ].map((warning) => warning.sourceFilePath).filter(Boolean))];
+  // 按文件预先算好（与告警行数无关）：只有文件名相同的才需要比较更上层的目录
+  const crossSheetBackfillLabelByPath = new Map();
+  {
+    const tail = (items, depth) => items.slice(-depth).join('/');
+    const segmentsByName = new Map();
+    crossSheetBackfillFilePaths.forEach((filePath) => {
+      const segments = String(filePath).split(/[\\/]+/).filter(Boolean);
+      const name = segments[segments.length - 1] || '';
+      if (!segmentsByName.has(name)) segmentsByName.set(name, []);
+      segmentsByName.get(name).push({ filePath, segments });
+    });
+    segmentsByName.forEach((group) => {
+      group.forEach(({ filePath, segments }) => {
+        let depth = 1;
+        while (depth < segments.length && group.some((other) => other.filePath !== filePath
+          && tail(other.segments, depth) === tail(segments, depth))) {
+          depth += 1;
+        }
+        crossSheetBackfillLabelByPath.set(filePath, tail(segments, depth));
+      });
+    });
+  }
+  const crossSheetBackfillFileLabel = (warning) => (warning.sourceFilePath
+    ? crossSheetBackfillLabelByPath.get(warning.sourceFilePath) || ''
+    : warning.sourceFileName || '');
+  const crossSheetBackfillRowLabel = (warning) => {
+    const label = crossSheetBackfillFileLabel(warning);
+    return label ? `「${label}」第${warning.rowNumber}行` : `第${warning.rowNumber}行`;
+  };
+  if (crossSheetBackfillSkippedWarnings.length) {
+    detailLines.push('以下行命中「跨 Sheet 回填」的待回填行条件但未能回填，已跳过，未写入导出的明细账单：');
+    crossSheetBackfillSkippedWarnings.forEach((warning) => {
+      let detail = '';
+      if (warning.reason === 'no-source-row') {
+        detail = forLog
+          ? `（来源 Sheet「${warning.sourceSheetName}」中没有可配对且未被使用的行）`
+          : `（来源 Sheet「${warning.sourceSheetName}」中没有「${warning.sourceMatchField}」为 ${warning.matchKey} 且未被使用的行）`;
+      } else if (warning.sourceRowNumber) {
+        detail = `（来源 Sheet「${warning.sourceSheetName}」第${warning.sourceRowNumber}行）`;
+      }
+      const matchText = forLog ? '' : `，${warning.matchField}="${warning.matchValue || '(空)'}"`;
+      detailLines.push(
+        `${crossSheetBackfillRowLabel(warning)}${matchText}，原因：${warning.reasonText || warning.reason}${detail}`
+      );
+    });
+  }
+  if (crossSheetBackfillMatchedEmptyWarnings.length) {
+    detailLines.push('以下行「跨 Sheet 回填」已配上来源行，但来源行中要回填的字段都为空，未填入任何值（该来源行已被占用；该行是否写入明细仍按「过滤账单」等后续处理）：');
+    crossSheetBackfillMatchedEmptyWarnings.forEach((warning) => {
+      const fields = Array.isArray(warning.emptyFields) && warning.emptyFields.length ? `，为空的字段：${warning.emptyFields.join('、')}` : '';
+      detailLines.push(
+        `${crossSheetBackfillRowLabel(warning)}，来源 Sheet「${warning.sourceSheetName}」第${warning.sourceRowNumber}行${fields}`
+      );
+    });
+  }
+  if (crossSheetBackfillDateWarnings.length) {
+    detailLines.push('以下行「跨 Sheet 回填」的账单日期不在前后相邻交易的日期之间，未因此拦截（是否写入明细仍按「过滤账单」等后续处理），请人工核对配对是否正确：');
+    crossSheetBackfillDateWarnings.forEach((warning) => {
+      detailLines.push(
+        `${crossSheetBackfillRowLabel(warning)}，回填日期 ${warning.date}，前一笔 ${warning.prevDate || '(无)'}，后一笔 ${warning.nextDate || '(无)'}`
+      );
     });
   }
 
@@ -4582,6 +4921,20 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
 
   if (summaryRowCount > 0) {
     warningParts.push(`已跳过${summaryRowCount}条账单自带的合计行`);
+  }
+
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」
+  const crossSheetBackfillSkippedCount = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped').length;
+  const crossSheetBackfillDateCount = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-date-out-of-range').length;
+  if (crossSheetBackfillSkippedCount > 0) {
+    warningParts.push(`跨 Sheet 回填：${crossSheetBackfillSkippedCount}行未配上，已跳过`);
+  }
+  if (crossSheetBackfillDateCount > 0) {
+    warningParts.push(`跨 Sheet 回填：${crossSheetBackfillDateCount}行回填日期不在相邻交易日期之间，请核对`);
+  }
+  const crossSheetBackfillMatchedEmptyCount = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-matched-empty').length;
+  if (crossSheetBackfillMatchedEmptyCount > 0) {
+    warningParts.push(`跨 Sheet 回填：${crossSheetBackfillMatchedEmptyCount}行已配上但来源值为空，未填入，请核对`);
   }
 
   if (skippedDetailCount > 0) {
@@ -5372,7 +5725,9 @@ function buildTemplateSummary(template) {
       ? template.featureFilters.map((item) => ({ ...item }))
       : [],
     // v3.2.19：原始账单预处理「过滤账单」的过滤规则，供【规则设置】回显
-    preprocessRowFilterRules: normalizeRowFilterRules(template.preprocessRowFilterRules)
+    preprocessRowFilterRules: normalizeRowFilterRules(template.preprocessRowFilterRules),
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」规则，供【规则设置】回显（未设置为 null）
+    crossSheetBackfillRule: normalizeCrossSheetBackfillRule(template.crossSheetBackfillRule)
   };
 }
 
@@ -6935,7 +7290,8 @@ function registerAppHandlers() {
   // snapshot key = id + name + priority + enabled + JSON.stringify(config)
   function buildScenariosSnapshot(detailedEnabled, fundTransferDatePolicySignature = '') {
     const scenarioSnapshot = detailedEnabled
-      .map((s) => `${s.id}|${s.name}|${s.priority}|${s.enabled ? 1 : 0}|${JSON.stringify(s.config || {})}`)
+      // v3.2.22 B5：与 C4 同口径按 key 排序序列化，同语义 config 在库内往返后 key 顺序不同不再误报场景已变化
+      .map((s) => `${s.id}|${s.name}|${s.priority}|${s.enabled ? 1 : 0}|${stableJsonStringify(s.config || {})}`)
       .sort()
       .join('\n');
     return [
@@ -7012,26 +7368,11 @@ function registerAppHandlers() {
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
       const workingBankRows = structuredClone(bankStatementSession.rows);
-      // v3.0.11 需求3（批2）：银行行深拷已完成（原子 clone 后的步骤边界，非 clone 内部）→ 让出一次，再读大网关表。
-      await yieldRun('prepare-clone-bank');
-      // v2.1.16-beta.2 T1：网关行数据源从「资金对账不平 gatewayReconSession」切到链接表 linked_gateway_bill。
-      //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）。
-      // v3.0.7 需求6 修复（🔴 资金红线）：网关账单表（可达数百万行）改「按 Channel 过滤读」根治内存尖峰
-      //   （旧 readLinkedTableRows('gateway-bill') 全量读 + structuredClone 深拷，实测 65.7万行 ~1.2GB 尖峰先例）。
-      //   业务不变量（已确认）：对账永远同 Channel → 只读本批银行单出现过的 Channel 子集，绝不漏合法匹配
-      //   （任一银行行 B 的合法网关对手 G 必有 G.Channel===B.Channel∈bankChannels → 必在子集内）。
-      //   仓储一次 SQL 生成 exactRows + c3Rows：前者保持旧大小写敏感口径，后者仅供 C3 trim+NOCASE 预筛。
-      //   ⚠️ 删 structuredClone：gwRows 全程只读（R1/R2/R3.5/R5s2/R5s3 仅建索引/比对，modifications 只写 bankRows）
-      //     + 每次新解析 → 深拷无保护意义；银行行 structuredClone(bankStatementSession.rows)（上方 workingBankRows）
-      //     必须保留（常驻 session、引擎原地改它）。
-      const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
-      const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(bankChannels);
-      const workingGwRows = gatewayRowPools.exactRows;
-      const workingC3GwRows = gatewayRowPools.c3Rows;
-      // v3.0.11 需求3（批2）：网关账单大表读完（步骤边界）→ 让出一次，再读入金/调拨等链接表。
+      // v3.0.11 需求3（批2）：银行行深拷已完成（原子 clone 后的步骤边界，非 clone 内部）→ 让出一次，再读入金/退款等链接表。
       //   🔴 原子性前提（codex-P2 → 补强）：linked-table:import / delete-by-date-range 已纳入 bankStatementOperationLock，
-      //   run 全程持锁 → 此让出窗口内并发链接表改动被锁挡住（返回「正在处理中…」）→ gw 与后续 deposit/mid/recon 仍是一致快照。
-      await yieldRun('prepare-gw');
+      //   run 全程持锁 → 各让出窗口内并发链接表改动被锁挡住（返回「正在处理中…」）→ deposit/mid/recon/gw 是一致快照。
+      // v3.2.22：网关大表改在读账户映射之后读（见下方 prepare-gw），以便同一次扫描收集 R5s2 缺渠道诊断候选。
+      await yieldRun('prepare-clone-bank');
       // v2.1.16-beta.4 R5 场景4（中台退款订单回填）安全接线：
       //   入金表（链接表 tableKey='bank-deposit'，beta.3② 合法 tableKey）—— JPM-US 子链路用；无数据返回 []。
       //   refund order —— v2.1.16-beta.6 需求C 退款导入已开通：refundOrderSession 非 null 时注入真实退款行；未导入退款表时注入 []（引擎 no-op）。
@@ -7062,8 +7403,8 @@ function registerAppHandlers() {
         && r5s2Scenario.config.paymentOfflineBackfill
         && r5s2Scenario.config.paymentOfflineBackfill.enabled === true
       );
-      // v3.0.11 需求3（批2）：入金/退款/调拨链接表深拷群已完成（步骤边界）→ 让出一次，再做调拨对账单重派生+读取等剩余重活。
-      //   🔴 原子性前提同上（见 prepare-gw 处）：linked-table 写入已纳入 op-lock，run 持锁期间并发改表被挡 → 快照一致。
+      // v3.0.11 需求3（批2）：入金/退款链接表深拷群已完成（步骤边界）→ 让出一次，再做调拨对账单重派生、读网关大表等剩余重活。
+      //   🔴 原子性前提同上（见 prepare-clone-bank 处）：linked-table 写入已纳入 op-lock，run 持锁期间并发改表被挡 → 快照一致。
       await yieldRun('prepare-linked');
       // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
       //   默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
@@ -7075,56 +7416,53 @@ function registerAppHandlers() {
       );
       // v3.1.7：Payment 开启时强制使用派生调拨对账单。保留原配置值不落库改写，编排器据此输出兼容提示。
       const reconSourceMidEnabled = paymentOfflineEnabled || configuredReconSourceMidEnabled;
+      // v3.2.22（🔴 资金红线）：R5s2 走网关来源（取消勾选且未被 Payment 强制改走派生表）时，网关回填按本轮账户映射匹配。
+      const r5s2GatewaySourceEnabled = !!r5s2Scenario && !reconSourceMidEnabled;
       // v3.0.6 codex-pr74-fix P2（细化，🔴 资金红线）：需求3 DBS-Charge 资金校验（R3.5）是否启用 ——
       //   dispatchScenarios 已是 enabled 过滤后集合（见上方注释「无须再判 enabled」），存在 funcCategory='dbs-charge-fund-check'
       //   场景即下游会消费调拨对账单派生表（DBS-Charge seed 默认 enabled）。供重派生门控 + workingDispatchReconRows 门控共用。
       const dbsChargeScenarioEnabled = dispatchScenarios.some(
         (s) => s && s.config && s.config.funcCategory === 'dbs-charge-fund-check'
       );
-      // v3.0.6 codex-pr74-fix P2（🔴 资金红线）：读调拨对账单（readFundTransferReconRows）前，从当前 mid-allocation 实时重派生刷新持久表。
-      //   背景：建表迁移 ensureFundTransferReconSupport 仅 CREATE TABLE linked_fund_transfer_recon，不从既有 mid-allocation 回填；
-      //   且派生 rebuildFundTransferReconDerivation 原仅在「导入 mid-allocation」时触发。两者叠加 → v3.0.5 升级用户
-      //   （已有 mid-allocation 但未重导）隐藏表恒空 → R5s2 勾选路读空表 → 静默不回填（真实回归）。
-      //   故在此 run 入口、读取之前实时重派生覆盖持久表，再往下读：升级用户无需重导、永不读空/陈旧表、链接表管理显示同步。
-      //   范式照搬导入侧（src/main.js mid-allocation 落库后调用 + 函数内部 try/catch 隔离记 created:false）；
-      //   此处再加一层 try/catch + warn 日志。Payment 关闭时保留历史降级；Payment 开启时派生表是唯一数据源，
-      //   失败必须阻断，禁止读取陈旧派生表继续写 ReconciliationId。
-      //   ⚠️ 消费方门控（仿上方 paymentOfflineEnabled「防整表无谓载入」范式）：仅当下游真会读派生表
-      //   （需求2 勾选 reconSourceMidEnabled，或 需求3 dbsChargeScenarioEnabled）时才重派生；两者皆否 = 无消费方 → 跳过重派生，
-      //   不为大 mid-allocation 表白付全量读 + 2× 写。两门控默认均 true（R5s2 默认勾选 + DBS-Charge seed 默认 enabled），
-      //   故默认仍重派生 —— 升级回归修复不被削弱。
-      if (reconSourceMidEnabled || dbsChargeScenarioEnabled) {
-        try {
-          const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
-          if (fundTransferReconDerive && fundTransferReconDerive.created === false) {
-            if (paymentOfflineEnabled) {
-              const deriveError = new Error(
-                `Payment线下调拨运行前生成调拨对账单失败：${String(fundTransferReconDerive.error || '未知错误')}`
-              );
-              deriveError.code = 'payment-offline-recon-derive-failed';
-              throw deriveError;
-            }
-            appendActivityLogEntry({
-              level: 'warning',
-              source: 'main',
-              domain: 'fund-transfer-recon-derive',
-              message: '[调拨对账单] run 入口实时重派生失败，降级继续（读现有持久表）',
-              details: [String(fundTransferReconDerive.error || '')]
-            });
-          }
-        } catch (ftrRunErr) {
-          appendActivityLogEntry({
-            level: 'warning',
-            source: 'main',
-            domain: 'fund-transfer-recon-derive',
-            message: paymentOfflineEnabled
-              ? '[调拨对账单] run 入口实时重派生异常，Payment运行已阻断'
-              : '[调拨对账单] run 入口实时重派生异常，降级继续（读现有持久表）',
-            details: [ftrRunErr && ftrRunErr.message ? ftrRunErr.message : String(ftrRunErr)]
-          });
-          if (paymentOfflineEnabled) throw ftrRunErr;
-        }
-      }
+      // v3.2.22（🔴 资金红线）：账户映射整轮只读一次（派生、R5s2 网关来源与多对多检测器共用），并按消费方从当前
+      //   mid-allocation 实时重派生调拨对账单（v3.0.6 codex-pr74-fix P2 升级回归修复）。读映射失败、Payment 或网关来源开启时
+      //   重派生失败都会抛错，整轮失败，不读取下方派生表、不运行对账；其余重派生失败按历史降级读现有持久表。
+      //   详见 linked-derive-rebuild.js prepareRunFundTransferReconDerivation。
+      const {
+        accountMappingMap: fundTransferAccountMappingMap,
+        runWarnings: fundTransferDerivationWarnings
+      } = prepareRunFundTransferReconDerivation(
+        { database, buildFundTransferReconRows, appendActivityLogEntry },
+        { reconSourceMidEnabled, dbsChargeScenarioEnabled, r5s2GatewaySourceEnabled, paymentOfflineEnabled }
+      );
+      // v3.2.22：调拨对账单重派生完成（步骤边界）→ 让出一次，再读网关大表。
+      await yieldRun('prepare-linked');
+      // v2.1.16-beta.2 T1：网关行数据源从「资金对账不平 gatewayReconSession」切到链接表 linked_gateway_bill。
+      //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）。
+      // v3.0.7 需求6 修复（🔴 资金红线）：网关账单表（可达数百万行）改「按 Channel 过滤读」根治内存尖峰
+      //   （旧 readLinkedTableRows('gateway-bill') 全量读 + structuredClone 深拷，实测 65.7万行 ~1.2GB 尖峰先例）。
+      //   业务不变量（已确认）：对账永远同 Channel → 只读本批银行单出现过的 Channel 子集，绝不漏合法匹配
+      //   （任一银行行 B 的合法网关对手 G 必有 G.Channel===B.Channel∈bankChannels → 必在子集内）。
+      //   仓储一次 SQL 生成 exactRows + c3Rows：前者保持旧大小写敏感口径，后者仅供 C3 trim+NOCASE 预筛。
+      //   ⚠️ 删 structuredClone：gwRows 全程只读（R1/R2/R3.5/R5s2/R5s3 仅建索引/比对，modifications 只写 bankRows）
+      //     + 每次新解析 → 深拷无保护意义；银行行 structuredClone(bankStatementSession.rows)（上方 workingBankRows）
+      //     必须保留（常驻 session、引擎原地改它）。
+      const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
+      // v3.2.22（🔴 资金红线·可观测）：R5s2 走网关来源且账户映射非空时，读池的同一次扫描另暂存池外（exactRows 补集）
+      //   调拨方向、对账ID 非空、原账号属映射键或映射值的网关行：只存 id、诊断键摘要与渠道为空位（类型化数组），不保留
+      //   网关记录，R5 运行时不再二次全扫网关表。这些行不并入 workingGwRows / workingC3GwRows，任何轮次都不拿它匹配
+      //   （见下方 r5ChannelMissingDiagnosticSource）。
+      const r5ChannelMissingDiagnosticPrefilter = r5s2GatewaySourceEnabled
+        ? buildR5ChannelMissingDiagnosticPrefilter(fundTransferAccountMappingMap)
+        : null;
+      const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(
+        bankChannels,
+        r5ChannelMissingDiagnosticPrefilter ? { outOfPoolDiagnostic: r5ChannelMissingDiagnosticPrefilter } : undefined
+      );
+      const workingGwRows = gatewayRowPools.exactRows;
+      const workingC3GwRows = gatewayRowPools.c3Rows;
+      // v3.0.11 需求3（批2）：网关账单大表读完（步骤边界）→ 让出一次，再读调拨对账单派生表（原子性前提见 prepare-clone-bank 处）。
+      await yieldRun('prepare-gw');
       const workingReconRows = reconSourceMidEnabled
         ? structuredClone(database.readFundTransferReconRows() || [])
         : [];
@@ -7144,6 +7482,18 @@ function registerAppHandlers() {
       const workingFundTransferAuditReconRows = dbsChargeScenarioEnabled
         ? workingDispatchReconRows
         : workingReconRows;
+      // v3.2.22（🔴 资金红线·可观测）：R5s2 走网关来源时，由 R5s2 引擎在方向配置通过校验后，以当时的银行行算出键摘要，
+      //   只按 id 回读读池时暂存的、摘要对得上的池外候选，再按完整键与按方向收集的映射目标账号精确裁决，只做账户映射
+      //   缺渠道告警。run 全程持 op-lock（原子性前提见 prepare-clone-bank 处），回读与读池是同一份网关表。没有可对上的
+      //   调拨银行行时不回读；只保留方向、账号、币种、金额能对上银行行且无法确认同渠道的记录。
+      const r5ChannelMissingDiagnosticSource = r5ChannelMissingDiagnosticPrefilter
+        ? createR5ChannelMissingDiagnosticSource({
+          accountMappingMap: fundTransferAccountMappingMap,
+          bankChannels,
+          prefilter: r5ChannelMissingDiagnosticPrefilter,
+          readRowsByIds: (ids, onRow) => database.readGatewayBillRowsByIds(ids, onRow)
+        })
+        : null;
       // v3.0.8 需求3：进入 R1-R5 编排前让出一次（大表读已完成，下面是 CPU 密集的多轮对账）。
       await yieldRun('reconcile');
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
@@ -7165,9 +7515,14 @@ function registerAppHandlers() {
         // v3.1.1 self-review：调拨多对多只读审计入参独立于 R5 写入 gating。
         // R5 关闭但 R3.5 开启时仍注入 R3.5 已使用的调拨副本；编排器不得把它交给 R5。
         fundTransferAuditContext: { reconRows: workingFundTransferAuditReconRows },
+        // v3.2.22：R5s2 网关来源与 M2M 网关侧共用账户映射（调拨来源已在派生时映射）。
+        fundTransferAccountMappingMap,
+        // v3.2.22：池外空渠道网关调拨行的读取器，只供 R5s2 网关来源缺渠道告警。
+        fundTransferChannelMissingDiagnosticSource: r5ChannelMissingDiagnosticSource,
         // v3.1.1：R3.5、R5s2 两来源和 M2M 审计共享同一不可变日期策略；配置告警排在引擎告警之前。
         fundTransferDatePolicy,
-        initialWarnings: fundTransferPolicyResolution.warnings,
+        // v3.2.22：调拨对账单账户号转义歧义（大账号留空、不参与匹配）的结构化告警排在配置告警之后。
+        initialWarnings: [...fundTransferPolicyResolution.warnings, ...(fundTransferDerivationWarnings || [])],
         // v3.0.8 需求3：轮次边界进度上报（编排器在 R1→R2→R3.5→R4→R5 各轮完成后调；只读不写 processingResult）。
         onProgress
       });
@@ -7368,9 +7723,21 @@ function registerAppHandlers() {
       };
     },
     async execute(_event, prepared, taskContext) {
+    // v3.2.22：只有 writer 成功返回的输出才按路径结算；其余计划输出（写失败、写盘前被拒、因前序失败未执行）一律声明为
+    //   未产出、不按路径读取——用户选择覆盖的旧主文件、同一分钟同目录的上一批同名附属报表仍在原路径时，不能归档成本批产物。
+    const producedOutputKinds = new Set();
+    const settlePlannedOutputs = () => taskContext.settleArtifacts({
+      files: taskContext.fileEvidence.filePlan.outputs
+        .map((item, index) => (producedOutputKinds.has(prepared.outputKinds[index])
+          ? { artifactKey: item.artifactKey }
+          : { artifactKey: item.artifactKey, produced: false }))
+    });
     // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁（与 import/run 共享一把）。争用即返回失败。
     const opLock = tryAcquireBankStatementOpLock('export');
     if (!opLock.acquired) {
+      // v3.2.22：没抢到锁时一个文件都没写，计划输出全部声明未产出（不留待重试存档时按路径读到旧文件）；
+      //   锁由他人持有，不释放。
+      await settlePlannedOutputs();
       return { status: 'failed', message: opLock.message };
     }
     try {
@@ -7414,8 +7781,11 @@ function registerAppHandlers() {
           bankRows: [
             ...processingResult.modifiedRows,
             ...(Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : [])
-          ]
+          ],
+          // v3.2.22：登记临时文件归属，进程中断后由下次启动按登记回收。
+          writerOptions: { temporaryFileMarkerDir: getErrorReportTemporaryMarkerDir() }
         });
+        if (errorReport) producedOutputKinds.add('error-report');
       }
 
       // 主输出 savePath 已在 BOR/reserve 前取得；取消时不会落错误报告或业务文件。
@@ -7449,6 +7819,7 @@ function registerAppHandlers() {
         // v3.0.12 功能1：异常-人工判断命中银行行 → 主文件追加「异常-人工判断」sheet（空/null 时不加 sheet）
         manyToManyRows: processingResult.manyToManyReviewRows
       });
+      if (main) producedOutputKinds.add('main');
 
       // v2.1.9 N5 T26（spec §5.1-5.4 🔴 对外契约破坏性变更）：场景命中行独立报表
       //   v2.1.8 主输出 Sheet 3「命中场景行」撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
@@ -7460,6 +7831,18 @@ function registerAppHandlers() {
       //     writer 用 row._hitChannelId 反查 channels.label 渲染「匹配渠道」列
       //     通用 label='通用' / 非通用 label='name-ownerLocation'（与场景管理 UI 一致）
       let hitRowsReport = null;
+      // v3.2.22：附属报表写失败仍不阻塞主文件，但把未生成的报表与原因带回界面（如单元格超过 Excel 上限时报出工作表与
+      //   单元格），不只记日志——否则界面显示「已导出」，与本来就不需要该报表的情况无法区分。
+      const sideReportFailures = [];
+      //   活动日志只记固定文案与错误码，不记原始错误文本（可能带路径、单元格内容等业务数据）；原因随导出结果显示在界面。
+      const recordSideReportFailure = (label, logMessage, error) => {
+        appendActivityLogEntry({
+          level: 'warning',
+          message: logMessage,
+          details: [`错误码：${error && error.code ? error.code : '无'}；原因见导出界面状态框`]
+        });
+        sideReportFailures.push({ label, message: error && error.message ? error.message : String(error) });
+      };
       // v2.1.16-beta.2 self-review A：N5「命中场景行」报表只放 R2 命中行（带 _hitScenarioId）。
       //   编排器的 modifiedRows 含 R4/R5-only 改写行（无 _hitScenarioId）——它们进主输出 sheet1 标黄即可，
       //   不应进 N5 报表（否则「匹配渠道/匹配状态/命中场景」三列全空白，污染审计报表）。
@@ -7475,13 +7858,10 @@ function registerAppHandlers() {
             originalFilePath,
             { outputPath: outputByKind.get('hit-scenarios'), channels }
           );
+          if (hitRowsReport) producedOutputKinds.add('hit-scenarios');
         } catch (e) {
           // graceful — log 警告但不阻塞主流程返回
-          appendActivityLogEntry({
-            level: 'warning',
-            message: '[banking-statement-process] 命中场景行独立报表生成失败',
-            details: [e && e.message ? e.message : String(e)]
-          });
+          recordSideReportFailure('命中场景行报表', '[banking-statement-process] 命中场景行独立报表生成失败', e);
           hitRowsReport = null;
         }
       }
@@ -7496,12 +7876,9 @@ function registerAppHandlers() {
             processingResult.platformCleanupRows,
             outputByKind.get('platform-cleanup')
           );
+          if (platformCleanupReport) producedOutputKinds.add('platform-cleanup');
         } catch (e) {
-          appendActivityLogEntry({
-            level: 'warning',
-            message: '[banking-statement-process] 中台加款单剔除文件生成失败',
-            details: [e && e.message ? e.message : String(e)]
-          });
+          recordSideReportFailure('加款单剔除文件', '[banking-statement-process] 中台加款单剔除文件生成失败', e);
           platformCleanupReport = null;
         }
       }
@@ -7564,12 +7941,9 @@ function registerAppHandlers() {
             refundUnmatchedRowsForExport,
             outputByKind.get('refund-backfill')
           );
+          if (refundBackfillReport) producedOutputKinds.add('refund-backfill');
         } catch (e) {
-          appendActivityLogEntry({
-            level: 'warning',
-            message: '[banking-statement-process] 中台退款订单回填文件生成失败',
-            details: [e && e.message ? e.message : String(e)]
-          });
+          recordSideReportFailure('中台回填文件', '[banking-statement-process] 中台退款订单回填文件生成失败', e);
           refundBackfillReport = null;
         }
       }
@@ -7609,17 +7983,19 @@ function registerAppHandlers() {
         platformCleanupName: platformCleanupReport ? platformCleanupReport.fileName : null,
         // v2.1.16-beta.4 R5 场景4：renderer 用于状态框提示「中台退款订单回填文件已生成：{path}」（未生成时为 null）
         refundBackfillPath: refundBackfillReport ? refundBackfillReport.filePath : null,
-        refundBackfillName: refundBackfillReport ? refundBackfillReport.fileName : null
+        refundBackfillName: refundBackfillReport ? refundBackfillReport.fileName : null,
+        // v3.2.22：未生成的附属报表 [{ label, message }]（主文件已生成；界面逐条提示，需人工复核）
+        sideReportFailures
       };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     } finally {
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      // v3.0.11 需求3（批1）：导出结束统一释放互斥锁（含 cancelled / empty / ok 各早返回路径）。
-      releaseBankStatementOpLock();
+      try {
+        await settlePlannedOutputs();
+      } finally {
+        // v3.0.11 需求3（批1）：导出结束统一释放互斥锁（含 cancelled / empty / ok 各早返回路径；结算抛错也释放）。
+        releaseBankStatementOpLock();
+      }
     }
     }
   });
@@ -8627,14 +9003,6 @@ function registerAccountMappingHandlers() {
       const allTemplates = database.listTemplates();
       const validTemplateIds = new Set(allTemplates.map((t) => t.id));
 
-      // 获取迁移源数据的行数，用于完整性校验
-      const migrationSourceRows = database.listAllAccountMappings
-        ? database.listAllAccountMappings()
-        : [];
-      const uniqueSourceKeys = new Set(
-        migrationSourceRows.map((m) => `${normalizeCell(m.bankAccountId)}@@${normalizeCell(m.clearingAccountId)}`)
-      );
-
       const droppedRows = [];
       // v3.2.15（D7）：渠道子模板不再持有模板级账户映射，迁移分配只面向普通模板。
       const channelTemplateIds = new Set(allTemplates.filter((t) => t.channelId).map((t) => t.id));
@@ -8703,7 +9071,7 @@ function registerAccountMappingHandlers() {
 
 // v3.0.12 功能2（批A）：账户映射管理保存前校验（仿 validateAccountMappings，无币种 / 无模板维度）。
 //   - 两列皆空 → 跳过（空行不保存）；仅一列为空 → 报错。
-//   - 中台调拨单账户号去重（DB UNIQUE(mid_account_id) 兜底，这里先给友好提示）。
+//   - 链接表账户号（中台调拨单 / 网关对账单共用）去重（DB UNIQUE(mid_account_id) 兜底，这里先给友好提示）。
 //   - 长度护栏（≤128，防异常脏数据；不强加字符集正则，账号格式跨系统不一）。
 //   归一化（trim + String）由仓储 saveMappings 统一执行；本函数仅做完整性 / 唯一性 / 长度校验。
 function validateFundTransferAccountMappings(mappings) {
@@ -8741,7 +9109,7 @@ function validateFundTransferAccountMappings(mappings) {
     if (midAccountSeen.has(midAccountId)) {
       return {
         status: 'error',
-        message: '中台调拨单账户号不可重复，请重新确认'
+        message: '链接表账户号不可重复，请重新确认'
       };
     }
 
@@ -8787,7 +9155,8 @@ function registerFundTransferAccountMappingHandlers() {
 
       database.saveFundTransferAccountMappings(validationResult.mappings);
       // 🔴 资金红线：账户映射改写调拨对账派生的 big_account（批B buildFundTransferReconRows 用 getMappingMap 替换），
-      //   影响「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 → 失效已缓存对账结果，强制用户重跑后才能导出。
+      //   影响「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5；v3.2.22 起 R5s2 网关来源与多对多检测器网关侧也按此映射
+      //   → 失效已缓存对账结果，强制用户重跑后才能导出。
       //   （同 linked-table 变更范式：bank-statement:export 守卫只校验 scenariosSnapshot、不认账户映射变更，须在此清缓存兜底。）
       processingResult = null;
       clearLastErrorReport();
@@ -9135,6 +9504,17 @@ function validateTemplateConfiguration({
       return;
     }
 
+    if (targetField === CROSS_SHEET_BACKFILL_MAPPING_FIELD) {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: normalizedSourceField === CROSS_SHEET_BACKFILL_ENABLED_OPTION
+          ? CROSS_SHEET_BACKFILL_ENABLED_OPTION
+          : '',
+        mappedFields: []
+      });
+      return;
+    }
+
     if (targetField === REUSE_MODULE_MAPPING_FIELD) {
       const value = normalizedSourceField === '否' ? '否' : REUSE_MODULE_DEFAULT_OPTION;
       cleanedMappings.push({
@@ -9358,7 +9738,8 @@ function validateTemplateConfiguration({
       }
 
       item.currencies.forEach((currency) => {
-        const compositeKey = `${item.merchantId}@@${currency}`;
+        // B132：结构化键，账号或币种本身含 @@ 时不同账户不同键
+        const compositeKey = JSON.stringify([item.merchantId, currency]);
 
         if (duplicateKeys.has(compositeKey)) {
           throw new FileValidationError('FILE_READ', `大账号 ${item.merchantId} 的币种 ${currency} 重复`);
@@ -9417,8 +9798,66 @@ function validateTemplateConfiguration({
     // v3.2.19：原始账单预处理「过滤账单」（与拆分无关）
     usesPreprocessRowFilter: isPreprocessRowFilterEnabled(cleanedMappings),
     // v3.2.19：原始账单预处理「重复账单过滤」
-    usesDuplicateRowFilter: isDuplicateRowFilterEnabled(cleanedMappings)
+    usesDuplicateRowFilter: isDuplicateRowFilterEnabled(cleanedMappings),
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」
+    usesCrossSheetBackfill: isCrossSheetBackfillEnabled(cleanedMappings)
   };
+}
+
+// v3.2.21：跨 Sheet 回填不能回填的本表字段（保存时校验）——与生成时 buildMappedRows 同口径：映射给 Credit Amount、
+//   Debit Amount、Balance、Currency、MerchantId 与「按正负号取发生额」的源列（主映射与生效中的拆分映射），按字段区分发生额
+//   的条件与金额字段，拆分行的币种 / 收支 / 金额列，拆分的按正负号与按字段区分发生额，费用账单公式字段，以及这些映射所选
+//   「字段筛选特征值」的筛选字段。只取启用中的配置、模板表头中的字段；主映射取本次保存的，拆分、按字段区分发生额与特征值
+//   取已保存的配置（它们在各自的弹窗中保存）。
+const CROSS_SHEET_BACKFILL_PROTECTED_MAPPING_TARGETS = new Set([
+  'Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId', SIGNED_AMOUNT_MAPPING_FIELD
+]);
+const CROSS_SHEET_BACKFILL_PROTECTED_AREAS = new Set([
+  'amount-split', 'bill-split-row', 'bill-split-amount', 'bill-split-signed', 'bill-split-fee-formula'
+]);
+function collectCrossSheetBackfillExcludedTargets(templateId, mappings, headers) {
+  const headerSet = new Set((Array.isArray(headers) ? headers : []).map((header) => normalizeCell(header)).filter(Boolean));
+  const billSplitMeta = database.getBillSplitMeta(templateId) || {};
+  const references = templateHeaderUpdateTools.collectTemplateFieldReferences({
+    mappings: Array.isArray(mappings) ? mappings : [],
+    amountSplitRules: database.getAmountSplitRules(templateId) || [],
+    billSplitMappings: database.getBillSplitMappings(templateId) || [],
+    billSplitRows: database.getBillSplitRows(templateId) || [],
+    billSplitAmountRules: database.getBillSplitAmountRules(templateId) || [],
+    billSplitSignedAmountSourceField: normalizeCell(billSplitMeta.signedAmountSourceField),
+    billSplitFeeAmountFormula: Array.isArray(billSplitMeta.feeAmountFormula) ? billSplitMeta.feeAmountFormula : [],
+    billSplitFeeAmountFormulaEnabled: Boolean(billSplitMeta.feeAmountFormulaEnabled)
+  });
+  const excluded = new Set();
+  references.forEach((reference) => {
+    if (!reference.active || !headerSet.has(reference.field)) return;
+    const protectedMapping = (reference.area === 'mapping' || reference.area === 'bill-split-mapping')
+      && CROSS_SHEET_BACKFILL_PROTECTED_MAPPING_TARGETS.has(reference.target);
+    if (protectedMapping || CROSS_SHEET_BACKFILL_PROTECTED_AREAS.has(reference.area)) {
+      excluded.add(reference.field);
+    }
+  });
+  // 受保护的目标字段选了「字段筛选特征值」时，实际读取的是该特征值的筛选字段（与生成时同口径：主映射始终生效，
+  //   拆分映射在启用拆分且不复用模块映射时生效）
+  const mappingList = Array.isArray(mappings) ? mappings : [];
+  const switchValue = (field) => normalizeCell((mappingList.find((mapping) => (
+    normalizeCell(mapping && mapping.templateField) === field
+  )) || {}).mappedField);
+  const billSplitMappingActive = switchValue(BILL_SPLIT_MERGE_MAPPING_FIELD) === BILL_SPLIT_MERGE_ENABLED_OPTION
+    && switchValue(REUSE_MODULE_MAPPING_FIELD) === '否';
+  const template = database.getTemplate(templateId);
+  const featureFilterById = new Map((template && Array.isArray(template.featureFilters) ? template.featureFilters : [])
+    .map((featureFilter) => [normalizeCell(featureFilter && featureFilter.id), featureFilter]));
+  mappingList
+    .concat(billSplitMappingActive ? database.getBillSplitMappings(templateId) || [] : [])
+    .forEach((mapping) => {
+      if (normalizeCell(mapping && mapping.mappedField) !== FEATURE_FILTER_MAPPING_FIELD) return;
+      if (!CROSS_SHEET_BACKFILL_PROTECTED_MAPPING_TARGETS.has(normalizeCell(mapping.templateField))) return;
+      const featureFilter = featureFilterById.get(normalizeCell(getFeatureFilterRef(mapping)));
+      const field = normalizeCell(featureFilter && featureFilter.sourceField);
+      if (field && headerSet.has(field)) excluded.add(field);
+    });
+  return Array.from(excluded);
 }
 
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」的保存校验（spec §4.1、§4.2）。
@@ -9553,7 +9992,7 @@ function createStatementChannelErrorResult(step, error, context = {}) {
 // v3.2.15【导入子模板】（spec §4.4，D9）：表头规则同【导入模板】；模板名按渠道编号自动生成，总是新建，不占用失败的编号。
 function importStatementChildTemplate(channelId, selectedPath) {
   try {
-    const headers = extractHeaders(selectedPath);
+    const headers = extractStatementTemplateHeaders(selectedPath);
     const conflict = findConflictingTemplateByHeaders(headers, null);
     if (conflict) {
       return createErrorResult({
@@ -9643,7 +10082,7 @@ function createTemplateHeadersDuplicateResult(conflict) {
 // 预检：表头能读出且与所有已有模板都不相同，才算新模板并登记待命名；表头重复沿用原报错，不弹命名框。
 function prepareOrdinaryTemplateImport(ownerId, selectedPath) {
   try {
-    const headers = extractHeaders(selectedPath);
+    const headers = extractStatementTemplateHeaders(selectedPath);
     const conflict = findConflictingTemplateByHeaders(headers, null);
     if (conflict) {
       return createTemplateHeadersDuplicateResult(conflict);
@@ -9716,7 +10155,7 @@ function importOrdinaryTemplate(event, options = {}, selectedPath) {
   const { templateName, bankName, region } = checked.name;
   pendingTemplateImports.consume(importToken, ownerId);
   try {
-    const headers = extractHeaders(selectedPath);
+    const headers = extractStatementTemplateHeaders(selectedPath);
     if (JSON.stringify(headers) !== JSON.stringify(pending.headers)) {
       return createErrorResult({
         step: '导入模板文件',
@@ -10236,6 +10675,19 @@ function registerTemplateHandlers() {
       } else if (templateConfiguration.usesPreprocessRowFilter) {
         validateRowFilterRules(template.preprocessRowFilterRules, template.headers, preprocessRuleOptions);
       }
+      // v3.2.21：原始账单预处理「跨 Sheet 回填」规则同口径：勾选时须设置完整、本表字段在模板表头中、回填字段不能是
+      //   发生额 / 余额 / 币种所用的源列；未勾选时只规范化保存（保留草稿）。
+      const crossSheetBackfillOptions = {
+        excludedTargetFields: collectCrossSheetBackfillExcludedTargets(payload.templateId, templateConfiguration.mappings, template.headers)
+      };
+      let crossSheetBackfillRule = null;
+      if (payload.crossSheetBackfillRule && typeof payload.crossSheetBackfillRule === 'object') {
+        crossSheetBackfillRule = templateConfiguration.usesCrossSheetBackfill
+          ? validateCrossSheetBackfillRule(payload.crossSheetBackfillRule, template.headers, crossSheetBackfillOptions)
+          : (normalizeCrossSheetBackfillRule(payload.crossSheetBackfillRule) || {});
+      } else if (templateConfiguration.usesCrossSheetBackfill) {
+        validateCrossSheetBackfillRule(template.crossSheetBackfillRule, template.headers, crossSheetBackfillOptions);
+      }
 
       // v1.5.3 R2 round 3 (Codex Finding 5)：透传 preserveOwn
       // 默认 false（向后兼容旧行为：DELETE all + INSERT all，caller 接管 own 全集）
@@ -10256,7 +10708,8 @@ function registerTemplateHandlers() {
           channelAssignment,
           currencyBigAccounts: templateConfiguration.currencyBigAccounts,
           billSplitRowFilterRules,
-          preprocessRowFilterRules
+          preprocessRowFilterRules,
+          crossSheetBackfillRule
         }
       );
       // v3.2.21：日期格式决定交易归属日，变化时在落库后立即留痕——不受随后模板库文件同步失败影响
@@ -10681,7 +11134,7 @@ function registerTemplateHandlers() {
           if (bundleConflict) {
             skippedCount += 1;
             appendActivityLogEntry({
-              level: 'warn',
+              level: 'warning',
               message: `Bundle 导入跳过模板「${entry.name}」：表头与已有模板「${bundleConflict.name}」重复`
             });
             return;
@@ -10745,7 +11198,9 @@ function registerTemplateHandlers() {
               preserveOwn: false,
               featureFilters: bundleFeatureFilters,
               currencyBigAccounts: validated.currencyBigAccounts,
-              preprocessRowFilterRules: Array.isArray(entry.preprocessRowFilterRules) ? entry.preprocessRowFilterRules : []
+              preprocessRowFilterRules: Array.isArray(entry.preprocessRowFilterRules) ? entry.preprocessRowFilterRules : [],
+              // v3.2.21：包内没有回填规则时清空（覆盖导入以包为准）
+              crossSheetBackfillRule: entry.crossSheetBackfillRule || {}
             }
           );
 
@@ -10771,18 +11226,7 @@ function registerTemplateHandlers() {
           database.saveBillSplitMappings(template.id, normalizedBillSplitMappings);
 
           applyBundleBillSplitConfig(template.id, entry);
-
-          if (entry.bigAccountOrderConfig && Array.isArray(entry.bigAccountOrderConfig.files)) {
-            writeBigAccountOrder(ensureStorageRoot(), template.id, entry.bigAccountOrderConfig);
-          } else {
-            writeBigAccountOrder(ensureStorageRoot(), template.id, { assignments: [] });
-          }
-
-          writeBigAccountMode(
-            ensureStorageRoot(),
-            template.id,
-            entry.bigAccountMode === 'fixed' ? 'fixed' : 'unfixed'
-          );
+          // v3.2.22：旧模板包里的 bigAccountMode / bigAccountOrderConfig（账号顺序固定，已去掉）忽略，不报错。
 
           if (existingTemplate) {
             updatedCount += 1;
@@ -12026,6 +12470,13 @@ function buildStatementGenerationConfig({
   const billSplitMergeConfig = buildBillSplitMergeConfig(template, selectedMappings, { exportTargetFields: orderedTargetFields });
 
   let currencyMappings = [];
+  const readCurrencyMappingTable = () => {
+    const mappings = currencyMappingCache && Array.isArray(currencyMappingCache.mappings)
+      ? currencyMappingCache.mappings
+      : loadCurrencyMappings(getCurrencyMappingTablePath());
+    if (currencyMappingCache) currencyMappingCache.mappings = mappings;
+    return mappings;
+  };
   // v3.2.19：根据字段值过滤账单时命中行拆分出的币种也按币种映射表规范化（buildMappedRows），按实际下发的规则加载映射表
   const usesBillSplitRowFilter = Boolean(billSplitMergeConfig.enabled
     && Array.isArray(billSplitMergeConfig.rowFilterRules)
@@ -12036,16 +12487,10 @@ function buildStatementGenerationConfig({
     !selectedCurrency &&
     !currencyMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)
   )) {
-    const currencyMappingTablePath = getCurrencyMappingTablePath();
-
-    if (!fs.existsSync(currencyMappingTablePath)) {
+    if (!fs.existsSync(getCurrencyMappingTablePath())) {
       throw new FileValidationError('FILE_READ', '未找到币种映射表，请确认文件已放入 assets 目录');
     }
-
-    currencyMappings = currencyMappingCache && Array.isArray(currencyMappingCache.mappings)
-      ? currencyMappingCache.mappings
-      : loadCurrencyMappings(currencyMappingTablePath);
-    if (currencyMappingCache) currencyMappingCache.mappings = currencyMappings;
+    currencyMappings = readCurrencyMappingTable();
   }
   // v3.2.18：模板【更新】后映射仍引用已删除的字段时拒绝生成（否则该列静默输出空值），在读取文件与写出之前拦截。
   templateHeaderUpdateTools.assertTemplateFieldReferencesAvailable(template, {
@@ -12063,9 +12508,22 @@ function buildStatementGenerationConfig({
     preprocessRowFilterRules: template && Array.isArray(template.preprocessRowFilterRules)
       ? template.preprocessRowFilterRules
       : [],
+    crossSheetBackfillRule: template ? template.crossSheetBackfillRule || null : null,
     featureFilters: template && Array.isArray(template.featureFilters) ? template.featureFilters : []
   });
   const preprocessRowFilterRules = buildPreprocessRowFilterRules(template, selectedMappings);
+  const crossSheetBackfillRule = buildCrossSheetBackfillRule(template, selectedMappings);
+  // v3.2.21：跨 Sheet 回填按金额识别时认作币种的代码取自币种映射表，与输出 Currency 是否经映射表无关
+  //   （固定币种、所选大账号时同样加载）；映射表缺失时由回填模块用内置常见代码。
+  let crossSheetBackfillCurrencyCodes = null;
+  if (crossSheetBackfillRule && crossSheetBackfillRule.matchMode === 'amount') {
+    const tableMappings = currencyMappings.length || !fs.existsSync(getCurrencyMappingTablePath())
+      ? currencyMappings
+      : readCurrencyMappingTable();
+    crossSheetBackfillCurrencyCodes = tableMappings
+      .map((mapping) => normalizeCell(mapping && mapping.englishCode).toUpperCase())
+      .filter(Boolean);
+  }
   const featureFilters = resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig);
   const currencyBigAccountMapping = isCurrencyOnlyTemplate
     ? buildCurrencyBigAccountMappingConfig(template, outputName)
@@ -12092,6 +12550,9 @@ function buildStatementGenerationConfig({
     featureFilters,
     currencyBigAccountMapping,
     preprocessRowFilterRules,
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」规则（未勾选为 null）与按金额识别用的币种代码
+    crossSheetBackfillRule,
+    crossSheetBackfillCurrencyCodes,
     // v3.2.19：原始账单预处理「重复账单过滤」——映射时为源行算指纹，导入时跨文件查重（spec §8.3）
     duplicateRowFilterEnabled: isDuplicateRowFilterEnabled(selectedMappings),
     dateParseOrder: template.dateFormat || 'auto'
@@ -12115,6 +12576,26 @@ function buildPreprocessRowFilterRules(template, selectedMappings) {
     throw new FileValidationError(
       'PREPROCESS_ROW_FILTER_MISSING',
       `模板「${normalizeCell(template && template.name)}」已勾选原始账单预处理「过滤账单」，但过滤规则未设置完整（${error.message}），`
+        + '请在映射关系管理中点击【规则设置】设置并保存后重新导入'
+    );
+  }
+}
+
+// v3.2.21：原始账单预处理「跨 Sheet 回填」——勾选时下发规则（buildMappedRows 回填待回填行、跳过配不上的行）；未勾选返回 null。
+// 勾选了却没有完整规则时拒绝生成。本表字段是否仍在模板表头由失效引用拦截负责，是否在源文件表头由 buildMappedRows 校验。
+function buildCrossSheetBackfillRule(template, selectedMappings) {
+  if (!isCrossSheetBackfillEnabled(selectedMappings)) {
+    return null;
+  }
+  try {
+    return validateCrossSheetBackfillRule(template && template.crossSheetBackfillRule, null);
+  } catch (error) {
+    if (!(error instanceof FileValidationError)) {
+      throw error;
+    }
+    throw new FileValidationError(
+      'CROSS_SHEET_BACKFILL_MISSING',
+      `模板「${normalizeCell(template && template.name)}」已勾选原始账单预处理「跨 Sheet 回填」，但规则未设置完整（${error.message}），`
         + '请在映射关系管理中点击【规则设置】设置并保存后重新导入'
     );
   }
@@ -12451,15 +12932,18 @@ function buildMappedRowsForFile({
     },
     currencyBigAccountMapping: config.currencyBigAccountMapping || null,
     preprocessRowFilterRules: config.preprocessRowFilterRules || null,
+    crossSheetBackfillRule: config.crossSheetBackfillRule || null,
+    crossSheetBackfillCurrencyCodes: config.crossSheetBackfillCurrencyCodes || null,
     duplicateRowKeys: Boolean(config.duplicateRowFilterEnabled),
     dateParseOrder: config.dateParseOrder,
     readOptions: {
       readGuard: createStatementWorkbookReadGuard(inputFilePath),
-      onWorkbookRows(rawRows) {
+      onWorkbookRows(rawRows, { headerRowNumbers = [] } = {}) {
         provisionalRecognitionBasis = buildBigAccountRecognitionBasis({
           rawRows,
           expectedSourceHeaders: config.template.headers,
-          accountMappingByBankId: config.accountMappingByBankId
+          accountMappingByBankId: config.accountMappingByBankId,
+          matchedHeaderRowNumbers: headerRowNumbers
         });
       }
     }
@@ -12581,15 +13065,8 @@ function buildDuplicateReviewConfigStamp(templateIds) {
       generationConfig = { error: String(error && error.message || error) };
     }
     // 拆分/合并的原始元数据（正负号 / 按字段取发生额的指定账单序号等）也直接计入：不论当前是否生效，变化即重新确认
-    // 大账号「固定模式」与记住的顺序（按记住的顺序自动分配大账号时决定各段账号）：存于模板配置以外，一并计入
-    let bigAccountSelection;
-    try {
-      bigAccountSelection = [readBigAccountMode(ensureStorageRoot(), id), readBigAccountOrder(ensureStorageRoot(), id)];
-    } catch (error) {
-      bigAccountSelection = { error: String(error && error.message || error) };
-    }
-    return [id, templateConfig, database.listEffectiveAccountMappings(config.template), database.getBillSplitMeta(id), generationConfig,
-      bigAccountSelection];
+    //   （v3.2.22 起不再有大账号「固定模式」与记住的顺序，不计入）
+    return [id, templateConfig, database.listEffectiveAccountMappings(config.template), database.getBillSplitMeta(id), generationConfig];
   }))).digest('hex');
 }
 
@@ -12867,6 +13344,11 @@ function assertStatementEntriesWritable(options) {
   return statementGenerationHelpers.assertStatementEntriesWritable(options);
 }
 
+// v3.2.22 B113：多组校验共用计数记下的无法写入的字符，各组校验完后一并拒绝（列出全批前 20 处与总数）
+function assertNoCollectedUnwritableText(found) {
+  return statementGenerationHelpers.assertNoUnwritableRowText(found);
+}
+
 // v1.5.2 #9 修复：按文件名映射模板导入多个文件匹配不同模板时，按 matchedTemplateId 分组，
 // 每组独立生成明细+余额文件，确保余额账单的银行名称/所在地使用各自模板的值。
 // v1.5.2：合并多组生成的 xlsx 文件（直接操作单元格，保留日期/数字格式）
@@ -12927,6 +13409,8 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
       font: { ...existingFont, name: 'Courier New' }
     };
   }
+  // v3.2.22 B113：读回时字面 _xHHHH_ 已还原成原文，写出前须与单组写出同样转义，否则合并文件中的流水号等被改写
+  prepareWorkbookTextForWrite(baseWb);
   fs.mkdirSync(path.dirname(mergedOutputPath), { recursive: true });
   applyWatermark(baseWb);
   XLSXStyle.writeFile(baseWb, mergedOutputPath);
@@ -13429,6 +13913,8 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
   const balanceModeConflictGroups = [];
   const balanceRowIssueGroups = [];
   const issueLineBudget = { remaining: 200 };
+  // 各组无法写入的字符共用计数，校验完一并拒绝
+  const unwritableText = { total: 0, labels: [] };
   // 其他组的错误（如映射失效）暂存，先完成各渠道的余额校验；有渠道余额错误时优先报出，否则照常抛出
   let otherError = null;
   for (const group of generationGroups) {
@@ -13459,7 +13945,7 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
         issueLineBudget
       });
       // 写出前的检查（收支同时有值、账单日期等）在任何组写出余额与种子之前做完
-      assertStatementBatchWritable({ config: groupGenConfig, preparedBatch: groupPreparedBatch, includeBalance: true });
+      assertStatementBatchWritable({ config: groupGenConfig, preparedBatch: groupPreparedBatch, includeBalance: true, unwritableText });
       groupPlans.push({ config: groupGenConfig, preparedBatch: groupPreparedBatch });
     } catch (error) {
       // v3.2.21（D3）：补录重算同样汇总各渠道的冲突账户与缺字段的行，在写种子、生成之前一并阻断
@@ -13482,6 +13968,7 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
     throw buildChannelBalancePlanningError(balanceModeConflictGroups, balanceRowIssueGroups);
   }
   if (otherError) throw otherError;
+  assertNoCollectedUnwritableText(unwritableText);
   return { scope, generationGroups, groupPlans, skippedGroups };
 }
 
@@ -13503,7 +13990,7 @@ function regenerateVirtualTemplateBalanceFromSession(
   const skippedCount = skippedGroups.length;
   for (const { templateIds, fileCount } of skippedGroups) {
     appendActivityLogEntry({
-      level: 'warn',
+      level: 'warning',
       message: `余额重新生成时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${fileCount} 个文件的数据未包含`
     });
   }
@@ -13587,6 +14074,90 @@ function regenerateVirtualTemplateBalanceFromSession(
   };
 }
 
+// v3.2.22 B45：多模板写出期间的系统异常（如导出文件被占用）且本批写出的文件都已还原：导入入口只提示原因
+//   （preservesSession，上一批的会话、导出与补录入口不变），不按失败的导入清空上一批。业务校验失败仍走普通失败处理
+//   （界面列出明细、可导出报错文件）；预检、新鲜度失败不经此处。
+function isRestoredStatementRuntimeFailure(error) {
+  return isStatementOutputsRestored(error)
+    && !(error instanceof FileValidationError)
+    && error.code !== STATEMENT_SOURCE_FRESHNESS_FAILURE.code;
+}
+
+// 不调用 createErrorResult：上一批的状态框与可导出的报错文件保持不变（不替换 lastErrorReport），异常堆栈可能含内部文件名
+//   （含账号），不写入可导出的报告。诊断尽力写入日志文件与活动日志（不含路径），写不出不影响返回（导出盘已满或只读时）。
+// 写日志前去掉异常消息（Codex 第六轮）：Node 文件异常的消息带完整路径，内部文件名含完整账号；保留错误名、代码、系统调用与调用栈
+function statementOutputErrorForLog(error) {
+  const code = error && error.code ? String(error.code) : '';
+  const syscall = error && error.syscall ? String(error.syscall) : '';
+  const frames = String((error && error.stack) || '').split('\n').filter((line) => /^\s+at\s/.test(line));
+  const header = `${(error && error.name) || 'Error'}${code ? `（${code}${syscall ? `，${syscall}` : ''}）` : ''}：异常消息可能含内部文件名，已省略`;
+  return { stack: [header, ...frames].join('\n') };
+}
+
+function createRestoredStatementRuntimeFailureResult(error, { step, errorCode }) {
+  try {
+    appendLog(ensureStorageRoot(), statementOutputErrorForLog(error));
+  } catch (_logError) {
+    // 诊断落盘尽力而为
+  }
+  try {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'statement',
+      message: `${step}失败，已还原为导入前的状态`,
+      details: [`错误代码：${errorCode}`, `系统错误：${error && error.code ? error.code : '未知'}`]
+    });
+  } catch (_logError) {
+    // 同上
+  }
+  return {
+    status: 'error',
+    message: '生成失败（可能是导出文件正被其他程序占用），已还原为导入前的状态，请关闭占用的文件后重新导入',
+    errorCode,
+    errorReportReady: false,
+    preservesSession: true
+  };
+}
+
+// v3.2.22 B45（D7）：还原不完整（STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE）。报错文件尽力写入：导出所在的数据目录已满或只读
+//   （正是还原失败的常见原因）时写报错文件也会失败，此时仍返回给出未还原数量与恢复清单位置的消息，不让写报错文件的异常
+//   盖掉恢复指引；活动日志尽力只记错误代码。
+function createRollbackIncompleteErrorResult(options) {
+  const reportBefore = lastErrorReport;
+  try {
+    return createErrorResult(options);
+  } catch (_reportError) {
+    // 报错文件已写出、之后写活动日志失败：照常指向本次的报错文件
+    if (lastErrorReport && lastErrorReport !== reportBefore) {
+      return {
+        status: 'error',
+        message: options.message,
+        errorReportReady: true,
+        errorReportFileName: lastErrorReport.fileName
+      };
+    }
+    try {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'statement',
+        message: `${options.step}失败，且有文件未能自动还原（报错文件未能写出）`,
+        details: [`错误代码：${options.errorCode}`]
+      });
+    } catch (_logError) {
+      // 尽力而为
+    }
+    return {
+      status: 'error',
+      message: options.message,
+      errorCode: options.errorCode,
+      detailLines: Array.isArray(options.detailLines) ? options.detailLines.slice() : [],
+      errorReportReady: false
+    };
+  }
+}
+
 function generateMultiTemplateGroupFiles({
   fileEntries,
   fallbackTemplateConfig,
@@ -13632,6 +14203,8 @@ function generateMultiTemplateGroupFiles({
   const isMultiBigAccountConfig = (config) => normalizeCell((config.exportMappings || []).find(
     (m) => normalizeCell(m.templateField) === 'MerchantId'
   )?.mappedField) === multiBigAccountMarker;
+  // 各组无法写入的字符共用计数，校验完一并拒绝（Codex 第六轮）
+  const unwritableText = { total: 0, labels: [] };
   // 其他组的错误（如映射失效）暂存，先完成各渠道的余额校验；有渠道余额错误时优先报出，否则照常抛出
   let otherError = null;
   for (const group of generationGroups) {
@@ -13707,13 +14280,15 @@ function generateMultiTemplateGroupFiles({
         issueLineBudget
       });
       // 写出前的检查（收支同时有值、账单日期等）在任何组写出、移除旧会话条目之前做完
-      assertStatementBatchWritable({ config: groupConfig, preparedBatch: groupPreparedBatch });
+      assertStatementBatchWritable({ config: groupConfig, preparedBatch: groupPreparedBatch, unwritableText });
 
       groupPlans.push({
         groupTemplateConfig,
         groupConfig,
         effectiveEntries,
-        groupPreparedBatch
+        groupPreparedBatch,
+        // v3.2.21：跨 Sheet 回填跳过了该组全部交易（组内各文件没有会写入明细的行）
+        backfillEmptied: isAllTransactionsSkippedByBackfill(effectiveEntries)
       });
     } catch (error) {
       // v3.2.21（D3）：各渠道的冲突账户与缺字段的行汇总后一并阻断（仍在副作用之前）
@@ -13734,7 +14309,26 @@ function generateMultiTemplateGroupFiles({
   if (balanceModeConflictGroups.length || balanceRowIssueGroups.length) {
     throw buildChannelBalancePlanningError(balanceModeConflictGroups, balanceRowIssueGroups);
   }
+  // v3.2.21：任一组的交易全部被跨 Sheet 回填跳过时整批失败（用户决定，2026-11-22；导入预检已在大账号选择之前拦下，见
+  //   handleFilenameMappingImport）。这里在改动会话（替换同路径的旧条目）与写出之前兜底，显式报错（组内留有带日期的期初余额
+  //   等说明行时生成也取得到账单日期，不能靠生成失败），失败报告带这些组的逐行回填跳过
+  const backfillEmptiedPlans = groupPlans.filter((plan) => plan.backfillEmptied);
+  if (backfillEmptiedPlans.length) {
+    const backfillWarnings = backfillEmptiedPlans
+      .flatMap((plan) => (Array.isArray(plan.groupPreparedBatch.warnings) ? plan.groupPreparedBatch.warnings : []))
+      .filter((warning) => warning && String(warning.type || '').startsWith('cross-sheet-backfill-'));
+    throw new FileValidationError(
+      'FILE_READ',
+      buildBackfillEmptiedGroupsMessage(backfillEmptiedPlans.flatMap((plan) => plan.effectiveEntries), backfillWarnings),
+      {
+        detailLines: buildImportWarningDetailLines(backfillWarnings),
+        logDetailLines: buildImportWarningDetailLines(backfillWarnings, { forLog: true })
+      }
+    );
+  }
+
   if (otherError) throw otherError;
+  assertNoCollectedUnwritableText(unwritableText);
 
   // 所有组先完成 source-stable 解析，再进入 session/输出副作用。
   // v3.2.15（release 复审）：进入副作用前，按各组实际生成用的配置整批核对输出名称。等待确认期间配置可能已变化，
@@ -13745,70 +14339,128 @@ function generateMultiTemplateGroupFiles({
     groupPlans.map((plan) => ({ config: plan.groupConfig, preparedBatch: plan.groupPreparedBatch }))
   );
   if (outputPathConflicts) throw buildStatementOutputPathConflictError(outputPathConflicts);
+
+  // v3.2.22 B45：逐组写出与合并期间任一步失败（如文件被占用、合并失败）时，按写出记录还原本批已写的明细 / 余额 /
+  //   合并文件与余额种子，再原样抛出；旧会话条目在全部组与合并成功后才替换。后组仍可读取前组刚写的种子（同批语义不变）。
+  const outputJournal = createStatementOutputJournal();
+  // 批次临时备份（含账单原内容）重试后仍未能删除时留痕，只记目录位置（目录名不含业务信息，Codex 第八轮）
+  const noteStatementBackupCleanupFailure = (directory) => {
+    if (!directory) return;
+    try {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'statement',
+        message: '网银多模板生成的临时备份未能删除，含账单原内容，请手动删除该目录',
+        details: [`目录：${directory}`]
+      });
+    } catch (_logError) {
+      // 留痕尽力而为，不影响本批结果
+    }
+  };
+  let mergedDetail = null;
+  let mergedBalance = null;
+  let balancePending = false;
+  const templateCount = generationGroups.length;
+  try {
+    for (const {
+      groupTemplateConfig,
+      groupConfig,
+      effectiveEntries,
+      groupPreparedBatch
+    } of groupPlans) {
+
+      const groupGeneratedFiles = {
+        ...generateStatementFiles({
+          config: groupConfig,
+          preparedBatch: groupPreparedBatch,
+          scope: 'current',
+          writeOutput: outputJournal.write,
+          checkOutputTarget: outputJournal.checkTarget
+        }),
+        fileEntries: effectiveEntries,
+        preparedBatch: groupPreparedBatch
+      };
+
+      if (groupGeneratedFiles.detail) allDetailPaths.push(groupGeneratedFiles.detail.filePath);
+      if (groupGeneratedFiles.balance) allBalancePaths.push(groupGeneratedFiles.balance.filePath);
+      for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) allBalanceDates.push(date);
+      // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
+      if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
+      // v3.2.21：明细汇总按各组写出明细时确定的日期命名（剔除跳过的零金额行，与单组明细文件、另存为默认文件名同口径）；
+      //   逐个追加，展开成参数在大批量时会超出调用栈
+      for (const date of (groupGeneratedFiles.detail && groupGeneratedFiles.detail.billDates) || []) allBillDates.push(date);
+
+      lastGenerationTemplateConfig = groupTemplateConfig;
+      allFileEntries.push(...effectiveEntries);
+    }
+
+    // 合并多组文件为汇总文件，命名：组数-COMMON/BALANCE-日期范围.xlsx（渠道按一组计）
+    const dateRangeLabel = buildDateRangeLabel(allBillDates);
+
+    mergedDetail = allDetailPaths.length > 1
+      ? (() => {
+          const mergedFileName = `${templateCount}-COMMON-${dateRangeLabel || getToday()}.xlsx`;
+          const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'detail', outputFileName: mergedFileName });
+          outputJournal.write(mergedPath, () => mergeGeneratedXlsxFiles(allDetailPaths, mergedPath));
+          return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
+        })()
+      : allDetailPaths.length === 1
+        ? { filePath: allDetailPaths[0], fileName: path.basename(allDetailPaths[0]), templateName: '按文件名映射模板' }
+        : null;
+
+    // 任一模板组还需补录或确认断档时不合并、不缓存余额：汇总只含已算出的组，文件名却按全部模板计数。
+    // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
+    balancePending = allWarnings.some(
+      (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
+        || w.type === 'balance-mismatch-confirm' || w.type === 'balance-seed-replace-confirm'
+    );
+    const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
+    mergedBalance = mergeableBalancePaths.length > 1
+      ? (() => {
+          const mergedFileName = `${templateCount}-BALANCE-${buildDateRangeLabel(allBalanceDates) || getToday()}.xlsx`;
+          const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
+          outputJournal.write(mergedPath, () => mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath));
+          return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
+        })()
+      : mergeableBalancePaths.length === 1
+        ? { filePath: mergeableBalancePaths[0], fileName: path.basename(mergeableBalancePaths[0]), templateName: '按文件名映射模板' }
+        : null;
+  } catch (error) {
+    const { error: failure, outcome } = outputJournal.failBatch(error);
+    if (!outcome.restored) {
+      // 还原不完整：系统异常的堆栈照常写入日志；活动日志只记数量与恢复清单位置，不写含账号的文件路径
+      //   诊断落盘尽力而为：导出盘已满或只读时写日志可能再次失败，不能掩盖回滚结果与恢复清单位置
+      if (!(error instanceof FileValidationError)) {
+        try {
+          failure.detailLines.push(`系统异常已额外写入日志文件：${appendLog(ensureStorageRoot(), statementOutputErrorForLog(error))}`);
+        } catch (_logError) {
+          failure.detailLines.push('系统异常未能写入日志文件');
+        }
+      }
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'statement',
+          message: '网银多模板生成失败后部分文件未能自动还原',
+          details: [failure.context.rollbackSummary, failure.context.rollbackLocation]
+        });
+      } catch (_logError) {
+        // 同上
+      }
+    }
+    noteStatementBackupCleanupFailure(outcome.cleanupFailedDirectory);
+    throw failure;
+  }
+  noteStatementBackupCleanupFailure(outputJournal.commit().cleanupFailedDirectory);
+
+  // 全部组与合并成功后才替换旧会话条目（v3.2.22 B45）
   if (Array.isArray(replacePaths)) {
     replacePaths.forEach((filePath) => {
       removeStatementSessionEntriesByFilePath(session, filePath);
     });
   }
-
-  for (const {
-    groupTemplateConfig,
-    groupConfig,
-    effectiveEntries,
-    groupPreparedBatch
-  } of groupPlans) {
-
-    const groupGeneratedFiles = {
-      ...generateStatementFiles({ config: groupConfig, preparedBatch: groupPreparedBatch, scope: 'current' }),
-      fileEntries: effectiveEntries,
-      preparedBatch: groupPreparedBatch
-    };
-
-    if (groupGeneratedFiles.detail) allDetailPaths.push(groupGeneratedFiles.detail.filePath);
-    if (groupGeneratedFiles.balance) allBalancePaths.push(groupGeneratedFiles.balance.filePath);
-    for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) allBalanceDates.push(date);
-    // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
-    if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
-    // v3.2.21：明细汇总按各组写出明细时确定的日期命名（剔除跳过的零金额行，与单组明细文件、另存为默认文件名同口径）；
-    //   逐个追加，展开成参数在大批量时会超出调用栈
-    for (const date of (groupGeneratedFiles.detail && groupGeneratedFiles.detail.billDates) || []) allBillDates.push(date);
-
-    lastGenerationTemplateConfig = groupTemplateConfig;
-    allFileEntries.push(...effectiveEntries);
-  }
-
-  // 合并多组文件为汇总文件，命名：组数-COMMON/BALANCE-日期范围.xlsx（渠道按一组计）
-  const templateCount = generationGroups.length;
-  const dateRangeLabel = buildDateRangeLabel(allBillDates);
-
-  const mergedDetail = allDetailPaths.length > 1
-    ? (() => {
-        const mergedFileName = `${templateCount}-COMMON-${dateRangeLabel || getToday()}.xlsx`;
-        const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'detail', outputFileName: mergedFileName });
-        mergeGeneratedXlsxFiles(allDetailPaths, mergedPath);
-        return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
-      })()
-    : allDetailPaths.length === 1
-      ? { filePath: allDetailPaths[0], fileName: path.basename(allDetailPaths[0]), templateName: '按文件名映射模板' }
-      : null;
-
-  // 任一模板组还需补录或确认断档时不合并、不缓存余额：汇总只含已算出的组，文件名却按全部模板计数。
-  // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
-  const balancePending = allWarnings.some(
-    (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
-      || w.type === 'balance-mismatch-confirm' || w.type === 'balance-seed-replace-confirm'
-  );
-  const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
-  const mergedBalance = mergeableBalancePaths.length > 1
-    ? (() => {
-        const mergedFileName = `${templateCount}-BALANCE-${buildDateRangeLabel(allBalanceDates) || getToday()}.xlsx`;
-        const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
-        mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath);
-        return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
-      })()
-    : mergeableBalancePaths.length === 1
-      ? { filePath: mergeableBalancePaths[0], fileName: path.basename(mergeableBalancePaths[0]), templateName: '按文件名映射模板' }
-      : null;
 
   // session 只 append 一次（避免 importCount 膨胀导致首次导入就弹 scope 选择）
   const mergedSessionEntries = allFileEntries.map((entry) => buildStatementFileEntry({
@@ -13937,6 +14589,12 @@ function buildPreparedBatchFromStatementSession({
   });
 }
 
+// 网银模板的表头：与账单导入同一取值规则（见 readers.js extractHeaders 的 exactIsoDates），模板的创建、更新与按文件名匹配的
+//   预检（matchFileToTemplate、matchesTemplateHeaders）一致，从某份文件创建的模板总能匹配该文件自身（v3.2.21 第二十九轮审查）
+function extractStatementTemplateHeaders(filePath) {
+  return extractHeaders(filePath, { exactIsoDates: true });
+}
+
 function matchFileToTemplate(filePath, candidateTemplates) {
   const matches = [];
 
@@ -13945,8 +14603,12 @@ function matchFileToTemplate(filePath, candidateTemplates) {
     if (headers.length === 0) continue;
 
     try {
+      // 只解析第一个 sheet（与缺省读取的表一致），不为表头预检解析整本工作簿（v3.2.21：跨 Sheet 回填的来源表可能很大）
+      // 表头取值与正式映射同一规则（exactIsoDates：按原文校正 ODS 只写在属性上的文本等，v3.2.21 第二十八轮审查）
       readRowsWithMetadata(filePath, headers, {
-        readGuard: createStatementWorkbookReadGuard(filePath)
+        readGuard: createStatementWorkbookReadGuard(filePath),
+        onlyTargetSheet: true,
+        exactIsoDates: true
       });
       matches.push(template);
     } catch (error) {
@@ -14210,6 +14872,107 @@ function getGeneratedStatementExport(kind, scope = 'current') {
   return statementGenerationHelpers.getGeneratedStatementExport(lastGeneratedExports, kind, scope);
 }
 
+// v3.2.21：「跨 Sheet 回填」——【导出明细】时附带写出回填后的原始账单（spec §3.3）。导出范围内启用了回填且至少
+//   回填一行的源文件各一份（同一文件按大账号分段成多个条目时只算一份）；补丁与导入时的源文件指纹随会话条目缓存。
+//   只收集实际纳入本次明细的条目：按文件名映射导出全部时（不走缓存）逐组重新生成，模板已删除的组不纳入明细
+//   （exportStatementByScope），其回填文件同样不导出。其他范围与缓存的明细都含全部条目。
+function collectCrossSheetBackfillExportItems(session, scope) {
+  let entries = getStatementSessionEntries(session, scope);
+  if (scope === 'all' && session && isFilenameMappingMode(session.templateId) && !getGeneratedStatementExport('detail', 'all')) {
+    const included = new Set();
+    groupStatementEntriesForGeneration(entries).forEach(({ entries: groupEntries, templateConfig }) => {
+      if (templateConfig) groupEntries.forEach((entry) => included.add(entry));
+    });
+    entries = entries.filter((entry) => included.has(entry));
+  }
+  const byPath = new Map();
+  entries.forEach((entry) => {
+    const rows = entry && entry.detailRows;
+    const patches = rows && Array.isArray(rows.crossSheetBackfillPatches) ? rows.crossSheetBackfillPatches : [];
+    const source = rows && rows.crossSheetBackfillSource;
+    if (!patches.length || !source || !entry.filePath || byPath.has(entry.filePath)) return;
+    byPath.set(entry.filePath, { sourceFilePath: entry.filePath, patches, source });
+  });
+  if (!byPath.size) return [];
+  // 只导出在明细中留有交易的源文件：按明细导出的同一判定（hasDetailExportRow，与 buildDetailExportRows 一致：收、支都为空
+  //   或 0 的行不进明细）确认该文件至少有一行写入明细；回填后的行被「过滤账单」排除、或只剩零金额行时不导出。
+  //   只检查有回填补丁的文件，找到第一笔即停；同一文件按大账号分段成多个条目时，任一条目有明细行即可
+  const filesWithDetailRows = new Set();
+  entries.forEach((entry) => {
+    if (!entry || !byPath.has(entry.filePath) || filesWithDetailRows.has(entry.filePath)) return;
+    if (hasDetailExportRow(entry.detailRows)) filesWithDetailRows.add(entry.filePath);
+  });
+  return Array.from(byPath.values()).filter((item) => filesWithDetailRows.has(item.sourceFilePath));
+}
+
+// 源文件当前内容与导入时一致才写出；读不到（已删除、无权限）同样视为已变化
+function isCrossSheetBackfillSourceUnchanged(item) {
+  try {
+    // 先比较大小（不一致时不读内容），再分块计算摘要
+    const fingerprint = computeFileFingerprint(item.sourceFilePath, { expectedSize: item.source.size });
+    return fingerprint.size === item.source.size && fingerprint.sha256 === item.source.sha256;
+  } catch (_error) {
+    return false;
+  }
+}
+
+// 写出各份回填后的原始账单，返回 { lines（附在导出结果提示后）, results }；单份失败不影响明细与其他文件。
+async function exportCrossSheetBackfillWorkbooks(items, outputPaths, changedItems = []) {
+  const results = [];
+  for (const [index, item] of items.entries()) {
+    const sourceName = path.basename(item.sourceFilePath);
+    const outputFilePath = outputPaths[index];
+    // 读出一次原文件：按句柄核对普通文件与导入时大小后只读这么多字节，摘要一致才把同一份字节交给写出（不再按路径重读，
+    //   避免核对后被替换；文件被换成更大的文件时不读入整份内容）
+    let sourceBuffer = null;
+    try {
+      sourceBuffer = readFingerprintedFile(item.sourceFilePath, item.source);
+    } catch (_error) {
+      sourceBuffer = null;
+    }
+    if (!sourceBuffer) {
+      results.push({ sourceName, status: 'changed' });
+      continue;
+    }
+    try {
+      const written = await writeCrossSheetBackfillWorkbook({
+        sourceFilePath: item.sourceFilePath,
+        sourceBuffer,
+        outputFilePath,
+        patches: item.patches,
+        source: item.source
+      });
+      results.push({ sourceName, status: 'success', filePath: outputFilePath, fileName: path.basename(outputFilePath), ...written });
+    } catch (error) {
+      results.push({ sourceName, status: 'failed', message: error && error.message ? error.message : String(error) });
+    }
+  }
+  changedItems.forEach((item) => results.push({ sourceName: path.basename(item.sourceFilePath), status: 'changed' }));
+  const exported = results.filter((item) => item.status === 'success');
+  const changed = results.filter((item) => item.status === 'changed');
+  const failed = results.filter((item) => item.status === 'failed');
+  const lines = [];
+  if (exported.length) {
+    const converted = exported.some((item) => item.converted);
+    lines.push(`回填后的原始账单已导出：${exported.map((item) => item.fileName).join('、')}${converted ? '（非 xlsx 原始账单已转为 xlsx，只保留值与数字格式）' : ''}`);
+  }
+  if (changed.length) {
+    lines.push(`原始账单在导入后已变化，请重新导入：${changed.map((item) => item.sourceName).join('、')}（未导出回填后的原始账单）`);
+  }
+  failed.forEach((item) => lines.push(`回填后的原始账单导出失败：${item.sourceName}（${item.message}）`));
+  if (results.length) {
+    appendActivityLogEntry({
+      // 日志按 warning / error / info 分文件，部分失败写入 warning（第三十五轮审查）
+      level: changed.length || failed.length ? 'warning' : 'info',
+      message: '导出回填后的原始账单',
+      details: results.map((item) => (item.status === 'success'
+        ? `${item.sourceName} → ${item.filePath}（${item.cellCount} 个单元格）`
+        : `${item.sourceName}：${item.status === 'changed' ? '导入后已变化，未导出' : `失败：${item.message}`}`))
+    });
+  }
+  return { lines, results };
+}
+
 function buildStatementExportPlan(kind, scope = 'auto') {
   // v3.2.21（D2）：另存为默认文件名的日期范围与生成时的文件名同口径（release 审查）：先按全部明细行校验账单日期（原有检查），
   //   再按实际写出的行取日期——剔除收支都为空或 0 的行（生成时跳过）；明细没有其他行时按全部明细行；
@@ -14465,13 +15228,15 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       const balanceModeConflictGroups = [];
       const balanceRowIssueGroups = [];
       const issueLineBudget = { remaining: 200 };
+      // 各组无法写入的字符共用计数，校验完一并拒绝（Codex 第六轮）
+      const unwritableText = { total: 0, labels: [] };
       // 其他组的错误（如映射缺字段）暂存，先完成各渠道的余额校验；有渠道余额错误时优先返回，否则照常抛出
       let otherError = null;
       for (const group of generationGroups) {
         const { entries: groupEntries, templateIds, templateConfig } = group;
         if (!templateConfig) {
           appendActivityLogEntry({
-            level: 'warn',
+            level: 'warning',
             message: `导出时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${groupEntries.length} 个文件的数据未包含在导出中`
           });
           skippedGroupNames.push(`模板ID=${templateIds.join('、')}（${groupEntries.length}个文件）`);
@@ -14496,7 +15261,8 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
             config: groupGenConfig,
             fileEntries: groupEntries,
             balancePlan,
-            includeBalance: kind === 'balance'
+            includeBalance: kind === 'balance',
+            unwritableText
           });
         } catch (error) {
           if (error && error.code === 'CHANNEL_BALANCE_MODE_MISMATCH' && Array.isArray(error.conflictGroups)) {
@@ -14531,6 +15297,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         });
       }
       if (otherError) throw otherError;
+      assertNoCollectedUnwritableText(unwritableText);
       for (const { templateConfig, groupGenConfig, groupEntries, balancePlan } of exportGroupPlans) {
         lastGroupTemplateConfig = templateConfig;
         const tid = templateConfig.template.id;
@@ -15011,15 +15778,14 @@ function registerBigAccountHandlers() {
     }
   });
 
-  // v3.2.17：补录余额「导入余额文件」——选择余额文件，按当前补录提示的待补录账号（银行账号 + 币种）提取上一账单日余额，
+  // v3.2.17：补录余额「导入余额文件」——选择余额文件，按当前补录提示的待补录账号提取上一账单日余额，
   //   返回给补录弹窗的「余额确认」视图。只读预检：不写种子、不改补录 prompt 与生成缓存；确认后由渲染层逐个账号
   //   沿用 file:save-balance-seed 写入（主进程照常只接受当前 prompt 指向的账号并校验）。
+  // v3.2.22：文件为「银行原始日终余额信息」，按 银行账户号 + 币种 + 银行名 + 开户地 匹配（银行名、开户地取输出名称拆分，
+  //   与余额账单写入的银行名称、所在地同口径）；「核对上一账单日余额」提示也可导入（当前核对账号在前）。
   ipcMain.handle('file:import-balance-seed-file', async () => {
     const pendingPrompt = lastManualBalancePrompt;
-    const pendingAccounts = pendingPrompt && !pendingPrompt.reason && !pendingPrompt.seedMismatch
-      && Array.isArray(pendingPrompt.pendingAccounts)
-      ? pendingPrompt.pendingAccounts
-      : [];
+    const pendingAccounts = balanceImportAccountsForPrompt(pendingPrompt);
     if (!pendingAccounts.length) {
       return {
         status: 'error',
@@ -15027,26 +15793,54 @@ function registerBigAccountHandlers() {
         message: '当前没有待补录的账号，请重新生成余额'
       };
     }
+    const balanceGroup = splitTemplateName(pendingPrompt.templateName);
+    // v3.2.22 W1：余额文件只接受 xlsx（读取时另按扩展名与内容核对）
     const choice = await showImportOpenDialog('balance-seed-file', {
       title: '选择余额文件',
       properties: ['openFile'],
-      filters: statementFileDialogFilters()
+      filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }]
     });
     const filePath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
     if (!filePath) return { status: 'cancelled' };
     const fileName = path.basename(filePath);
     try {
-      const { rows, displayRows, date1904 } = readBalanceSeedImportFile(filePath);
-      const { records, skippedRowCount } = parseBalanceSeedImportRows(rows, { displayRows, date1904 });
-      const matched = matchBalanceSeedImport(records, pendingAccounts);
+      const { rows, displayRows, date1904, rowNumbers, unreadableCells } = readBalanceSeedImportFile(filePath);
+      const { records, skippedRowCount } = parseBalanceSeedImportRows(rows, { displayRows, date1904, rowNumbers, unreadableCells });
+      // 核对账号可填日期的下限按当前种子记录取（与重算、保存时的预检同口径）。种子文件读取失败（如损坏）时的明细含
+      //   种子文件路径（文件名为银行名，可能是账号），界面弹窗的文字会进活动日志：只返回不带路径的提示
+      let accounts;
+      try {
+        accounts = balanceImportAccountsForPrompt(pendingPrompt, {
+          previousSeedDate: ({ merchantId, currency, targetBillDate }) => {
+            const seed = findPreviousBalanceSeed(ensureStorageRoot(), {
+              bankName: balanceGroup.bankName, merchantId, currency, beforeBillDate: targetBillDate
+            });
+            return seed ? seed.billDate : '';
+          }
+        });
+      } catch (seedError) {
+        if (!(seedError instanceof FileValidationError)) throw seedError;
+        return {
+          status: 'error',
+          errorCode: seedError.code,
+          message: seedError.message,
+          detailLines: ['请在模板管理的【余额管理】中检查本组的余额，或删除损坏的余额种子文件后重试']
+        };
+      }
+      const matched = matchBalanceSeedImport(records, accounts, balanceGroup);
+      // 文件名、模板 / 输出名称可能含账号：落盘日志按待匹配账号与长数字脱敏，返回界面的仍是原名
+      const maskForLog = (text) => maskAccountLikeTextForLog(text, accounts.map((account) => account.merchantId));
       appendActivityLogEntry({
         level: 'info',
         message: '导入余额文件，等待确认补录余额',
         details: [
-          `文件：${fileName}`,
-          `模板名：${pendingPrompt.templateName || 'N/A'}`,
+          `文件：${maskForLog(fileName)}`,
+          `模板名：${maskForLog(pendingPrompt.templateName || 'N/A')}`,
+          `银行名 / 开户地：${maskForLog(balanceGroup.bankName || '(空)')} / ${maskForLog(balanceGroup.location || '(空)')}`,
+          ...(pendingPrompt.seedMismatch ? ['入口：核对上一账单日余额'] : []),
           `待补录账号：${matched.accounts.length} 个`,
           `从文件提取：${matched.matchedCount} 个`,
+          ...(matched.choiceCount ? [`同日多个余额待选择：${matched.choiceCount} 个`] : []),
           `需手工录入：${matched.manualCount} 个`,
           ...(skippedRowCount ? [`跳过无效行：${skippedRowCount} 行`] : [])
         ]
@@ -15055,6 +15849,8 @@ function registerBigAccountHandlers() {
         status: 'success',
         fileName,
         templateName: pendingPrompt.templateName || '',
+        bankName: balanceGroup.bankName,
+        location: balanceGroup.location,
         skippedRowCount,
         ...matched
       };
@@ -15184,26 +15980,6 @@ function findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockO
   return null;
 }
 
-// 大账号预览行对应的块里有没有交易（收入或支出非空的行），按块实际包含的明细行判断：
-//   没有分段的文件整份是一块，起止不经裁剪，只有表头时也是 [0, 0]，不能只看起止。
-//   明细没有收入 / 支出列时无法判断，返回 null（按有交易处理）。
-function bigAccountBlockHasTransactions(detailRows, startIndex, endIndex) {
-  const headerRow = Array.isArray(detailRows) && Array.isArray(detailRows[0]) ? detailRows[0] : [];
-  const amountIndexes = ['Credit Amount', 'Debit Amount']
-    .map((field) => headerRow.indexOf(field))
-    .filter((index) => index >= 0);
-  if (!amountIndexes.length) return null;
-  const start = Number(startIndex);
-  const end = Number(endIndex);
-  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
-  const dataRows = detailRows.slice(1);
-  for (let index = Math.max(0, start); index <= end && index < dataRows.length; index += 1) {
-    const row = dataRows[index];
-    if (Array.isArray(row) && amountIndexes.some((amountIndex) => normalizeCell(row[amountIndex]) !== '')) return true;
-  }
-  return false;
-}
-
 function buildBigAccountOrderEvidence(pendingContext) {
   const fileEntries = Array.isArray(pendingContext.fileEntries) ? pendingContext.fileEntries : [];
   const allMerchantIds = (pendingContext.bigAccounts || [])
@@ -15277,12 +16053,6 @@ function buildBigAccountOrderEvidence(pendingContext) {
       ).size > 1
         ? 'MULTI_CURRENCY'
         : null;
-      // 区分无交易空段与“有交易但未识别账号”的块，记住顺序时据此核对未识别块的位置是否变化。
-      const hasTransactions = bigAccountBlockHasTransactions(
-        entry.detailRows,
-        previewRow.blockStartIndex,
-        previewRow.blockEndIndex
-      );
       return Object.freeze({
         blockOrdinal,
         sourceRow,
@@ -15290,8 +16060,7 @@ function buildBigAccountOrderEvidence(pendingContext) {
         currency,
         matchKind: identified ? identified.matchType : '',
         accountKey: merchantId ? `${merchantId}\u0000${currency}` : '',
-        ambiguityCode,
-        empty: typeof hasTransactions === 'boolean' ? !hasTransactions : null
+        ambiguityCode
       });
     });
     return Object.freeze({
@@ -15313,7 +16082,7 @@ function buildBigAccountOrderEvidence(pendingContext) {
   });
 }
 
-function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
+function extractBigAccountOrderFromEvidence(pendingContext, rowIndexes) {
   const evidence = pendingContext.bigAccountOrderEvidence;
   if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
     return { status: 'error', failedRows: [], message: '大账号选择预览已失效，请重新导入文件' };
@@ -15346,7 +16115,7 @@ function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
       unmaintainedAccounts
     };
   }
-  const selectedRows = selectPendingBigAccountRows(pendingContext, mode, rowIndexes);
+  const selectedRows = selectPendingBigAccountRows(pendingContext, rowIndexes);
   if (selectedRows.length === 0) {
     return { status: 'error', failedRows: [], message: '请选择需要提取的大账号预览行' };
   }
@@ -15382,194 +16151,6 @@ function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
     result.ambiguousCurrencyFiles = Array.from(new Set(ambiguousCurrencyFiles));
   }
   return result;
-}
-
-// 大账号顺序证据里每份文件逐块（与固定模式预览行一一对应）的 { merchantId（未识别为 ''）, empty（是否无交易，未知为 null）}；
-// 与保存顺序的 rowAccounts / rowEmpty 同口径。
-function bigAccountOrderEvidenceRowLists(evidence) {
-  const files = evidence && Array.isArray(evidence.files) ? evidence.files : [];
-  return files.map((file) => (Array.isArray(file.rows) ? file.rows : [])
-    .map((row) => ({
-      merchantId: row.accountKey !== '' ? normalizeCell(row.merchantId) : '',
-      empty: typeof row.empty === 'boolean' ? row.empty : null
-    })));
-}
-
-// 逐块结果里识别到的账号（按块顺序），供匹配记住的文件。
-function identifiedAccountsFromRowLists(rowLists) {
-  return rowLists.map((rows) => rows
-    .filter((row) => row.merchantId !== '')
-    .map((row) => ({ merchantId: row.merchantId })));
-}
-
-// v3.2.15（release 审查）：固定模式下界面按位置逐块套用记住的分配，而完成选择时服务端只核对账号、不核对币种。
-//   记住的顺序与本次导入文件无法按位置逐块对上时（文件个数不同、匹配不上、同一多币种大账号的多份账单或同一文件里
-//   同一账号多个币种、文件或账号块换序、空段 / 未识别段的位置变化），按位置套用会把账号 / 币种填到别的块上，
-//   因此降级为不固定模式由用户选择，界面也不再套用记住的分配（forceMode 存在即不预填）。
-//   各文件逐块识别到的账号取大账号顺序证据，与保存顺序同口径；没有文件信息的旧顺序无法核对，沿用原行为。
-function resolveSavedBigAccountOrderDecision(pendingContext) {
-  const keep = { forceUnfixed: false, reason: '', fileNames: [] };
-  const templateId = pendingContext && pendingContext.templateId;
-  if (readBigAccountMode(ensureStorageRoot(), templateId) !== 'fixed') return keep;
-  const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
-  if (!savedOrderConfig || !Array.isArray(savedOrderConfig.assignments) || !savedOrderConfig.assignments.length) return keep;
-  if (!Array.isArray(savedOrderConfig.files) || !savedOrderConfig.files.length) return keep;
-  const evidenceFiles = pendingContext.bigAccountOrderEvidence && Array.isArray(pendingContext.bigAccountOrderEvidence.files)
-    ? pendingContext.bigAccountOrderEvidence.files
-    : [];
-  const fileNamesOf = (indexes) => indexes.map((index) => evidenceFiles[index].fileName);
-  if (evidenceFiles.length !== savedOrderConfig.fileCount) return { forceUnfixed: true, reason: 'file-count', fileNames: [] };
-  const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
-  const { failedImportIndexes, ambiguousImportIndexes, savedIndexByImport } = matchImportFilesToSavedOrder(
-    identifiedAccountsFromRowLists(importRowLists),
-    savedOrderConfig
-  );
-  if (ambiguousImportIndexes.length) {
-    return { forceUnfixed: true, reason: 'ambiguous', fileNames: fileNamesOf(ambiguousImportIndexes) };
-  }
-  if (failedImportIndexes.length) return { forceUnfixed: true, reason: 'mismatch', fileNames: fileNamesOf(failedImportIndexes) };
-  // 界面按位置套用：本次第 i 份文件须对上记住的第 i 份，且逐块识别结果一致（不比较拼接后的分配，空段不会造成误降级）。
-  const reorderedIndexes = savedIndexByImport
-    .map((savedIndex, importIndex) => (savedIndex === importIndex ? -1 : importIndex))
-    .filter((importIndex) => importIndex >= 0);
-  if (reorderedIndexes.length) return { forceUnfixed: true, reason: 'reordered', fileNames: fileNamesOf(reorderedIndexes) };
-  const rowMismatches = findSavedOrderFileRowMismatches(importRowLists, savedOrderConfig, savedIndexByImport);
-  if (rowMismatches.length) return { forceUnfixed: true, reason: 'rows', fileNames: fileNamesOf(rowMismatches) };
-  return keep;
-}
-
-const SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS = Object.freeze({
-  'file-count': '本次导入的文件个数与记住的不同',
-  mismatch: '部分文件的账户个数、账户号或账号块顺序与记住的对不上',
-  reordered: '文件顺序与记住的不同',
-  rows: '部分文件的账号块（含无交易的空段、未识别账号的块）与记住的对不上'
-});
-
-// 降级在预检阶段做出：常规导入预检返回大账号选择后直接转入完成选择，不会再以非预检方式运行到这里，
-// 因此日志不区分预检；同一次导入只会判定一次。
-function logSavedBigAccountOrderDowngrade(templateName, decision) {
-  const ambiguous = decision.reason === 'ambiguous';
-  appendActivityLogEntry({
-    level: 'info',
-    message: ambiguous
-      ? '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择'
-      : '已记住的大账号顺序与本次导入文件对不上，改为人工选择',
-    details: [
-      `模板名：${normalizeCell(templateName) || 'N/A'}`,
-      ...(ambiguous ? [] : [`原因：${SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS[decision.reason] || decision.reason}`]),
-      ...(decision.fileNames.length ? [`涉及文件：${decision.fileNames.join('、')}`] : [])
-    ]
-  });
-}
-
-function applySavedBigAccountOrderGuard(_prepared, pendingContext, selectionRequired) {
-  const decision = resolveSavedBigAccountOrderDecision(pendingContext);
-  if (!decision.forceUnfixed) return selectionRequired;
-  logSavedBigAccountOrderDowngrade(pendingContext.template && pendingContext.template.name, decision);
-  return { ...selectionRequired, forceMode: 'unfixed' };
-}
-
-function buildBigAccountOrderData(pendingContext, assignments = []) {
-  const evidence = pendingContext.bigAccountOrderEvidence;
-  if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
-    throw new Error('大账号顺序证据已失效');
-  }
-  return {
-    assignments,
-    fileCount: evidence.files.length,
-    files: evidence.files.map((file) => {
-      const accounts = file.rows
-        .filter((row) => row.accountKey !== '')
-        .map((row) => ({ merchantId: row.merchantId, currency: row.currency }));
-      // 逐块识别账号、是否无交易与 assignments 一一对应（含空段 / 未识别段），供下次按块核对能否按位置套用。
-      const rowAccounts = file.rows.map((row) => (row.accountKey !== '' ? row.merchantId : ''));
-      const rowEmpty = file.rows.map((row) => (typeof row.empty === 'boolean' ? row.empty : null));
-      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts, rowAccounts, rowEmpty };
-    })
-  };
-}
-
-function persistBigAccountOrderAfterGeneration({
-  pendingContext,
-  normalizedAssignments,
-  rememberOrder,
-  result
-}) {
-  if (typeof rememberOrder !== 'boolean') return result;
-  try {
-    const data = rememberOrder
-      ? buildBigAccountOrderData(pendingContext, normalizedAssignments)
-      : { assignments: [] };
-    writeBigAccountOrder(ensureStorageRoot(), pendingContext.templateId, data);
-    return result;
-  } catch (error) {
-    const warning = rememberOrder
-      ? '账单已生成，但大账号顺序保存失败，本次选择未记住。'
-      : '账单已生成，但清除已记住的大账号顺序失败，后续仍可能沿用原顺序。';
-    appendActivityLogEntry({
-      level: 'warning',
-      message: '大账号顺序设置保存失败',
-      details: [warning, error && error.message ? error.message : String(error)]
-    });
-    return {
-      ...result,
-      status: result && result.status === 'success' ? 'warning' : result.status,
-      message: [result && result.message, warning].filter(Boolean).join('\n'),
-      detailLines: [
-        ...(result && Array.isArray(result.detailLines) ? result.detailLines : []),
-        warning
-      ],
-      bigAccountOrderSaveWarning: warning
-    };
-  }
-}
-
-function registerBigAccountOrderHandlers() {
-  ipcMain.handle('big-account-mode:load', (_event, templateId) => {
-    try {
-      return { status: 'success', mode: readBigAccountMode(ensureStorageRoot(), templateId) };
-    } catch (_error) {
-      return { status: 'success', mode: 'unfixed' };
-    }
-  });
-
-  businessIpcHandle('big-account-mode:save', '保存大账号模式', (_event, payload = {}) => {
-    try {
-      writeBigAccountMode(ensureStorageRoot(), payload.templateId, payload.mode);
-      return { status: 'success' };
-    } catch (_error) {
-      return { status: 'error', message: '解析模式保存失败' };
-    }
-  });
-
-  ipcMain.handle('big-account-order:load', (_event, templateId) => {
-    try {
-      return { status: 'success', order: readBigAccountOrder(ensureStorageRoot(), templateId) };
-    } catch (_error) {
-      return { status: 'success', order: null };
-    }
-  });
-
-  businessIpcHandle('big-account-order:save', '保存大账号顺序', (_event, payload = {}) => {
-    try {
-      const data = { assignments: payload.assignments || [] };
-
-      if (payload.includeFileInfo) {
-        const pendingContext = requirePendingBigAccountSelection(payload.contextId);
-        if (!pendingContext) {
-          return { status: 'error', message: '大账号选择预览已失效，请重新导入文件' };
-        }
-        const fileInfoData = buildBigAccountOrderData(pendingContext, data.assignments);
-        data.fileCount = fileInfoData.fileCount;
-        data.files = fileInfoData.files;
-      }
-
-      writeBigAccountOrder(ensureStorageRoot(), payload.templateId, data);
-      return { status: 'success' };
-    } catch (_error) {
-      return { status: 'error', message: '大账号选择顺序保存失败' };
-    }
-  });
 }
 
 const STATEMENT_IMPORT_PREVIEW_READY = 'statement-import-preview-ready';
@@ -15643,6 +16224,9 @@ function buildTemplateFieldReferenceInput(templateConfig) {
       && Array.isArray(templateConfig.template.preprocessRowFilterRules)
       ? templateConfig.template.preprocessRowFilterRules
       : [],
+    crossSheetBackfillRule: templateConfig && templateConfig.template
+      ? templateConfig.template.crossSheetBackfillRule || null
+      : null,
     featureFilters: templateConfig && templateConfig.template && Array.isArray(templateConfig.template.featureFilters)
       ? templateConfig.template.featureFilters
       : []
@@ -15715,7 +16299,7 @@ function prepareTemplateHeaderUpdate({ templateId, filePath }) {
       context: { templateId, templateName: template.name }
     });
   }
-  const headers = normalizeBundleTemplateHeaders(extractHeaders(filePath));
+  const headers = normalizeBundleTemplateHeaders(extractStatementTemplateHeaders(filePath));
   if (!headers.some((header) => header !== '')) {
     throw new FileValidationError('TEMPLATE_HEADERS_INVALID', '所选文件没有有效的表头');
   }
@@ -15821,7 +16405,7 @@ function applyTemplateHeaderUpdate(payload = {}) {
   } catch (error) {
     librarySyncFailed = true;
     appendActivityLogEntry({
-      level: 'warn',
+      level: 'warning',
       message: '更新模板表头后同步模板库文件失败',
       details: [`模板名：${template.name}`, `原因：${error && error.message ? error.message : String(error)}`]
     });
@@ -15874,8 +16458,10 @@ function matchesTemplateHeaders(filePath, template) {
   const headers = Array.isArray(template?.headers) ? template.headers : [];
   if (headers.length === 0) return false;
   try {
+    // 表头取值与正式映射同一规则（见 matchFileToTemplate）
     readRowsWithMetadata(filePath, headers, {
-      readGuard: createStatementWorkbookReadGuard(filePath)
+      readGuard: createStatementWorkbookReadGuard(filePath),
+      exactIsoDates: true
     });
     return true;
   } catch (error) {
@@ -16188,6 +16774,15 @@ async function handleFilenameMappingImport(prepared) {
       });
     }
 
+    // v3.2.21：多组时任一组的交易全部被「跨 Sheet 回填」跳过则整批取消，在大账号聚合、选择与写入会话之前返回（用户决定，
+    //   2026-11-22；见 createBackfillEmptiedGroupsErrorResult）。只有一组时沿用单模板「没有交易数据」的口径（后续步骤）
+    const backfillEmptiedGroups = importGenerationGroups.length > 1
+      ? importGenerationGroups.filter((group) => isAllTransactionsSkippedByBackfill(group.entries))
+      : [];
+    if (backfillEmptiedGroups.length) {
+      return createBackfillEmptiedGroupsErrorResult(backfillEmptiedGroups, virtualTemplateName);
+    }
+
     // ===== 步骤 4：聚合大账号 =====
     // 每个命中的模板自身 bigAccounts；v3.2.15（A3）：命中渠道的任一子模板时，取该渠道全部子模板的 bigAccounts。
     const aggregatedBigAccounts = [];
@@ -16258,23 +16853,29 @@ async function handleFilenameMappingImport(prepared) {
     );
     const bigAccountOptions = allCurrencyOnly ? [] : expandBigAccountConfigurations(aggregatedBigAccounts);
 
+    // v3.2.22：MerchantId 由大账号决定的导入（命中的模板有「自己输入」/ 多大账号映射，或候选大账号多于一个）整批原表
+    //   只有表头时没有需要识别或分配大账号的交易：在混合模式检查、直接识别与手动选择之前统一拒绝（预检阶段按未开始导入
+    //   处理）。MerchantId 取自源列的普通映射、有数据的混合批次仍按原规则
+    const needsBigAccountMerchant = bigAccountOptions.length > 1 || trimmedProvisionalEntries.some((entry) => {
+      const entryConfig = perTemplateConfigCache.get(entry.matchedTemplateId);
+      return usesBigAccountMerchantMapping(entryConfig && entryConfig.exportMappings);
+    });
+    if (needsBigAccountMerchant && allEntriesHeaderOnly(trimmedProvisionalEntries)) {
+      return createNoTransactionDataResult(virtualTemplateName, prepared);
+    }
+
     if (bigAccountOptions.length > 1 && currencyOnlyFileNames.length) {
       return createCurrencyOnlyMixedSelectionErrorResult(currencyOnlyFileNames, virtualTemplateName);
     }
 
     if (bigAccountOptions.length > 1) {
       const selectionRows = buildBigAccountSelectionRows(trimmedProvisionalEntries);
-      if (!selectionRows.length) {
-        return createErrorResult({
-          step: '导入网银明细文件',
-          message: '导入文件中没有账号存在交易数据',
-          errorCode: 'NO_TRANSACTION_DATA',
-          templateName: virtualTemplateName
-        });
+      if (!selectionRows.length || isAllTransactionsSkippedByBackfill(trimmedProvisionalEntries)) {
+        return createNoTransactionDataResult(virtualTemplateName, prepared, trimmedProvisionalEntries);
       }
       const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-      const pendingContext = stagePendingBigAccountSelection(prepared, {
+      stagePendingBigAccountSelection(prepared, {
         templateId: FILENAME_MAPPING_TEMPLATE_ID,
         template: syntheticTemplateConfig.template,
         mappings: syntheticTemplateConfig.exportMappings,
@@ -16287,13 +16888,12 @@ async function handleFilenameMappingImport(prepared) {
         rows: selectionRows,
         rowsWithEmptyBlocks: selectionRowsWithEmpty
       });
-      return applySavedBigAccountOrderGuard(prepared, pendingContext, buildBigAccountSelectionRequiredResult({
+      return buildBigAccountSelectionRequiredResult({
         rows: selectionRows,
-        rowsWithEmptyBlocks: selectionRowsWithEmpty,
         bigAccounts: aggregatedBigAccounts,
         fixedAssignments: [],
         templateId: FILENAME_MAPPING_TEMPLATE_ID
-      }));
+      });
     }
 
     // ===== 步骤 8：边界 — bigAccountOptions.length <= 1 直接生成 =====
@@ -16323,17 +16923,12 @@ async function handleFilenameMappingImport(prepared) {
 
       if (recognitionResult.status === 'needs-selection') {
         const selectionRows = buildBigAccountSelectionRows(trimmedProvisionalEntries);
-        if (!selectionRows.length) {
-          return createErrorResult({
-            step: '导入网银明细文件',
-            message: '导入文件中没有账号存在交易数据',
-            errorCode: 'NO_TRANSACTION_DATA',
-            templateName: virtualTemplateName
-          });
+        if (!selectionRows.length || isAllTransactionsSkippedByBackfill(trimmedProvisionalEntries)) {
+          return createNoTransactionDataResult(virtualTemplateName, prepared, trimmedProvisionalEntries);
         }
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-        const pendingContext = stagePendingBigAccountSelection(prepared, {
+        stagePendingBigAccountSelection(prepared, {
           templateId: FILENAME_MAPPING_TEMPLATE_ID,
           template: syntheticTemplateConfig.template,
           mappings: syntheticTemplateConfig.exportMappings,
@@ -16346,13 +16941,12 @@ async function handleFilenameMappingImport(prepared) {
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty
         });
-        return applySavedBigAccountOrderGuard(prepared, pendingContext, buildBigAccountSelectionRequiredResult({
+        return buildBigAccountSelectionRequiredResult({
           rows: selectionRows,
-          rowsWithEmptyBlocks: selectionRowsWithEmpty,
           bigAccounts: aggregatedBigAccounts,
           fixedAssignments: [],
           templateId: FILENAME_MAPPING_TEMPLATE_ID
-        }));
+        });
       }
 
       if (recognitionResult.selectedBigAccount) {
@@ -16425,6 +17019,12 @@ async function handleFilenameMappingImport(prepared) {
     }
     return executeFilenameMappingImportPlan(statementImportPlan, prepared);
   } catch (error) {
+    if (!prepared.previewOnly && isRestoredStatementRuntimeFailure(error)) {
+      return createRestoredStatementRuntimeFailureResult(error, {
+        step: '导入网银明细文件',
+        errorCode: 'FILE_IMPORT_RUNTIME'
+      });
+    }
     if (!prepared.previewOnly) {
       clearGeneratedExports();
       clearPendingManualBalancePrompt();
@@ -16444,21 +17044,23 @@ async function handleFilenameMappingImport(prepared) {
     if (error instanceof FileValidationError) {
       // v3.2.16：币种未维护大账号需要把文件 / 币种 / 行号带回界面弹窗（spec D1）；
       //   v3.2.21：渠道余额方式冲突、出余额的交易缺账单日期或 MerchantId 同样带回明细
+      //   v3.2.22 B45：还原不完整时报错文件写不出也返回恢复指引
       const buildResult = String(error.code || '').startsWith('CURRENCY_BIG_ACCOUNT_')
         || error.code === 'CHANNEL_BALANCE_MODE_MISMATCH'
         || error.code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE'
         ? createDetailedErrorResult
-        : createErrorResult;
+        : (error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? createRollbackIncompleteErrorResult : createErrorResult);
       return buildResult({
         step: '导入网银明细文件',
         message: error.message,
         errorCode: error.code,
         originalError: error,
         detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+        // 按文件名映射：各组错误的上下文可能带该组模板的真实名称（可能含完整账号），最后以固定名称覆盖（Codex 第九轮）
         context: {
           templateId: FILENAME_MAPPING_TEMPLATE_ID,
-          templateName: virtualTemplateName,
-          ...(error.context || {})
+          ...(error.context || {}),
+          templateName: virtualTemplateName
         },
         templateName: virtualTemplateName
       });
@@ -16784,9 +17386,7 @@ function registerFileHandlers() {
           })
         };
       }
-      if (previewResult
-          && (previewResult.status === 'select-big-account'
-            || previewResult.status === 'remember-order-mismatch')) {
+      if (previewResult && previewResult.status === 'select-big-account') {
         const pendingContext = previewPrepared.pendingBigAccountSelection;
         if (!pendingContext) {
           return {
@@ -16913,6 +17513,39 @@ function registerFileHandlers() {
         (mapping) => mapping.templateField === 'MerchantId' && mapping.mappedField === MERCHANT_ID_SELF_INPUT_OPTION
       );
 
+      // v3.2.22：MerchantId 由大账号决定（「自己输入」/ 多大账号映射，或候选大账号多于一个）时，整批原表只有表头即没有
+      //   需要识别或分配大账号的交易：在直接识别与手动选择分流之前统一拒绝（预检阶段按未开始导入处理，与按文件名映射同一判断）。
+      //   MerchantId 取自源列的普通映射不受影响
+      // 预检已确认原表有数据行时（sourceRowsChecked），执行阶段（同一份 prepared，任务开始前已核对文件与配置未变）不再重新映射
+      if ((bigAccountOptions.length > 1 || isMerchantIdSelfInput || usesBigAccountMerchantMapping(templateConfig.exportMappings))
+        && !selectionResult.sourceRowsChecked) {
+        // 后续分支本来就复用预映射条目时（多个 / 一个候选大账号、自己输入）映射并缓存。多大账号映射而没有候选大账号时，
+        //   生成须走原路径（prepareGeneratedFiles）校验大账号，不能复用放宽了受管大账号校验的预映射条目：
+        //   这里不映射，只逐文件探测原表有没有数据行（probeSourceFilesHeaderOnly），只记结论
+        let headerOnly = null;
+        if (selectionResult.parentProvisionalEntries) {
+          headerOnly = allEntriesHeaderOnly(selectionResult.parentProvisionalEntries);
+        } else if (bigAccountOptions.length > 0 || isMerchantIdSelfInput) {
+          const provisionalEntries = buildPendingBigAccountFileEntries({
+            template: templateConfig.template,
+            mappings: templateConfig.exportMappings,
+            orderedTargetFields: templateConfig.exportTargetFields,
+            inputFilePaths: selectionResult.filePaths
+          });
+          if (prepared.previewOnly) selectionResult.parentProvisionalEntries = provisionalEntries;
+          headerOnly = allEntriesHeaderOnly(provisionalEntries);
+        } else {
+          headerOnly = probeSourceFilesHeaderOnly({
+            template: templateConfig.template,
+            inputFilePaths: selectionResult.filePaths
+          });
+        }
+        if (headerOnly === true) {
+          return createNoTransactionDataResult(templateConfig.template.name, prepared);
+        }
+        if (headerOnly === false && prepared.previewOnly) selectionResult.sourceRowsChecked = true;
+      }
+
       if (bigAccountOptions.length > 1) {
         const provisionalFileEntries = selectionResult.parentProvisionalEntries
           || buildPendingBigAccountFileEntries({
@@ -16924,292 +17557,18 @@ function registerFileHandlers() {
         if (prepared.previewOnly && !selectionResult.parentProvisionalEntries) {
           selectionResult.parentProvisionalEntries = provisionalFileEntries;
         }
-        const savedMode = readBigAccountMode(ensureStorageRoot(), templateId);
-        const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
-
-
-        let forceUnfixedMode = false;
-        if (savedMode === 'fixed' && savedOrderConfig && Array.isArray(savedOrderConfig.files) && savedOrderConfig.files.length > 0) {
-          const importFileCount = selectionResult.filePaths.length;
-
-          if (importFileCount !== savedOrderConfig.fileCount) {
-            // 文件个数不等于"记住顺序"里的文件个数 → 降级为"不固定"模式（不缓存判定，预检返回选择后不会再执行到这里）
-            forceUnfixedMode = true;
-            logSavedBigAccountOrderDowngrade(templateConfig.template.name, { reason: 'file-count', fileNames: [] });
-          } else if (importFileCount === savedOrderConfig.fileCount) {
-            const autoMatchDecision = resolvePreparedFixedBigAccountAutoMatchDecision(
-              prepared,
-              () => {
-                // 每个导入文件按块顺序识别到的账号去全部保存文件里找匹配（不按位置对位）。识别取大账号顺序证据，
-                // 与保存顺序同口径：直接识别逐块取，自定义输入 MerchantId 逐块经账户映射桥接（部分块桥接不到时
-                // 保留已桥接的块，与保存时一致），只用导入时冻结的识别依据，不重开源文件。
-                const importAccountLists = identifiedAccountsFromRowLists(bigAccountOrderEvidenceRowLists(
-                  buildBigAccountOrderEvidence({
-                    fileEntries: provisionalFileEntries,
-                    bigAccounts: effectiveBigAccounts,
-                    rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true })
-                  })
-                ));
-
-                const {
-                  failedImportIndexes,
-                  ambiguousImportIndexes,
-                  reorderedAssignments,
-                  savedIndexByImport
-                } = matchImportFilesToSavedOrder(importAccountLists, savedOrderConfig);
-                const importFileName = (index) => path.basename(provisionalFileEntries[index].filePath);
-                return {
-                  failedFileNames: failedImportIndexes.map(importFileName),
-                  ambiguousFileNames: ambiguousImportIndexes.map(importFileName),
-                  reorderedAssignments,
-                  savedIndexByImport
-                };
-              }
-            );
-            const { failedFileNames, ambiguousFileNames, reorderedAssignments, savedIndexByImport } = autoMatchDecision;
-
-            // 记住的顺序无法唯一对应导入文件时（如同一多币种大账号的多份账单）不自动套用，降级为不固定模式由用户确认；
-            // 匹配不上的文件仍走下方“记住顺序不匹配”提示。
-            if (failedFileNames.length === 0 && ambiguousFileNames.length > 0) {
-              forceUnfixedMode = true;
-              // 常规导入在预检阶段即返回大账号选择，日志须在预检时写（判定按 prepared 缓存，同一次导入只写一次）。
-              if (prepared.previewOnly || !Object.hasOwn(prepared, 'fixedBigAccountAutoMatchDecision')) {
-                logSavedBigAccountOrderDowngrade(templateConfig.template.name, {
-                  reason: 'ambiguous',
-                  fileNames: ambiguousFileNames
-                });
-              }
-            }
-
-            if (failedFileNames.length === 0 && reorderedAssignments.length > 0) {
-
-              // 已保存顺序自动命中时只需本地上下文；仅真正进入人工选择时才持久化 opaque context。
-              const pendingContext = createPendingBigAccountSelectionContext(prepared, {
-                templateId,
-                template: templateConfig.template,
-                mappings: templateConfig.exportMappings,
-                orderedTargetFields: templateConfig.exportTargetFields,
-                inputFilePaths: selectionResult.filePaths,
-                bigAccounts: effectiveBigAccounts,
-                fixedAssignments: templateConfig.fixedAssignments,
-                fileEntries: provisionalFileEntries,
-                rows: buildBigAccountSelectionRows(provisionalFileEntries),
-                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }),
-              });
-
-              // 重排后按位置逐块套用：每份文件逐块识别结果须与对上的记住文件一致（空段 / 未识别段位置、
-              // 旧数据无法还原逐块信息时不自动套用，转人工选择，由下方选择结果的顺序核对降级）。
-              // 有交易但识别不出账号的块只能按位置取分配、无法核对，也不自动生成，交由用户在选择窗口确认。
-              const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
-              const autoApplicable = findSavedOrderFileRowMismatches(importRowLists, savedOrderConfig, savedIndexByImport).length === 0
-                && !hasUnidentifiedTransactionRows(importRowLists);
-              const autoResult = prepared.previewOnly
-                ? null
-                : await ipcMain.emit('__internal-complete-big-account-selection__') || null;
-              if (!autoResult && autoApplicable) {
-                try {
-                  const directResult = await (async () => {
-                    const isFixedMode = true;
-                    const expectedRows = pendingContext.rowsWithEmptyBlocks || pendingContext.rows;
-                    const normalizedAssignments = reorderedAssignments
-                      .map((assignment) => {
-                        const matchedAccount = effectiveBigAccounts.find((item) => item.merchantId === assignment.merchantId);
-                        if (!matchedAccount) return null;
-                        const availableCurrencies = Array.isArray(matchedAccount.currencies) ? matchedAccount.currencies : [];
-                        const normalizedCurrency = matchedAccount.isMultiCurrency
-                          ? normalizeCell(assignment.currency)
-                          : normalizeCell(availableCurrencies[0] || assignment.currency);
-                        if (!normalizedCurrency || !availableCurrencies.includes(normalizedCurrency)) return null;
-                        return { merchantId: matchedAccount.merchantId, currency: normalizedCurrency, rowIndex: assignment.rowIndex };
-                      })
-                      .filter((a) => a !== null)
-                      .sort((left, right) => left.rowIndex - right.rowIndex);
-
-                    if (normalizedAssignments.length !== expectedRows.length) {
-                      // Log first few filtered-out assignments
-                      savedOrderConfig.assignments.forEach((a, i) => {
-                        const matched = effectiveBigAccounts.find((item) => item.merchantId === a.merchantId);
-                        if (!matched) {
-                        } else {
-                          const avail = Array.isArray(matched.currencies) ? matched.currencies : [];
-                          const nc = matched.isMultiCurrency ? normalizeCell(a.currency) : normalizeCell(avail[0] || a.currency);
-                          if (!nc || !avail.includes(nc)) {
-                          }
-                        }
-                      });
-                      return null;
-                    }
-
-                    // v3.2.19：重复账单过滤——在按记住顺序分配大账号后的条目上查重；预检有重复先暂停，
-                    //   执行时按确认摘要去重。须以返回值传出（外层 catch 会把异常当成自动套用失败转人工选择）。
-                    if (prepared.previewOnly) {
-                      if (hasDuplicateRowKeys(pendingContext.fileEntries)) {
-                        const paused = previewDuplicateRows(
-                          applyBigAccountAssignmentsToFileEntries(
-                            pendingContext.fileEntries,
-                            normalizedAssignments,
-                            { includeEmptyBlocks: isFixedMode }
-                          ),
-                          prepared,
-                          templateConfig.template.name
-                        );
-                        if (paused) return paused;
-                      }
-                      return statementImportPreviewReady();
-                    }
-
-                    const reviewedAutoEntries = applyConfirmedDuplicateRowFilter(
-                      applyBigAccountAssignmentsToFileEntries(
-                        pendingContext.fileEntries,
-                        normalizedAssignments,
-                        { includeEmptyBlocks: isFixedMode }
-                      ),
-                      prepared,
-                      templateConfig.template.name
-                    );
-                    if (reviewedAutoEntries.result) return reviewedAutoEntries.result;
-                    const resolvedFileEntries = reviewedAutoEntries.entries;
-                    const fallbackTemplateConfig = {
-                      template: pendingContext.template,
-                      exportMappings: pendingContext.mappings,
-                      exportTargetFields: pendingContext.orderedTargetFields
-                    };
-                    const generationTemplateConfig = resolveGenerationTemplateConfig({
-                      fileEntries: resolvedFileEntries,
-                      fallbackTemplateConfig
-                    });
-                    const generationConfig = buildStatementGenerationConfig({
-                      template: generationTemplateConfig.template,
-                      mappings: generationTemplateConfig.exportMappings,
-                      orderedTargetFields: generationTemplateConfig.exportTargetFields,
-                      allowManagedMerchantWithoutSelection: true
-                    });
-                    const preparedBatch = statementGenerationHelpers.buildPreparedStatementBatchFromEntries({
-                      config: generationConfig,
-                      fileEntries: resolvedFileEntries
-                    });
-                    const generatedFiles = {
-                      ...generateStatementFiles({
-                        config: generationConfig,
-                        preparedBatch,
-                        scope: 'current'
-                      }),
-                      fileEntries: resolvedFileEntries.map((entry) => buildStatementFileEntry({
-                        ...entry,
-                        buildEntryId: buildStatementFileEntryId
-                      })),
-                      preparedBatch
-                    };
-
-                    resolvePendingReplacePaths(pendingContext).forEach((fp) => {
-                      removeStatementSessionEntriesByFilePath(session, fp);
-                    });
-                    const batchId = appendStatementSessionImport({
-                      buildBatchId: buildStatementBatchId,
-                      lastGeneratedExports,
-                      session,
-                      fileEntries: generatedFiles.fileEntries
-                    });
-                    rememberLastFileImportContext({
-                      templateId: generationTemplateConfig.template.id || pendingContext.templateId,
-                      template: generationTemplateConfig.template,
-                      mappings: generationTemplateConfig.exportMappings,
-                      orderedTargetFields: generationTemplateConfig.exportTargetFields,
-                      inputFilePaths: pendingContext.inputFilePaths,
-                      selectedBigAccount: null,
-                      preparedDetailRows: generatedFiles.preparedBatch.detailRows,
-                      scope: 'current',
-                      statementSessionKey: session.key,
-                      currentBatchId: batchId
-                    });
-                    clearPendingBigAccountSelection();
-                    updateStatementSessionCache(session, batchId, generatedFiles);
-                    return buildImportResultFromGeneratedFiles({
-                      generatedFiles,
-                      templateId: pendingContext.templateId,
-                      templateName: generationTemplateConfig.template.name,
-                      inputFilePaths: pendingContext.inputFilePaths
-                    });
-                  })();
-
-                  if (directResult) {
-                    return directResult;
-                  }
-                } catch (autoMatchError) {
-                  // v3.2.19：重复账单【确认】后的续跑：条目已按记住的顺序分配并经用户确认，生成失败（如收支同时有值）
-                  //   照常按导入失败报错，不降级为重新选择大账号（复核窗口会把它当作最终结果）
-                  if (prepared && prepared.duplicateReviewConfirmation && !prepared.previewOnly) throw autoMatchError;
-                  // Fall through to manual selection
-                }
-              }
-            }
-
-            if (failedFileNames.length > 0) {
-              stagePendingBigAccountSelection(prepared, {
-                templateId,
-                template: templateConfig.template,
-                mappings: templateConfig.exportMappings,
-                orderedTargetFields: templateConfig.exportTargetFields,
-                inputFilePaths: selectionResult.filePaths,
-                bigAccounts: effectiveBigAccounts,
-                fixedAssignments: templateConfig.fixedAssignments,
-                fileEntries: provisionalFileEntries,
-                rows: buildBigAccountSelectionRows(provisionalFileEntries),
-                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }),
-              });
-              return {
-                status: 'remember-order-mismatch',
-                message: failedFileNames
-                  .map((name) => `${name}的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。`)
-                  .join('\n'),
-                failedFileNames,
-                selectionMode: 'multi-row',
-                templateId,
-                rows: buildBigAccountSelectionRows(provisionalFileEntries).map((row, index) => ({
-                  index: Number.isInteger(row.index) ? row.index : index,
-                  label: `${index + 1}.`,
-                  sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName)
-                })),
-                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }).map((row, index) => ({
-                  index: Number.isInteger(row.index) ? row.index : index,
-                  label: `${index + 1}.`,
-                  sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName)
-                })),
-                bigAccounts: effectiveBigAccounts.map((item) => ({
-                  merchantId: normalizeCell(item.merchantId),
-                  currencies: Array.isArray(item.currencies)
-                    ? item.currencies.map((value) => normalizeCell(value)).filter((value) => value !== '')
-                    : [],
-                  isMultiCurrency: Boolean(item.isMultiCurrency)
-                })),
-                expandedBigAccountOptions: expandBigAccountConfigurations(effectiveBigAccounts),
-                fixedAssignments: (templateConfig.fixedAssignments || []).map((item) => ({
-                  merchantId: normalizeCell(item.merchantId),
-                  currency: normalizeCell(item.currency),
-                  rowIndex: Number(item.rowIndex || 0)
-                })),
-                forceMode: 'fixed'
-              };
-            }
-          }
-        }
-
+        // v3.2.21：跨 Sheet 回填跳过了全部交易时返回逐行跳过原因（不提示用户检查账户个数或账户号）
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
-        if (!selectionRows.length) {
-          return createErrorResult({
-            step: '导入网银明细文件',
-            message: '导入文件中没有账号存在交易数据',
-            errorCode: 'NO_TRANSACTION_DATA',
-            templateName: templateConfig.template.name
-          });
+        if (!selectionRows.length || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
+          return createNoTransactionDataResult(templateConfig.template.name, prepared, provisionalFileEntries);
         }
 
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
-        const pendingContext = stagePendingBigAccountSelection(prepared, {
+        // v3.2.22：账号顺序固定（记住顺序、按记住的顺序自动分配）已去掉，多账号导入一律由用户手动选择。
+        //   含空段的预览行仍随待选择上下文保存，供「提取大账号顺序」按块取识别证据。
+        stagePendingBigAccountSelection(prepared, {
           templateId,
           template: templateConfig.template,
           mappings: templateConfig.exportMappings,
@@ -17219,22 +17578,14 @@ function registerFileHandlers() {
           fixedAssignments: templateConfig.fixedAssignments,
           fileEntries: provisionalFileEntries,
           rows: selectionRows,
-          rowsWithEmptyBlocks: selectionRowsWithEmpty,
-          });
-        const selectionRequired = buildBigAccountSelectionRequiredResult({
+          rowsWithEmptyBlocks: selectionRowsWithEmpty
+        });
+        return buildBigAccountSelectionRequiredResult({
           rows: selectionRows,
-          rowsWithEmptyBlocks: selectionRowsWithEmpty,
           bigAccounts: effectiveBigAccounts,
           fixedAssignments: templateConfig.fixedAssignments,
           templateId
         });
-        if (forceUnfixedMode) {
-          selectionRequired.forceMode = 'unfixed';
-          return selectionRequired;
-        }
-        // 固定模式未能自动套用（重排后逐块对不上、币种不可用等）而进入人工选择时，界面会按位置预填记住的分配，
-        // 与标准入口同样按位置逐块核对，对不上就降级。
-        return applySavedBigAccountOrderGuard(prepared, pendingContext, selectionRequired);
       }
 
       if (isMerchantIdSelfInput && bigAccountOptions.length <= 1) {
@@ -17253,13 +17604,8 @@ function registerFileHandlers() {
           return sum + identifyAccountBlocks(entry.detailRows).length;
         }, 0);
 
-        if (totalBlocks === 0) {
-          return createErrorResult({
-            step: '导入网银明细文件',
-            message: '导入文件中没有账号存在交易数据',
-            errorCode: 'NO_TRANSACTION_DATA',
-            templateName: templateConfig.template.name
-          });
+        if (totalBlocks === 0 || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
+          return createNoTransactionDataResult(templateConfig.template.name, prepared, provisionalFileEntries);
         }
 
         const needsSelection = inputFileCount > 1 || totalBlocks > 1;
@@ -17275,13 +17621,8 @@ function registerFileHandlers() {
 
           const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
-          if (!selectionRows.length) {
-            return createErrorResult({
-              step: '导入网银明细文件',
-              message: '导入文件中没有账号存在交易数据',
-              errorCode: 'NO_TRANSACTION_DATA',
-              templateName: templateConfig.template.name
-            });
+          if (!selectionRows.length || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {
+            return createNoTransactionDataResult(templateConfig.template.name, prepared, provisionalFileEntries);
           }
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
@@ -17295,11 +17636,10 @@ function registerFileHandlers() {
             fixedAssignments: templateConfig.fixedAssignments,
             fileEntries: provisionalFileEntries,
             rows: selectionRows,
-            rowsWithEmptyBlocks: selectionRowsWithEmpty,
-              });
+            rowsWithEmptyBlocks: selectionRowsWithEmpty
+          });
           return buildBigAccountSelectionRequiredResult({
             rows: selectionRows,
-            rowsWithEmptyBlocks: selectionRowsWithEmpty,
             bigAccounts: effectiveBigAccounts,
             fixedAssignments: templateConfig.fixedAssignments,
             templateId
@@ -17346,13 +17686,8 @@ function registerFileHandlers() {
         if (recognitionResult.status === 'needs-selection') {
           const selectionRows = buildBigAccountSelectionRows(recognitionFileEntries);
 
-          if (!selectionRows.length) {
-            return createErrorResult({
-              step: '导入网银明细文件',
-              message: '导入文件中没有账号存在交易数据',
-              errorCode: 'NO_TRANSACTION_DATA',
-              templateName: templateConfig.template.name
-            });
+          if (!selectionRows.length || isAllTransactionsSkippedByBackfill(recognitionFileEntries)) {
+            return createNoTransactionDataResult(templateConfig.template.name, prepared, recognitionFileEntries);
           }
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(recognitionFileEntries, { includeEmptyBlocks: true });
@@ -17371,7 +17706,6 @@ function registerFileHandlers() {
           });
           return buildBigAccountSelectionRequiredResult({
             rows: selectionRows,
-            rowsWithEmptyBlocks: selectionRowsWithEmpty,
             bigAccounts: effectiveBigAccounts,
             fixedAssignments: templateConfig.fixedAssignments,
             templateId
@@ -17651,8 +17985,7 @@ function registerFileHandlers() {
           let assignedEntries = null;
           const resolveAssignedEntries = () => assignedEntries || (assignedEntries = applyBigAccountAssignmentsToFileEntries(
             pendingContext.fileEntries,
-            normalized.normalizedAssignments,
-            { includeEmptyBlocks: normalized.isFixedMode }
+            normalized.normalizedAssignments
           ));
           const reviewsDuplicateRows = !confirmation && hasDuplicateRowKeys(pendingContext.fileEntries);
           // v3.2.21（D3）：按本次分配的大账号判断渠道组内同一账户是否命中不同余额方式（导入预检时多大账号模板的行还没有账号）。
@@ -17669,13 +18002,9 @@ function registerFileHandlers() {
                   pendingContext.fileEntries,
                   normalized.normalizedAssignments,
                   {
-                    includeEmptyBlocks: normalized.isFixedMode,
                     onlyEntries: new Set(mixedEntries),
                     // 不参与复核的文件按选择窗口已识别的账号块计数，不再扫描
-                    blockCounts: countSelectionRowsByFile(
-                      normalized.isFixedMode ? pendingContext.rowsWithEmptyBlocks : pendingContext.rows,
-                      pendingContext.fileEntries
-                    )
+                    blockCounts: countSelectionRowsByFile(pendingContext.rows, pendingContext.fileEntries)
                   }
                 ))
             )
@@ -17744,9 +18073,6 @@ function registerFileHandlers() {
               ),
               outputs: []
             },
-            rememberOrder: normalized.isFixedMode && typeof payload.rememberOrder === 'boolean'
-              ? payload.rememberOrder
-              : null,
             importConfigGuard: () => (review ? isDuplicateReviewConfigCurrent(review) : isImportConfigStampCurrent(mappingConfig)),
             beforeStart() {
               const current = requirePendingBigAccountSelection(contextId);
@@ -17837,7 +18163,9 @@ function registerFileHandlers() {
     };
     clearPendingBigAccountSelection(prepared.contextId);
     statementDuplicateReview.clear();
-    const { isFixedMode, normalizedAssignments, rememberOrder } = prepared;
+    const { normalizedAssignments } = prepared;
+    // 按文件名映射的多模板分组生成：报错文件名、上下文与活动日志用固定名称（见下方错误处理）
+    let multiTemplateGeneration = false;
     try {
       const session = getOrCreateStatementImportSession({
         statementImportSessions,
@@ -17847,11 +18175,7 @@ function registerFileHandlers() {
 
       // v3.2.19：重复账单过滤——有重复时须已确认（摘要一致）才去重生成，否则拒绝
       const reviewedEntries = applyConfirmedDuplicateRowFilter(
-        applyBigAccountAssignmentsToFileEntries(
-          pendingContext.fileEntries,
-          normalizedAssignments,
-          { includeEmptyBlocks: isFixedMode }
-        ),
+        applyBigAccountAssignmentsToFileEntries(pendingContext.fileEntries, normalizedAssignments),
         prepared,
         pendingContext.template.name
       );
@@ -17868,6 +18192,7 @@ function registerFileHandlers() {
         resolvedFileEntries.map((entry) => entry.matchedTemplateId || 0)
       );
       if (isFilenameMappingMode(pendingContext.templateId) && distinctTemplateIds.size > 1) {
+        multiTemplateGeneration = true;
         const { lastResult, lastBatchId, lastGenerationTemplateConfig } = generateMultiTemplateGroupFiles({
           fileEntries: resolvedFileEntries,
           fallbackTemplateConfig,
@@ -17889,12 +18214,7 @@ function registerFileHandlers() {
           statementSessionKey: session.key,
           currentBatchId: lastBatchId,
         });
-        return persistBigAccountOrderAfterGeneration({
-          pendingContext,
-          normalizedAssignments,
-          rememberOrder,
-          result: lastResult
-        });
+        return lastResult;
       }
 
       const generationTemplateConfig = resolveGenerationTemplateConfig({
@@ -17952,13 +18272,14 @@ function registerFileHandlers() {
         templateName: generationTemplateConfig.template.name,
         inputFilePaths: pendingContext.inputFilePaths
       });
-      return persistBigAccountOrderAfterGeneration({
-        pendingContext,
-        normalizedAssignments,
-        rememberOrder,
-        result
-      });
+      return result;
     } catch (error) {
+      if (isRestoredStatementRuntimeFailure(error)) {
+        return createRestoredStatementRuntimeFailureResult(error, {
+          step: '选择大账号',
+          errorCode: 'BIG_ACCOUNT_SELECTION_RUNTIME'
+        });
+      }
       clearGeneratedExports();
       clearPendingManualBalancePrompt();
 
@@ -17973,23 +18294,29 @@ function registerFileHandlers() {
           || error.code === 'CHANNEL_BALANCE_MODE_MISMATCH'
           || error.code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE'
           ? createDetailedErrorResult
-          : createErrorResult;
+          : (error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? createRollbackIncompleteErrorResult : createErrorResult);
+        // v3.2.22 B45（Codex 第七、八轮）：多模板分组生成的错误（还原不完整、导出位置不安全、写出期间被改动等）报错文件名、
+        //   上下文与活动日志用固定名称（与直接导入入口相同），不写入首个匹配模板的真实名称（可能含完整账号）
+        const reportTemplateName = multiTemplateGeneration ? '按文件名映射模板' : pendingContext.template.name;
         return buildResult({
           step: '选择大账号',
           message: error.message,
           errorCode: error.code,
           originalError: error,
           detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+          // 多模板时各组错误的上下文可能带该组模板的真实名称（如收支同时有值），最后以固定名称覆盖（Codex 第九轮）
           context: {
             templateId: pendingContext.templateId,
-            templateName: pendingContext.template.name,
-            ...(error.context || {})
+            templateName: reportTemplateName,
+            ...(error.context || {}),
+            ...(multiTemplateGeneration ? { templateName: reportTemplateName } : {})
           },
-          templateName: pendingContext.template.name
+          templateName: reportTemplateName
         });
       }
 
       const logPath = appendLog(ensureStorageRoot(), error);
+      const runtimeTemplateName = multiTemplateGeneration ? '按文件名映射模板' : pendingContext.template.name;
       return createErrorResult({
         step: '选择大账号',
         message: '文件转换错误，请导出报错文件查看详情',
@@ -18001,10 +18328,10 @@ function registerFileHandlers() {
         ],
         context: {
           templateId: pendingContext.templateId,
-          templateName: pendingContext.template.name
+          templateName: runtimeTemplateName
         },
         originalError: error,
-        templateName: pendingContext.template.name
+        templateName: runtimeTemplateName
       });
     }
   
@@ -18029,11 +18356,7 @@ function registerFileHandlers() {
     if (!pendingContext) {
       return { status: 'error', failedRows: [], message: '当前没有待处理的大账号选择任务，请重新导入文件' };
     }
-    return extractBigAccountOrderFromEvidence(
-      pendingContext,
-      payload?.mode || 'unfixed',
-      payload.rowIndexes
-    );
+    return extractBigAccountOrderFromEvidence(pendingContext, payload.rowIndexes);
   });
 
   businessIpcHandle('file:save-balance-seed', '补录余额并生成账单', {
@@ -18148,7 +18471,7 @@ function registerFileHandlers() {
             throw new FileValidationError('BALANCE_GAP_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
           }
           appendActivityLogEntry({
-            level: 'warn',
+            level: 'warning',
             message: '账单日期不连续，选择不补录期末余额，余额可能不准确',
             details: [
               `模板名：${pendingPrompt.templateName || 'N/A'}`,
@@ -18165,7 +18488,7 @@ function registerFileHandlers() {
             throw new FileValidationError('BALANCE_MISMATCH_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
           }
           appendActivityLogEntry({
-            level: 'warn',
+            level: 'warning',
             message: '余额校验不一致，已确认按账单余额生成',
             details: [
               `模板名：${pendingPrompt.templateName || 'N/A'}`,
@@ -18182,7 +18505,7 @@ function registerFileHandlers() {
             throw new FileValidationError('BALANCE_SEED_REPLACE_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
           }
           appendActivityLogEntry({
-            level: 'warn',
+            level: 'warning',
             message: '人工补录的期末余额与本次余额不一致，已确认替换',
             details: [
               `模板名：${pendingPrompt.templateName || 'N/A'}`,
@@ -18228,13 +18551,18 @@ function registerFileHandlers() {
               detail: lastGeneratedExports.detail,
               balanceRequested: true
             };
+            // v3.2.21：后续提示与首次提示同样带上「跨 Sheet 回填」跳过的笔数（明细仍可导出）
+            const withPendingNotes = (result) => statementGenerationHelpers.attachCrossSheetBackfillSkipped(
+              withDuplicateDropped(result),
+              regenResult.warnings
+            );
             // 还有其他 group 需要补录、确认断档或确认余额不一致 → 返回下一个 prompt
-            if (regenResult.gaps) return withDuplicateDropped(buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles));
-            if (regenResult.mismatches) return withDuplicateDropped(buildBalanceMismatchConfirmResult(regenResult.mismatches, pendingFiles));
+            if (regenResult.gaps) return withPendingNotes(buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles));
+            if (regenResult.mismatches) return withPendingNotes(buildBalanceMismatchConfirmResult(regenResult.mismatches, pendingFiles));
             if (regenResult.replacements) {
-              return withDuplicateDropped(buildBalanceSeedReplaceConfirmResult(regenResult.replacements, pendingFiles));
+              return withPendingNotes(buildBalanceSeedReplaceConfirmResult(regenResult.replacements, pendingFiles));
             }
-            return withDuplicateDropped(buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles));
+            return withPendingNotes(buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles));
           }
           const generatedFiles = regenResult.generatedFiles;
           if (importContext.scope === 'all') {
@@ -18340,19 +18668,33 @@ function registerFileHandlers() {
       // 其他错误交给 beforeStart 处理（与此前一致）
     }
     if (channelBalanceStop) return { proceed: false, result: channelBalanceStop };
+    // v3.2.21：导出明细附带回填后的原始账单，写在明细保存目录下；导入后已变化的源文件不登记输出，结果中提示重新导入
+    const backfillCandidates = kind === 'detail' && plan.session
+      ? collectCrossSheetBackfillExportItems(plan.session, plan.normalizedScope)
+      : [];
+    const backfillItems = backfillCandidates.filter((item) => isCrossSheetBackfillSourceUnchanged(item));
+    const backfillChangedItems = backfillCandidates.filter((item) => !backfillItems.includes(item));
+    const backfillOutputPaths = allocateCrossSheetBackfillOutputPaths({
+      directory: path.dirname(saveResult.filePath),
+      sourceFilePaths: backfillItems.map((item) => item.sourceFilePath),
+      reservedPaths: [saveResult.filePath]
+    });
+    const backfillSignature = (items) => items.map((item) => `${item.sourceFilePath}\u0000${item.source.sha256}`).join('\u0001');
     return {
       proceed: true,
       kind,
       plan,
+      backfillItems,
+      backfillChangedItems,
       filePlan: {
         version: 1,
         allocation: 'eager',
         inputs: [],
-        outputs: [{
-          filePath: saveResult.filePath,
+        outputs: [saveResult.filePath].concat(backfillOutputPaths).map((filePath) => ({
+          filePath,
           role: 'output',
           sourceOperation: kind === 'detail' ? 'file:export-detail' : 'file:export-balance'
-        }]
+        }))
       },
       beforeStart() {
         const current = buildStatementExportPlan(kind, plan.normalizedScope);
@@ -18360,7 +18702,10 @@ function registerFileHandlers() {
             || current.session !== plan.session
             || current.generatedFile !== plan.generatedFile
             || current.needsGeneration !== plan.needsGeneration
-            || current.defaultFileName !== plan.defaultFileName) {
+            || current.defaultFileName !== plan.defaultFileName
+            || (kind === 'detail'
+              && backfillSignature(collectCrossSheetBackfillExportItems(current.session, plan.normalizedScope))
+                !== backfillSignature(backfillCandidates))) {
           throw new Error('账单导出会话在保存确认期间已变化，请重新导出');
         }
       }
@@ -18370,14 +18715,38 @@ function registerFileHandlers() {
   trackedIpcHandle('file:export-detail', '生成网银账单', '导出明细', {
     prepare: (_event, scope = 'auto') => prepareStatementExport('detail', scope),
     async execute(_event, prepared, taskContext) {
-      const result = exportStatementByScope(
+      let result = await exportStatementByScope(
         'detail',
         prepared.plan.normalizedScope,
         taskContext.fileEvidence.filePlan.outputs[0].filePath
       );
+      // v3.2.21：明细导出成功后再写回填后的原始账单（明细未导出时不写）；结果提示附上各份的导出情况
+      const backfillOutputs = taskContext.fileEvidence.filePlan.outputs.slice(1);
+      let backfillResults = [];
+      if (result && result.status === 'success'
+          && (prepared.backfillItems.length || prepared.backfillChangedItems.length)) {
+        const backfill = await exportCrossSheetBackfillWorkbooks(
+          prepared.backfillItems,
+          backfillOutputs.map((item) => item.filePath),
+          prepared.backfillChangedItems
+        );
+        backfillResults = backfill.results;
+        result = {
+          ...result,
+          message: [result.message].concat(backfill.lines).join('；'),
+          crossSheetBackfillExports: backfill.results
+        };
+      }
+      // 回填文件按本次写出内容的摘要结算（发布后被替换的不会当成本次产物）；未写出的声明为未产出，不按路径读取
+      //   （目标在分配名称后被他人占用时，不把占位者的文件归档成本次产物）。backfillResults 与 backfillOutputs 同序。
       await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
+        files: [{ artifactKey: taskContext.fileEvidence.filePlan.outputs[0].artifactKey }]
+          .concat(backfillOutputs.map((item, index) => {
+            const written = backfillResults[index];
+            return written && written.status === 'success'
+              ? { artifactKey: item.artifactKey, expectedSha256: written.sha256, expectedSizeBytes: written.size }
+              : { artifactKey: item.artifactKey, produced: false };
+          }))
       });
       return result;
     }
@@ -18416,6 +18785,9 @@ function registerFileHandlers() {
     }),
     async execute(_event, prepared, taskContext) {
     const payload = prepared.payload;
+    // v3.2.22 B113（Codex 第七轮）：新一轮装配开始即失效上一期的待导出引用（不删除已归档文件）：任何失败出口（输入无效、
+    //   余额模板缺失、记录无法写出等）都不再让导出拿到上一期的文件；装配成功时换成本期
+    lastGeneratedExports.monthlyBalance = null;
     try {
       const templateScopeRaw = payload && typeof payload.templateScope === 'string' ? payload.templateScope : '';
       const templateNameRaw = payload && typeof payload.templateName === 'string' ? payload.templateName : '';
@@ -18510,6 +18882,8 @@ function registerFileHandlers() {
         kind: 'balance',
         outputFileName: publicFileName
       });
+      // 校验失败不建批、不占号：预留归档批次前先核对最终记录（写出边界仍兜底）
+      assertBalanceRecordsWritable({ records, templateFields: balanceTemplateFields });
       const promotionManifest = buildStatementDeferredOutputManifest(
         output.outputFilePath,
         'monthly-balance:assemble'
@@ -18568,6 +18942,19 @@ function registerFileHandlers() {
         }
       };
     } catch (error) {
+      // 装配失败：与装配结果为空时一样清除待导出引用（不删除已归档的上一份文件），之后的「导出」不再拿到上一期的文件
+      //   （Codex 第六轮；rules/important-variables.md 导出缓存生命周期）
+      lastGeneratedExports.monthlyBalance = null;
+      // v3.2.22 B113：业务校验错误（如余额记录含无法写入 Excel 的字符）把消息与逐处位置交给弹窗和报错文件，不改报系统错误
+      if (error instanceof FileValidationError) {
+        return createDetailedErrorResult({
+          step: '装配月度余额账单',
+          message: error.message,
+          errorCode: error.code || 'BUSINESS_ERROR',
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+          context: error.context || {}
+        });
+      }
       return createErrorResult({
         step: '装配月度余额账单',
         message: '装配月度余额账单失败，请导出报错文件查看详情',
@@ -18739,6 +19126,8 @@ function registerNewAccountHandlers() {
         kind: 'new-account',
         outputFileName: generated.fileName
       });
+      // 校验失败不建批、不占号：预留归档批次前先核对最终记录（写出边界仍兜底）
+      assertBalanceRecordsWritable({ records: generated.records, templateFields: balanceTemplateFields });
       const promotionManifest = buildStatementDeferredOutputManifest(
         output.outputFilePath,
         'new-account:generate'
@@ -18796,17 +19185,20 @@ function registerNewAccountHandlers() {
           errorCode: error.code,
           detailLines: error.detailLines,
           originalError: error,
-          context: {
-            accounts: accounts.map((account) => ({
-              bankName: account.bankName,
-              location: account.location,
-              currency: account.currency,
-              currencies: account.currencies,
-              bankAccount: account.bankAccount,
-              openingDate: account.openingDate ? formatDateLabel(account.openingDate) : account.openingDateRaw
-            })),
-            moduleName: NEW_ACCOUNT_EXPORT_NAME
-          },
+          // v3.2.22 B113：无法写入的字符的拒绝只需行列位置（positionsOnly），不把整批账号写进报错文件
+          context: error.positionsOnly
+            ? { accountCount: accounts.length, moduleName: NEW_ACCOUNT_EXPORT_NAME }
+            : {
+              accounts: accounts.map((account) => ({
+                bankName: account.bankName,
+                location: account.location,
+                currency: account.currency,
+                currencies: account.currencies,
+                bankAccount: account.bankAccount,
+                openingDate: account.openingDate ? formatDateLabel(account.openingDate) : account.openingDateRaw
+              })),
+              moduleName: NEW_ACCOUNT_EXPORT_NAME
+            },
           templateName: NEW_ACCOUNT_EXPORT_NAME
         });
       }
@@ -19770,7 +20162,9 @@ function registerNewAccountHandlers() {
   //   既有 readLinkedRowsAsObjects 退化为只取 objects 的薄封装 → 所有旧调用方零行为变化。
   //   🔴 rowNumbers[i] = objects[i] 所在的原文件物理行号（1-based）；空行被 readRowsWithMetadata 过滤造成的
   //      行号断档（前后差 > 1）是 BOC 分组分隔符的唯一可还原依据（流式路径不透传行号，见 §2.5）。
-  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null) {
+  // storedProjection：结果要写入 SQLite（链接表入库）时传入落库前的投影（裁列、改名），实际落库的列含空字符时拒绝；
+  //   退款订单等只在内存中使用的读取不传，保留原有读取契约（v3.2.22 B113，Codex 第十一至十三轮）
+  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null, { storedProjection = null } = {}) {
     const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
     if (expected.length === 0) {
       return { objects: [], rowNumbers: [] };
@@ -19805,10 +20199,14 @@ function registerNewAccountHandlers() {
       throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
     }
 
+    const assertStoredCells = storedProjection ? createStoredCellAssert(expected, storedProjection) : null;
     const objects = [];
     const rowNumbers = [];
     for (let ri = headerRowIdx + 1; ri < rows.length; ri += 1) {
       const row = Array.isArray(rows[ri]) ? rows[ri] : [];
+      // 物理行号：allRowNumbers 同下标取；缺失退化为 ri+1（与 readRowsWithMetadata 无表头分支口径一致）。
+      const rn = allRowNumbers[ri];
+      const rowNumber = rn === undefined || rn === null ? ri + 1 : rn;
       const obj = {};
       for (let i = 0; i < expected.length; i += 1) {
         const headerName = normalizeLinkedCell(expected[i]);
@@ -19816,10 +20214,10 @@ function registerNewAccountHandlers() {
         const cell = row[colOffset + i];
         obj[headerName] = normalizeLinkedCell(cell === undefined ? '' : cell);
       }
+      // 落库的列含空字符时拒绝入库（与流式导入同口径，v3.2.22 B113，Codex 第十一、十三轮）
+      if (assertStoredCells) assertStoredCells(obj, rowNumber);
       objects.push(obj);
-      // 物理行号：allRowNumbers 同下标取；缺失退化为 ri+1（与 readRowsWithMetadata 无表头分支口径一致）。
-      const rn = allRowNumbers[ri];
-      rowNumbers.push(rn === undefined || rn === null ? ri + 1 : rn);
+      rowNumbers.push(rowNumber);
     }
     return { objects, rowNumbers };
   }
@@ -19877,7 +20275,9 @@ function registerNewAccountHandlers() {
     let fxRowNumbers = null;
     if (useStreamingPath) {
       const feedRows = async (writeOne) => {
-        const { matched } = await streamLinkedRowsToInsert(filePath, signature, writeOne, transform);
+        // 按键幂等写入的两张表核对键列（见 streamLinkedRowsToInsert）
+        const keyField = isGatewayBill ? 'ReconBillBizId' : (isBankDeposit ? 'BizId' : null);
+        const { matched } = await streamLinkedRowsToInsert(filePath, signature, writeOne, transform, { keyField });
         if (!matched) {
           throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
         }
@@ -19894,7 +20294,7 @@ function registerNewAccountHandlers() {
       }
     } else {
       // 数组路径：fx-settlement 用 WithMeta 同时取物理行号（BOC 分组扫描热依赖）；其余表零行为变化。
-      const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName);
+      const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName, { storedProjection: transform });
       // 一行对应一行，物理行号 rowNumbers 与之对齐不变（BOC 分组依赖行号断档）。
       const rows = meta.objects.map((row) => projectLinkedRow(signature, row));
       if (repoKey === 'fx-settlement') {
@@ -21507,8 +21907,9 @@ async function resolvePositionAnomalyReportReference(report = {}) {
   const batch = repository && operationKey
     ? repository.getBatchByOperationKey('position-reconciliation-process', operationKey)
     : null;
-  const artifact = batch && artifactKey
-    ? repository.getArtifactByKey(batch.id, artifactKey)
+  // 侧库记的是生成报告时的键，存档条目的键由文件计划另行分配：按条目里登记的生成键去找。
+  const artifact = batch
+    ? findArchivedPositionReportArtifact(repository, batch.id, artifactKey)
     : null;
   if (!artifact || artifact.status !== 'ready') {
     throw new PositionReconciliationError(
@@ -21527,6 +21928,36 @@ async function resolvePositionAnomalyReportReference(report = {}) {
     );
   }
   return { filePath: readonly.filePath };
+}
+
+// v3.2.22：平盘侧库换新结构（银行行只存交互字段），旧结构的库不迁移，启动时整体丢弃并解除主库绑定，
+// 之后按全新侧库初始化。必须早于任何读取侧库的入口（service、存档删除保护、启动恢复）。
+function discardOutdatedPositionSideDbAtStartup() {
+  try {
+    // 先解除主库绑定再删旧库：三项写入可重复执行，删除放在最后，任何一步中断后下次启动都会重做。
+    const discarded = discardOutdatedPositionSideDb(path.dirname(database.dbPath), {
+      beforeDelete: () => {
+        database.setSetting(POSITION_SIDE_DB_CHECKPOINT_SETTING, '');
+        database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
+        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+      }
+    });
+    if (!discarded) return;
+    appendActivityLogEntry({
+      level: 'info',
+      source: 'main',
+      domain: 'position-reconciliation-side-db-init',
+      message: '平盘侧库为旧版本结构，已丢弃并将按新结构重建'
+    });
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'position-reconciliation-side-db-init',
+      message: '平盘旧版本侧库清理失败',
+      details: [`code=${String(error && error.code ? error.code : 'unknown')}`]
+    });
+  }
 }
 
 function getPositionReconciliationService() {
@@ -21583,23 +22014,14 @@ function getPositionReconciliationService() {
             // Renderer may be closing while the utility process settles.
           }
         },
-        authorizeStreamingSourceApply: async (preflightReady) => {
-          const migration = dispatchPositionLargeImportSchemaMigration({
-            engine: 'streaming',
-            userDataDir: path.dirname(database.dbPath),
-            sideDbPath: service.store.dbPath,
-            expectedCheckpoint: service.persistenceCheckpoint()
-          });
-          const schema = await migration.promise;
-          return authorizePositionImportApply({
-            preflightReady,
-            currentCheckpoint: service.persistenceCheckpoint(),
-            schemaFingerprint: schema.fingerprint,
-            readPending: positionTaskOwner.readPositionPendingOperation,
-            writePending: positionTaskOwner.writePositionPendingOperation,
-            recordArchiveIntentFiles: positionTaskOwner.recordPositionArchiveIntentFiles
-          });
-        }
+        // 链接原始表单遍导入：数据已写在未提交的事务里，这里只登记存档意图并给出提交凭证。
+        authorizeStreamingSourceApply: async (preflightReady) => authorizePositionImportApply({
+          preflightReady,
+          currentCheckpoint: service.persistenceCheckpoint(),
+          readPending: positionTaskOwner.readPositionPendingOperation,
+          writePending: positionTaskOwner.writePositionPendingOperation,
+          recordArchiveIntentFiles: positionTaskOwner.recordPositionArchiveIntentFiles
+        })
       });
       const checkpoint = service.persistenceCheckpoint();
       const recovery = positionTaskOwner.recoverPositionArchiveIntent(
@@ -21786,18 +22208,35 @@ function registerPositionReconciliationHandlers() {
               sourceOperation: 'position-reconciliation:bank:apply-import'
             })),
             outputs: []
-          }
+          },
+          // 任务未接管就结束时回滚等待中的导入，释放侧库写锁。
+          onAbandon: () => getPositionReconciliationService().abandonPreparedBankImport(token)
         };
       },
-      execute: (_event, _prepared, taskContext, token) => (
-        withPositionReconciliationLock('bank-import-apply', () => {
+      execute: async (_event, _prepared, taskContext, token) => {
+        const result = await withPositionReconciliationLock('bank-import-apply', () => {
           return getPositionReconciliationService().applyBankImport(
             token,
             taskContext.batchContext,
             taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)
           );
-        })
-      )
+        });
+        // 模块锁被占时 applyBankImport 没有执行：同样要回滚等待中的导入。此时存档清单已登记这些暂存文件，
+        // 导入进程只回滚事务、不删暂存；文件留给本任务的存档结算，结算后由收尾流程回收。
+        if (result && result.status === 'busy') {
+          await getPositionReconciliationService().abandonPreparedBankImport(token);
+        }
+        return result;
+      }
+    },
+    {
+      // 导入进程在上一步（选择文件）已经开着未提交的事务等确认。确认这一步无论在哪里结束——
+      // 包括 prepare 之前的 Recovery Hold 检查就被拒、此时 onAbandon 还没登记——只要令牌没有被
+      // applyBankImport 用掉，就按令牌回滚并释放侧库写锁；令牌已用掉时这里什么都不做。
+      afterInvocation: async (_event, token) => {
+        if (!positionReconciliationService) return;
+        await positionReconciliationService.abandonPreparedBankImport(token);
+      }
     }
   );
 
@@ -22421,6 +22860,31 @@ function buildToolboxAuditDetailLines(files, warningSummary = null) {
   return details;
 }
 
+// v3.2.22 B58（spec D3，Codex 第十轮）：前台生成器失败时先核对冻结的输入：源文件在生成期间被替换（如换成缺少所选字段的版本）时
+//   按计划的失效口径报源文件已变化，不把另一版本引起的错误（「找不到字段」等）报给用户；输入未变或已取消时保留原错误。
+//   改报源文件已变化时保留原错误的暂存保留标志、清理诊断与人工恢复路径，清理失败的暂存文件不被外层删除（Codex 第十一轮）
+const TOOLBOX_CLEANUP_FAILURE_LINE_PREFIX = '清理工具箱临时产物失败：';
+async function generateToolboxCheckingInputs(filePlan, generate) {
+  try {
+    return await generate();
+  } catch (error) {
+    if (!filePlan || /_CANCELLED$/.test(String(error && error.code || ''))) throw error;
+    try {
+      await assertFilePlanInputsFreshAsync(filePlan);
+    } catch (staleError) {
+      if (error && typeof error === 'object') {
+        if (error.preserveTemporaryFiles === true) staleError.preserveTemporaryFiles = true;
+        const cleanupLines = (Array.isArray(error.detailLines) ? error.detailLines : [])
+          .filter((line) => String(line).startsWith(TOOLBOX_CLEANUP_FAILURE_LINE_PREFIX));
+        if (cleanupLines.length) staleError.detailLines = [...(staleError.detailLines || []), ...cleanupLines];
+        if (Array.isArray(error.recoveryPaths)) staleError.recoveryPaths = error.recoveryPaths.slice();
+      }
+      throw staleError;
+    }
+    throw error;
+  }
+}
+
 async function publishToolboxArtifacts(
   kind,
   artifacts,
@@ -22431,13 +22895,36 @@ async function publishToolboxArtifacts(
   const targetSnapshots = Array.isArray(options.targetSnapshots)
     ? options.targetSnapshots
     : [];
+  const targetList = Array.isArray(targets) ? targets : [];
+  // v3.2.22 B58：带冻结 FilePlan 的发布，目标须与计划输出一一对应；父目录身份统一取自冻结计划交给发布器复核
+  //   （目录被同路径替换即拒绝），并在发布前再核对一次输入，生成期间源文件被替换或改写时不形成正式输出。
+  //   目标文件与父目录由发布器在提交时复核，这里只补发布器不掌握的输入快照。
+  const plan = options.fileEvidence && options.fileEvidence.filePlan;
+  if (plan) {
+    if (plan.outputs.length !== targetList.length) {
+      throw new Error('工具箱发布目标与 FilePlan 输出数量不一致');
+    }
+    // 按计划输出的下标逐项核对：数组空槽也拒绝（forEach 会跳过空槽，Codex 第八轮）
+    plan.outputs.forEach((output, index) => {
+      const target = targetList[index];
+      const targetPath = target && typeof target === 'object' ? target.targetPath : target;
+      if (!targetPath || path.resolve(String(targetPath)) !== output.filePath) {
+        throw new Error('工具箱发布目标与 FilePlan 输出不一致');
+      }
+    });
+    // 异步核对：输入在网络盘上断连或高延迟时不阻塞主进程（Codex 第六轮）
+    await assertFilePlanInputsFreshAsync(plan);
+  }
   const publication = await publishToolboxPublicationAsync({
     taskId: `toolbox-${kind}-${Date.now()}-${randomUUID()}`,
     artifacts,
-    targets: (Array.isArray(targets) ? targets : []).map((target, index) => ({
+    targets: targetList.map((target, index) => ({
       ...(target && typeof target === 'object' ? target : { targetPath: target }),
       ...(targetSnapshots[index]
         ? { expectedTargetSnapshot: targetSnapshots[index] }
+        : {}),
+      ...(plan && plan.outputs[index].targetParentIdentity
+        ? { expectedTargetParentIdentity: plan.outputs[index].targetParentIdentity }
         : {})
     })),
     protectedSourcePaths: options.protectedSourcePaths,
@@ -22579,6 +23066,64 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
       }
     }
   }
+}
+
+// v3.2.22 B57：保存框 / 目录选择返回后先只冻结目标（目标快照与父目录身份），再访问输入（别名检查、输入快照）。
+//   完整计划沿用先冻结的输出证据、不重新采样（normalizeFilePlanV1 的 reuseFrozenOutputsOf），返回给执行阶段的计划携带的
+//   就是用户确认时的目标版本（父目录身份的可靠性也按首次冻结：首次不可靠时之后只核对路径）；之后再按冻结的证据核对当前
+//   磁盘。输入多或在网络盘上时，遍历输入期间外部新建、替换（含建成文件夹）的目标报目标变化。
+//   别名检查或完整计划规范化失败时先核对目标：目标变了、或系统错误指向输出路径与其任一级上级目录（目录被移走后又移回等），
+//   报目标变化（中文提示）；否则是输入本身的问题（或真的别名到输入），原样抛出
+function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
+  const targetsOnly = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs });
+  const targetChanged = () => Object.assign(new TypeError('输出目标在任务确认后已变化'), { code: 'ARCHIVE_TARGET_CHANGED' });
+  const assertTargetsUnchanged = () => {
+    try {
+      assertFilePlanFresh(targetsOnly);
+    } catch (_error) {
+      throw targetChanged();
+    }
+  };
+  // 系统错误的路径是输出路径本身或其任一级上级目录（字面路径与冻结时解析出的真实路径）时，按目标变化处理：
+  //   输出所在目录的上级被移走又移回时，解析报的是第一个缺失的上级（Codex 第五轮 P3）
+  const targetPaths = targetsOnly.outputs.flatMap((output) => [
+    path.resolve(output.filePath),
+    path.join(output.targetParentIdentity.canonicalRealPath, path.basename(output.filePath))
+  ]);
+  // 按工具箱既有的路径别名规则比较（macOS 不区分大小写与组合 / 分解字符，Windows 不区分大小写；只影响报错归类，
+  //   Codex 第六、七轮）
+  const comparable = (value) => normalizeTargetAliasKey(path.resolve(value));
+  const comparableTargets = targetPaths.map(comparable);
+  const matchesTargetOrAncestor = (candidate) => {
+    const resolved = comparable(candidate);
+    const prefix = resolved.endsWith(path.sep) ? resolved : resolved + path.sep;
+    return comparableTargets.some((targetPath) => targetPath === resolved || targetPath.startsWith(prefix));
+  };
+  // 字面路径未命中时按解析后的真实路径再比（错误经指向输出目录的目录链接报出，目录随后已移回，Codex 第八轮）。
+  //   冻结时的真实路径由 fs.realpathSync 解析，Windows 上保留 8.3 短名（如 RUNNER~1），native 版会展开成长名：两种都比，
+  //   否则短名路径下认不出输出目录、透传英文系统错误
+  const isTargetOrAncestor = (errorPath) => {
+    if (matchesTargetOrAncestor(errorPath)) return true;
+    for (const resolveRealPath of [(value) => fs.realpathSync(value), (value) => fs.realpathSync.native(value)]) {
+      try {
+        if (matchesTargetOrAncestor(resolveRealPath(errorPath))) return true;
+      } catch (_error) {
+        // 解析不了按未命中处理，换另一种解析方式
+      }
+    }
+    return false;
+  };
+  let plan;
+  try {
+    assertToolboxTargetsDoNotAliasSources(inputs.map((item) => item.filePath), outputs.map((item) => item.filePath));
+    plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs, outputs }, { reuseFrozenOutputsOf: targetsOnly });
+  } catch (error) {
+    assertTargetsUnchanged();
+    if (error && typeof error.path === 'string' && isTargetOrAncestor(error.path)) throw targetChanged();
+    throw error;
+  }
+  assertTargetsUnchanged();
+  return plan;
 }
 
 let toolboxSplitReadContext = null;
@@ -22747,24 +23292,19 @@ function registerToolboxHandlers() {
         if (saveResult.canceled || !saveResult.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
-        assertToolboxTargetsDoNotAliasSources(choice.filePaths, [saveResult.filePath]);
         const inputFiles = Object.freeze(choice.filePaths.map((filePath) => Object.freeze({
           filePath,
           role: 'input',
           sourceOperation: 'toolbox:merge'
         })));
+        // v3.2.22 B57：保存框返回即先冻结目标、再冻结输入，之后的新建 / 替换由生命周期与发布器拒绝
         const prepared = {
           proceed: true,
-          filePlan: {
-            version: 1,
-            allocation: 'eager',
-            inputs: inputFiles,
-            outputs: [{
-              filePath: saveResult.filePath,
-              role: 'output',
-              sourceOperation: 'toolbox:merge'
-            }]
-          }
+          filePlan: freezeToolboxFilePlanTargetsFirst(inputFiles, [{
+            filePath: saveResult.filePath,
+            role: 'output',
+            sourceOperation: 'toolbox:merge'
+          }])
         };
         return prepared;
       } catch (error) {
@@ -22830,11 +23370,11 @@ function registerToolboxHandlers() {
             };
             publishResult = generated.publication;
           } else {
-            writeRes = await toolboxMergeFilesToXlsx({
+            writeRes = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => toolboxMergeFilesToXlsx({
               filePaths,
               savePath: tempPath,
               sheetBaseName: 'COMMON'
-            });
+            }));
             publishResult = await publishMergeArtifacts([{
               sourcePath: tempPath,
               outputId: 'merge-1',
@@ -22979,6 +23519,19 @@ function registerToolboxHandlers() {
         let targetPlans = null;
         let savePath = '';
         let rows = null;
+        let frozenFilePlan = null;
+        // v3.2.22 B57：选定目标后立即冻结全部目标（含尚不存在的）与源文件，覆盖确认只针对冻结时已存在的目标，
+        //   确认期间的新建 / 替换由确认后的核对拒绝；按行拆分在 prepareRows 中同样处理。
+        const freezeSplitFilePlan = (targetPaths) => freezeToolboxFilePlanTargetsFirst([{
+          filePath: readContext.sourceFilePath,
+          role: 'input',
+          sourceOperation: 'toolbox:split:export',
+          freshnessFailure: { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', message: '拆分源文件在读取后已变化，请重新选择' }
+        }], targetPaths.map((filePath) => ({
+          filePath,
+          role: 'output',
+          sourceOperation: 'toolbox:split:export'
+        })));
         if (payload.mode === 'rows') {
           rows = await prepareToolboxRows(payload, readContext, {
             metadataDirectory: app.getPath('userData'),
@@ -23000,6 +23553,8 @@ function registerToolboxHandlers() {
           });
           if (!rows) return { proceed: false, result: { status: 'cancelled' } };
           outputPaths = rows.targets.map((item) => item.filePath);
+          assertToolboxTargetsDoNotAliasSources([readContext.sourceFilePath], outputPaths);
+          frozenFilePlan = rows.filePlan;
         } else if (payload.mode === 'multiple') {
           const groups = toolboxNormalizeMultiSplitGroups(payload.groups);
           const directoryChoice = await showImportOpenDialog('toolbox-split-export-directory', {
@@ -23030,7 +23585,9 @@ function registerToolboxHandlers() {
               }
             };
           }
-          const conflicts = targetPlans.filter((plan) => fs.existsSync(plan.targetPath));
+          outputPaths = targetPlans.map((plan) => plan.targetPath);
+          frozenFilePlan = freezeSplitFilePlan(outputPaths);
+          const conflicts = targetPlans.filter((_plan, index) => frozenFilePlan.outputs[index].targetSnapshot.exists);
           if (conflicts.length > 0) {
             const overwriteChoice = await dialog.showMessageBox(mainWindow, {
               type: 'warning',
@@ -23045,8 +23602,17 @@ function registerToolboxHandlers() {
             if (!overwriteChoice || overwriteChoice.response !== 1) {
               return { proceed: false, result: { status: 'cancelled' } };
             }
+            // 覆盖确认期间目标可能被新建或替换：确认后再核对整份计划。没有弹窗时冻结刚核对过全部目标、其后没有等待，
+            //   不再重复同步核对（执行前 TaskLifecycle 仍会核对），避免高延迟网络盘上阻塞其他 IPC（Codex 第七轮）
+            try {
+              assertFilePlanFresh(frozenFilePlan);
+            } catch (error) {
+              // 源文件已变化：清除本次拆分读取会话（预取值与字段缓存），与执行前核对到源文件变化时一致；目标变化等其他失败
+              //   保留会话，用户可直接重试（Codex 第十二轮）
+              if (error && error.code === 'TOOLBOX_SPLIT_READ_CONTEXT_STALE') clearToolboxSplitReadContext(readContext);
+              throw error;
+            }
           }
-          outputPaths = targetPlans.map((plan) => plan.targetPath);
           targetPlans = groups.map((group, index) => ({
             ...group,
             outputId: `split-${index + 1}`
@@ -23061,11 +23627,8 @@ function registerToolboxHandlers() {
           }
           savePath = saveResult.filePath;
           outputPaths = [savePath];
+          frozenFilePlan = freezeSplitFilePlan(outputPaths);
         }
-        assertToolboxTargetsDoNotAliasSources(
-          [readContext.sourceFilePath],
-          outputPaths
-        );
         const prepared = {
           proceed: true,
           payload,
@@ -23075,21 +23638,7 @@ function registerToolboxHandlers() {
           targetPlans,
           rows
         };
-        const inputFiles = Object.freeze([Object.freeze({
-          filePath: readContext.sourceFilePath,
-          role: 'input',
-          sourceOperation: 'toolbox:split:export'
-        })]);
-        prepared.filePlan = rows ? rows.filePlan : {
-          version: 1,
-          allocation: 'eager',
-          inputs: inputFiles,
-          outputs: outputPaths.map((filePath) => ({
-            filePath,
-            role: 'output',
-            sourceOperation: 'toolbox:split:export'
-          }))
-        };
+        prepared.filePlan = frozenFilePlan;
         prepared.beforeStart = (_batchContext, planEvidence) => {
           const sourceEvidence = planEvidence.inputFiles[0];
           assertToolboxSplitSourceFresh(readContext, sourceEvidence);
@@ -23125,10 +23674,7 @@ function registerToolboxHandlers() {
               metadataDirectory: app.getPath('userData'),
               publisher: (artifacts) => publishToolboxArtifacts(
                 'split-rows', artifacts,
-                taskContext.fileEvidence.filePlan.outputs.map((output) => ({
-                  targetPath: output.filePath,
-                  expectedTargetParentIdentity: output.targetParentIdentity
-                })),
+                taskContext.fileEvidence.filePlan.outputs.map((output) => ({ targetPath: output.filePath })),
                 taskContext.batchContext, {
                   protectedSourcePaths: [sourceFilePath],
                   targetSnapshots: taskContext.fileEvidence.targetSnapshots,
@@ -23182,7 +23728,7 @@ function registerToolboxHandlers() {
           let generationResult;
           let publishResult = null;
           if (await shouldUseLargeChannel(sourceFilePath)) {
-            generationResult = await dispatchLargeSplit({
+            generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => dispatchLargeSplit({
               op: 'exportMultiFilters',
               filePath: sourceFilePath,
               groups: preparedPlans.map((plan) => ({
@@ -23193,7 +23739,7 @@ function registerToolboxHandlers() {
                 savePath: plan.temporaryPath
               })),
               batchContext: taskContext.batchContext
-            }).promise;
+            }).promise);
           } else if (backgroundExecutionRuntimeManager.isProductionEnabled(
             TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           )) {
@@ -23241,7 +23787,7 @@ function registerToolboxHandlers() {
               inputDataRowCount: generated.summary.inputDataRowCount
             };
           } else {
-            generationResult = await exportToolboxMultiFilters({
+            generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => exportToolboxMultiFilters({
               filePath: sourceFilePath,
               groups: preparedPlans.map((plan) => ({
                 outputId: plan.outputId,
@@ -23250,7 +23796,7 @@ function registerToolboxHandlers() {
                 values: plan.values,
                 savePath: plan.temporaryPath
               }))
-            });
+            }));
           }
 
           const generationFiles = generationResult && Array.isArray(generationResult.files)
@@ -23354,20 +23900,22 @@ function registerToolboxHandlers() {
         const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
         let preserveTempDir = false;
         try {
-          const generationResult = await dispatchLargeSplit({
+          const generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => dispatchLargeSplit({
             op: 'exportFilter',
             filePath: sourceFilePath,
             field,
             values,
             savePath: tempPath,
             batchContext: taskContext.batchContext
-          }).promise;
+          }).promise);
           const matchedCount = Number(generationResult && generationResult.matchedCount) || 0;
           const inputDataRowCount = Number(
             generationResult && generationResult.inputDataRowCount
           ) || 0;
           if (matchedCount === 0) {
             // 0 命中：不弹保存框、不产用户文件（保留现文案，与小文件分支逐字节一致）。临时目录由 finally 清理。
+            //   先核对冻结的输入：生成期间源文件被替换时报源文件已变化，不把另一版本的结果当成本次筛选结果（Codex 第九轮）
+            await assertFilePlanInputsFreshAsync(taskContext.fileEvidence.filePlan);
             return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
           }
           const publishResult = await publishToolboxArtifacts(
@@ -23488,16 +24036,18 @@ function registerToolboxHandlers() {
           inputDataRowCount = generated.summary.inputDataRowCount;
           publishResult = generated.publication;
         } else {
-          const generationResult = await exportToolboxFilter({
+          const generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => exportToolboxFilter({
             filePath: sourceFilePath,
             field,
             values,
             savePath: tempPath,
             outputId: 'split-1'
-          });
+          }));
           matchedCount = Number(generationResult.matchedCount) || 0;
           inputDataRowCount = Number(generationResult.inputDataRowCount) || 0;
           if (matchedCount === 0) {
+            // 同大文件分支：先核对冻结的输入（Codex 第九轮）
+            await assertFilePlanInputsFreshAsync(taskContext.fileEvidence.filePlan);
             return {
               status: 'failed',
               message: '所选值在源文件中无匹配行，未生成文件',
@@ -23557,6 +24107,12 @@ function registerToolboxHandlers() {
         }
       }
     } catch (error) {
+      // 读取、生成或发布前核对到源文件已变化：清除本次拆分读取会话（预取值与字段缓存），与 Renderer 丢弃 token 一致；
+      //   目标变化等可重试的失败保留会话（v3.2.22 B58，Codex 第十二、十三轮）
+      const code = error && error.code;
+      if (code === 'TOOLBOX_SPLIT_READ_CONTEXT_STALE' || code === 'ARCHIVE_INPUT_CHANGED') {
+        clearToolboxSplitReadContext(prepared && prepared.readContext);
+      }
       return toolboxFailureResult(error);
     }
     }
@@ -23612,6 +24168,35 @@ async function settleVccOutputPublication(prepared, taskContext, publication, ev
 
 function reportArchiveFailure(warning) {
   const message = warning && warning.message ? warning.message : '存档副本写入失败';
+  // v3.2.22：含未产出输出（ARCHIVE_OUTPUT_NOT_PRODUCED）的批次，存档中心只给「重新执行业务」，不能提示「已正常生成、
+  //   请重试存档」。按 task-lifecycle settlementWarning 的计数区分：业务声明本次未生成（导出被拒、附属报表写失败，原路径
+  //   上的同名文件不是本次结果）、存档时已找不到文件（只能说找不到，不能断言没生成）、其他存档失败。
+  if (warning && warning.code === 'ARCHIVE_OUTPUT_NOT_PRODUCED') {
+    const declared = Number(warning.declaredNotProducedCount) || 0;
+    const missing = Number(warning.missingAtArchiveCount) || 0;
+    const other = Number(warning.otherArchiveFailureCount) || 0;
+    const parts = [];
+    if (declared > 0) parts.push('有输出文件本次未生成，原路径上的同名文件不是本次结果');
+    if (missing > 0) parts.push('有输出文件存档时已找不到（可能已被移动或删除）');
+    if (other > 0) parts.push('另有文件存档失败');
+    if (parts.length === 0) parts.push('有输出文件未形成可归档内容');
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'archive-center',
+      message: '部分输出文件未归档，存档中心只能重新执行业务',
+      details: [message]
+    });
+    try {
+      if (Notification && typeof Notification.isSupported === 'function' && Notification.isSupported()) {
+        new Notification({
+          title: '存档中心',
+          body: `${parts.join('；')}。该批次不能重试存档，请按界面提示处理后重新执行。`
+        }).show();
+      }
+    } catch (_error) { /* 存档告警展示失败不得影响业务 */ }
+    return;
+  }
   appendActivityLogEntry({
     level: 'warning',
     source: 'main',
@@ -23815,10 +24400,29 @@ function supportIpcHandle(channel, label, handler) {
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
 }
 
-function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
+// afterInvocation：本次调用结束后（成功、失败、被拒都算）执行的领域收尾，用于释放上一步 IPC 留下、
+// 而本次调用可能在 prepare 之前就结束因而无从登记 onAbandon 的资源。收尾失败只记日志，不改变原结果。
+function trackedIpcHandle(channel, moduleKey, functionKey, handler, { afterInvocation = null } = {}) {
   const meta = { channel, moduleKey, functionKey };
   ipcMain.handle(channel, async (event, ...args) => {
-    const result = await runArchiveAwareOperation(meta, event, args, handler);
+    let result;
+    try {
+      result = await runArchiveAwareOperation(meta, event, args, handler);
+    } finally {
+      if (typeof afterInvocation === 'function') {
+        try {
+          await afterInvocation(event, ...args);
+        } catch (error) {
+          appendActivityLogEntry({
+            level: 'warning',
+            source: 'main',
+            domain: 'ipc-task',
+            message: `[${channel}] 调用结束后的资源收尾失败`,
+            details: [error && error.message ? error.message : String(error)]
+          });
+        }
+      }
+    }
     if (isSuccessfulTrackedResult(result, moduleKey)) {
       tickUsageStats(moduleKey, functionKey);
     }
@@ -23883,7 +24487,6 @@ function registerAllIpcHandlersWithMemoryActivity() {
   registerFundTransferAccountMappingHandlers();
   registerTemplateHandlers();
   registerBigAccountHandlers();
-  registerBigAccountOrderHandlers();
   registerFileHandlers();
   registerNewAccountHandlers();
   registerPreFundReconciliationHandlers();
@@ -24109,6 +24712,7 @@ async function initializeApplication() {
     recoverVccStorageMigration({ journalPath: vccStorageMigrationJournalPath() });
     database = new AppDatabase(dataPath);
     database.init({ onStartupPhase: recordStartupPhase });
+    discardOutdatedPositionSideDbAtStartup();
     darkModeScheduler = createDarkModeScheduler({
       readSchedule: () => database.getDarkModeSchedule(),
       writeSchedule: (config) => database.setDarkModeSchedule(config),
@@ -24363,6 +24967,30 @@ function runStartupPostSetup() {
           domain: 'backup-retention',
           message: '旧备份保留策略执行失败',
           details: [String(err && err.stack ? err.stack : err)]
+        });
+      }
+    }));
+
+    // v3.2.22：按归属登记回收上次被中断的银行对账导出遗留的错误报告临时文件（只处理本 userData 登记过、
+    //   非本进程的临时文件，见 cleanupInterruptedErrorReportTemporaryFiles）。后台异步，失败只记日志。
+    setImmediate(observeBackgroundMemoryActivity(async () => {
+      const { removed, failures } = await cleanupInterruptedErrorReportTemporaryFiles(getErrorReportTemporaryMarkerDir());
+      if (removed.length > 0) {
+        appendActivityLogEntry({
+          level: 'info',
+          source: 'main',
+          domain: 'error-report-cleanup',
+          message: `已清理中断导出遗留的错误报告临时文件 ${removed.length} 个`,
+          details: removed.map((filePath) => path.basename(filePath))
+        });
+      }
+      if (failures.length > 0) {
+        appendActivityLogEntry({
+          level: 'warning',
+          source: 'main',
+          domain: 'error-report-cleanup',
+          message: `中断导出遗留的错误报告临时文件有 ${failures.length} 项未能清理，可在错误报告目录手动删除`,
+          details: failures.map((failure) => `${path.basename(failure.path)}（${failure.code || '未知错误'}）`)
         });
       }
     }));

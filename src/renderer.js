@@ -474,7 +474,7 @@ function initializeDomainControllers(info) {
       getAccountMappingCount: configurationServices.getAccountMappingCount, subscribe: configurationServices.subscribe,
       refreshTemplates: configurationServices.refreshTemplates },
     ui: { modalHost, modalBridge, status: updateStatusBox, reportError: ui.reportError, alertNative: window.alert.bind(window),
-      createAlertDialog, createTemplateManagerDialog, createBigAccountSelectionDialog, createRememberOrderMismatchDialog,
+      createAlertDialog, createTemplateManagerDialog, createBigAccountSelectionDialog,
       createDuplicateRowsReviewDialog,
       createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, createAccountMappingDialog, createAccountMappingMigrationDialog,
       createChannelAccountMappingConflictDialog, createTemplateImportNameDialog }
@@ -521,7 +521,6 @@ const {
   createTemplateImportNameDialog,
   createBigAccountSelectionDialog,
   createBigAccountManagerDialog,
-  createRememberOrderMismatchDialog,
   // v3.2.19 重复账单提醒
   createDuplicateRowsReviewDialog,
   createTemplateManagerDialog,
@@ -697,7 +696,6 @@ const rendererPreviews = window.__rendererPreviews.createRendererPreviews({
   createAmountSplitRulesDialog,
   createBillSplitRowsDialog,
   createBillSplitMappingsDialog,
-  createRememberOrderMismatchDialog,
   createDuplicateRowsReviewDialog,
   createAccountMappingMigrationDialog,
   closeModal,
@@ -748,7 +746,6 @@ const {
   applyAmountSplitRulesDialogPreviewState,
   applyBillSplitRowsDialogPreviewState,
   applyBillSplitMappingsDialogPreviewState,
-  applyRememberOrderMismatchDialogPreviewState,
   applyDuplicateRowsReviewDialogPreviewState,
   applyAccountMappingMigrationDialogPreviewState,
   // 2026-04-24 补：历史遗漏 preview
@@ -812,6 +809,8 @@ const {
 function updateStatusBox(box, message, tone = 'info', options = {}) {
   const {
     errorReportReady = false,
+    // v3.2.21：没有报错文件、但有逐行明细可点击查看（如导入预检的「跨 Sheet 回填」跳过原因）
+    detailAlertReady = false,
     manualBalancePromptReady = false,
     manualBalancePromptTitle = '',
     idleTitle = ''
@@ -828,12 +827,14 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
   box.dataset.tone = tone;
   box.dataset.errorReportReady = errorReportReady ? 'true' : 'false';
   box.dataset.manualBalancePromptReady = manualBalancePromptReady ? 'true' : 'false';
-  box.classList.toggle('is-clickable', errorReportReady || manualBalancePromptReady);
+  box.classList.toggle('is-clickable', errorReportReady || detailAlertReady || manualBalancePromptReady);
   box.title = manualBalancePromptReady
     ? (manualBalancePromptTitle || '点击补录上一账单日余额')
     : errorReportReady
       ? '点击导出报错文件'
-      : idleTitle;
+      : detailAlertReady
+        ? '点击查看逐行原因'
+        : idleTitle;
 
   // v2.1.9 SR-log-1 (T32i)：wrapper hijack — tone='error'/'warning' 自动上报告警（spec §15.5）
   //   - 集中在 updateStatusBox 出口，setStatus / setNewAccountStatus / updateReconIdFixUi 等全部走这条路径 → 一处覆盖 175+ 调用方
@@ -1965,10 +1966,6 @@ async function applyFullInfo(info) {
     setTimeout(() => {
       applyBillSplitMappingsDialogPreviewState();
     }, 120);
-  } else if (info.previewModal === 'remember-order-mismatch-dialog') {
-    setTimeout(() => {
-      applyRememberOrderMismatchDialogPreviewState();
-    }, 120);
   } else if (info.previewModal === 'duplicate-rows-review-dialog') {
     setTimeout(() => {
       applyDuplicateRowsReviewDialogPreviewState();
@@ -2149,7 +2146,7 @@ async function applyFullInfo(info) {
     }, 120);
   } else if (info.previewModal === 'position-reconciliation-import-progress') {
     setTimeout(() => {
-      positionReconciliationUI?.previewImportProgress('preflight');
+      positionReconciliationUI?.previewImportProgress('importing');
     }, 120);
   } else if (info.previewModal === 'position-reconciliation-import-stopping') {
     setTimeout(() => {

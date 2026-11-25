@@ -27,6 +27,7 @@ const {
   isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
   normalizeRowFilterRules,
+  normalizeCrossSheetBackfillRule,
   upgradeLegacyFeatureFilter
 } = require('../../../src/backend/file-service');
 const { matchMerchantIds, resolveRecognizedBigAccount } = require('../../../src/main-process/big-account-recognition');
@@ -53,7 +54,9 @@ const MAIN_DEPS = {
   isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
   // v3.2.19：原始账单预处理的过滤规则
-  normalizeRowFilterRules
+  normalizeRowFilterRules,
+  // v3.2.21：原始账单预处理的跨 Sheet 回填规则
+  normalizeCrossSheetBackfillRule
 };
 
 function loadMainFunction(name) {

@@ -35,8 +35,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         monthlyBalance:{assemble:payload=>f.invoke('assemble',[payload],{status:'ready',summary:{count:6}}),export:()=>f.invoke('monthly',[],{status:'success',message:'月度导出成功'})},
         errors:{exportLast:()=>f.invoke('error',[],{status:'success',message:'错误报告已导出'})},
         accountMappings:{checkMigrationPending:()=>f.invoke('migration',[],{pending:false}),list:id=>f.invoke('mappingList',[id],{status:'success',rows:[]}),
-          listChannelConflicts:()=>f.invoke('conflicts',[],{status:'success',channels:[]})},
-        bigAccount:{loadMode:async()=>({mode:'unfixed'}),loadOrder:async()=>({order:null})}};
+          listChannelConflicts:()=>f.invoke('conflicts',[],{status:'success',channels:[]})}};
       f.config=ConfigurationServices.createConfigurationServices({templatesApi:f.api.templates});
       f.config.acceptBootstrap({currencyOptions:['USD'],accountMappingCount:2});
       f.config.applyPreviewTemplates([{id:21,name:'测试模板',headers:['Currency']}]);
@@ -49,7 +48,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         applyManualBalancePromptStatus:value=>f.controller.createFeedbackScope().applyManualBalancePromptStatus(value)});
       const ui={modalHost:f.host,modalBridge:f.bridge,status(element,message,tone,options){element.querySelector('.status-box-text').textContent=message;element.dataset.tone=tone;f.feedback.push({message,tone,options});},
         alertNative:message=>f.alerts.push(message),reportError:error=>f.errors.push(String(error.message||error))};
-      for(const name of ['createAlertDialog','createTemplateManagerDialog','createBigAccountSelectionDialog','createRememberOrderMismatchDialog','createDuplicateRowsReviewDialog','createExportScopeDialog','createMonthlyBalanceExportDialog','createManualBalanceSeedDialog','createAccountMappingDialog','createAccountMappingMigrationDialog','createTemplateImportNameDialog'])ui[name]=f.dialogs[name];
+      for(const name of ['createAlertDialog','createTemplateManagerDialog','createBigAccountSelectionDialog','createDuplicateRowsReviewDialog','createExportScopeDialog','createMonthlyBalanceExportDialog','createManualBalanceSeedDialog','createAccountMappingDialog','createAccountMappingMigrationDialog','createTemplateImportNameDialog'])ui[name]=f.dialogs[name];
       f.controller=StatementController.createStatementController({api:f.api,panel:f.panel,config:f.config,ui,initialInfo:{hasEnum:true}});
       f.controller.enter(); void 0;
     `);
@@ -188,14 +187,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       assert.deepEqual(await js(`statementFixture.calls.find(call=>call.name==='assemble').args[0]`), {templateScope:'all',templateName:'',year:new Date().getFullYear(),month:8});
     });
   }
-  await test('导入分流真实大账号选择/记忆顺序异常窗口，手工余额提示按原结果进入', async () => {
+  await test('导入分流真实大账号选择窗口，手工余额提示按原结果进入', async () => {
     await setup();
-    await js(`statementFixture.next.import={status:'select-big-account',contextId:'fixture-selection',templateId:21,templateName:'测试模板',rows:[{index:0,fileIndex:0,fileName:'fixture.xlsx',sourceRowNumber:1}],expandedBigAccountOptions:[{merchantId:'FIXTURE',currency:'USD'}],canRemember:false};statementFixture.controller.commands.importFile()`); await tick();
+    await js(`statementFixture.next.import={status:'select-big-account',contextId:'fixture-selection',templateId:21,templateName:'测试模板',rows:[{index:0,fileIndex:0,fileName:'fixture.xlsx',sourceRowNumber:1}],expandedBigAccountOptions:[{merchantId:'FIXTURE',currency:'USD'}]};statementFixture.controller.commands.importFile()`); await tick();
     assert.equal(await js(`!!document.querySelector('.big-account-selection-card')`), true);
-    await js(`statementFixture.host.dispose();`);
-    await setup();
-    await js(`statementFixture.next.import={status:'remember-order-mismatch',failedFileNames:['fixture.xlsx'],contextId:'fixture-order',rows:[]};statementFixture.controller.commands.importFile()`); await tick();
-    assert.match(await js(`statementFixture.top().textContent`), /fixture.xlsx的账户个数或账户号匹配不上/);
     await js(`statementFixture.host.dispose();`);
     // v3.2.19：重复账单过滤发现重复 → 打开真实的重复账单提醒
     await setup();
@@ -328,6 +323,40 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.controller.enter();`); await tick();
     assert.deepEqual(await js('statementFixture.alerts.slice(3)'), [`${missing.message}\n${missing.detailLines[0]}`]);
   });
+
+  // v3.2.21：交易行全部因「跨 Sheet 回填」未配上、在导入预检即返回（没有报错文件）时，弹窗逐行列出跳过原因
+  await test('导入预检因没有交易数据返回且带回填跳过明细时，弹窗逐行列出；已生成报错文件时不弹窗', async () => {
+    await setup();
+    await js(`statementFixture.next.import={status:'error',message:'导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框查看逐行原因）',
+      errorCode:'NO_TRANSACTION_DATA',detailLines:['以下行命中「跨 Sheet 回填」的待回填行条件但未能回填，已跳过，未写入导出的明细账单：','「a.xlsx」第4行，Desc="Trade - $9"，原因：来源 Sheet 中没有可配对的行'],errorReportReady:false};
+      statementFixture.controller.commands.importFile()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts'), [
+      '导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框查看逐行原因）\n以下行命中「跨 Sheet 回填」的待回填行条件但未能回填，已跳过，未写入导出的明细账单：\n「a.xlsx」第4行，Desc="Trade - $9"，原因：来源 Sheet 中没有可配对的行'
+    ]);
+    assert.equal(await js(`document.getElementById('exportDetailBtn').disabled`), true);
+    // 状态框可点击，再次查看逐行原因（不导出报错文件）
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.detailAlertReady`), true);
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 2);
+    assert.equal(await js('statementFixture.alerts[1]===statementFixture.alerts[0]'), true);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+    await js(`statementFixture.next.import={status:'error',message:'导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框导出报错文件核对）',errorCode:'NO_TRANSACTION_DATA',detailLines:['x'],errorReportReady:true};statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 2);
+  });
+  await test('离页期间导入预检返回带回填跳过明细的失败：不弹窗，回到页面后点击状态框查看逐行原因', async () => {
+    await setup();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();`);
+    await js(`statementFixture.pending.resolve({status:'error',message:'导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框查看逐行原因）',
+      errorCode:'NO_TRANSACTION_DATA',detailLines:['「a.xlsx」第4行，原因：来源 Sheet 中没有可配对的行'],errorReportReady:false});`); await tick();
+    await js(`statementFixture.controller.enter();`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 0);
+    assert.match(await js('statementFixture.text()'), /请点击状态框查看逐行原因/);
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts'), [
+      '导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行，请点击状态框查看逐行原因）\n「a.xlsx」第4行，原因：来源 Sheet 中没有可配对的行'
+    ]);
+  });
   await test('导入双击只有一个IPC，离页期间不渲染；重进消费真实在途结果且不新增sessionStatus', async () => {
     await setup();
     await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;document.getElementById('importFileBtn').click();document.getElementById('importFileBtn').click();statementFixture.controller.leave();`);
@@ -345,6 +374,56 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.oldScope.setStatus('过期窗口错误','error');`);
     assert.equal(await js('statementFixture.text()'), '重进后完成');
     assert.equal(await js(`document.getElementById('exportDetailBtn').disabled`), false);
+  });
+  // v3.2.22 B113（Codex 第六轮）：装配失败（如记录含无法写入 Excel 的字符）→ 关闭弹窗 → 点击状态框导出报错文件
+  await test('月度装配失败后状态框可导出报错文件', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',detailLines:['第 3 行「银行账号」列'],errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    assert.match(await js('statementFixture.text()'), /含无法写入 Excel 的字符/);
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 1);
+  });
+  // v3.2.22 B113（Codex 第十轮）：同一弹窗内装配失败后改选月份重试得到空结果：状态框不留上一次的报错，不能再导出旧报告
+  await test('月度装配失败后重试得到空结果：状态框清掉上一次的报错状态', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.next.assemble={status:'empty',message:'该模板 / 月份范围内无余额数据'};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    assert.equal(await js('statementFixture.text()'), '该模板 / 月份范围内无余额数据');
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+  });
+  // v3.2.22 B113（Codex 第十一轮）：装配返回业务错误后重试、请求本身被拒绝：状态框同步本次失败，不能再导出上一次的报错文件
+  await test('月度装配失败后重试请求被拒绝：状态框清掉上一次的报错状态', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.next.assemble={promise:Promise.reject(new Error('IPC 已断开'))};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    assert.equal(await js('statementFixture.text()'), '装配月度余额账单失败：IPC 已断开');
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+  });
+  // v3.2.22 B113（Codex 第十三轮）：装配失败后在同一弹窗改回「选择月份」再点完成：本地校验未通过也同步状态框，不能再导出旧报告
+  await test('月度装配失败后改成未选月份再点完成：状态框清掉上一次的报错状态', async () => {
+    await setup(); await openMonthly();
+    await js(`statementFixture.next.assemble={status:'error',message:'第 3 行「银行账号」列的值含无法写入 Excel 的字符',errorCode:'FILE_READ',errorReportReady:true};statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    await js(`statementFixture.host.getTop().dispose();`);
+    await js(`statementFixture.top().querySelector('[data-role="month"]').value='';statementFixture.top().querySelector('[data-action="done"]').click();`);
+    await tick(); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='assemble').length`), 1, '本地校验未通过不发送装配请求');
+    await js(`while(statementFixture.host.getTop())statementFixture.host.getTop().dispose();`);
+    assert.equal(await js('statementFixture.text()'), '请选择时间');
+    await js(`statementFixture.controller.commands.exportError();void 0;`); await tick();
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
   });
   await test('真实月度装配双击只发送一次assemble且busy时不能关闭', async () => {
     await setup(); await openMonthly();
@@ -425,18 +504,6 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.controller.commands.importFile()`); await tick();
     assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1);
-  });
-  await test('大账号顺序不匹配的提示被正在提交的弹窗阻止打开时保留结果：提示等待确认，再点「导入文件」打开原提示且不重新导入', async () => {
-    await setup();
-    await js(`{const fx=statementFixture;fx.busy=true;const overlay=fx.modal('提交中的窗口');fx.bridge.registerModal(overlay,{canClose:()=>!fx.busy});
-      fx.bridge.openModal(()=>overlay,{owner:'statement-generator'});
-      fx.next.import={status:'remember-order-mismatch',contextId:'order-context',failedFileNames:['fixture.xlsx'],rows:[],rowsWithEmptyBlocks:[],expandedBigAccountOptions:[]};
-      fx.controller.commands.importFile();}void 0;`); await tick();
-    assert.match(await js('statementFixture.text()'), /导入等待确认/);
-    await js(`statementFixture.busy=false;statementFixture.host.closeTop();`); await tick();
-    await js(`statementFixture.controller.commands.importFile()`); await tick();
-    assert.match(await js('statementFixture.top().textContent'), /fixture\.xlsx的账户个数或账户号匹配不上/);
-    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1, '不重新导入');
   });
   await test('待继续的导入确认与导出选择分别保存：离页期间的导出选择不覆盖待确认的重复账单提醒', async () => {
     await setup();

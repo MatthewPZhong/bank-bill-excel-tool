@@ -430,6 +430,34 @@ test('受管 staging 清理保护外部源、pending/outbox 和活动导入路�
   for (const protectedFile of [...files.slice(1), external]) assert.equal(fs.existsSync(protectedFile), true);
 });
 
+test('任务终态清除 pending 后回收其暂存文件，未存档与待确认的文件保留', async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'position-owner-finalize-'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const jobRoot = path.join(tempRoot, 'run-data', 'position-reconciliation', 'import-staging', 'job');
+  const [archived, unresolved, awaitingConfirmation] = ['1', '2', '3']
+    .map((name) => path.join(jobRoot, name, 'input.xlsx'));
+  const external = path.join(tempRoot, 'external.xlsx');
+  for (const file of [archived, unresolved, awaitingConfirmation, external]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'source');
+  }
+  const f = fixture({
+    databasePath: path.join(tempRoot, 'main.sqlite'),
+    protectedPaths: [unresolved],
+    activePaths: [jobRoot, awaitingConfirmation]
+  });
+  f.setPending(storedPending({
+    archiveFiles: [archived, unresolved, awaitingConfirmation, external].map((filePath, index) => ({
+      role: 'input', filePath, artifactKey: `input-${index}`, sourceOperation: 'import',
+      sourceSnapshot: { sizeBytes: 6, mtimeMs: 1, ctimeMs: 2, ino: '3' }
+    }))
+  }));
+  await f.owner.finalizePositionPendingAfterTaskTerminal({ context: batchContext() });
+  assert.equal(f.pending(), null);
+  assert.equal(fs.existsSync(path.dirname(archived)), false);
+  for (const kept of [unresolved, awaitingConfirmation, external]) assert.equal(fs.existsSync(kept), true);
+});
+
 test('受管 staging 保护状态不可读时 fail-closed', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'position-owner-protected-'));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));

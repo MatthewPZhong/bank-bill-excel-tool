@@ -75,6 +75,7 @@ const {
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateFeatureFilterSupport,
   ensureTemplatePreprocessRowFilterSupport,
+  ensureTemplateCrossSheetBackfillSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -246,6 +247,7 @@ class AppDatabase {
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureTemplateFeatureFilterSupport();
     this.ensureTemplatePreprocessRowFilterSupport();
+    this.ensureTemplateCrossSheetBackfillSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
     this.ensureTemplateCurrencyBigAccountSupport();
@@ -627,6 +629,10 @@ class AppDatabase {
     return ensureTemplatePreprocessRowFilterSupport(this.db);
   }
 
+  ensureTemplateCrossSheetBackfillSupport() {
+    return ensureTemplateCrossSheetBackfillSupport(this.db);
+  }
+
   ensureAccountMappingTemplateSupport() {
     return ensureAccountMappingTemplateSupport(this.db);
   }
@@ -697,7 +703,7 @@ class AppDatabase {
       }
     } catch (error) {
       appendModuleLog({
-        level: 'warn',
+        level: 'warning',
         source: 'main',
         domain: 'migration',
         message: '[migration v3.2.15] 核对旧账户映射迁移标记失败，下次启动重试',
@@ -1459,8 +1465,14 @@ class AppDatabase {
   }
 
   // v3.0.23：银行对账运行一次读取 exactRows + C3 大小写不敏感候选池。
-  readGatewayBillRowPoolsByChannels(channels) {
-    return linkedTableRepository.readGatewayBillRowPoolsByChannels(this.db, channels);
+  //   v3.2.22：options.outOfPoolDiagnostic 时同一次扫描另把 R5s2 缺渠道诊断候选交给其 collect（见仓储同名函数注释）。
+  readGatewayBillRowPoolsByChannels(channels, options) {
+    return linkedTableRepository.readGatewayBillRowPoolsByChannels(this.db, channels, options);
+  }
+
+  // v3.2.22：R5s2 缺渠道诊断按暂存的候选 id 回读网关行（逐行回调，不累积）。
+  readGatewayBillRowsByIds(ids, onRow) {
+    return linkedTableRepository.readGatewayBillRowsByIds(this.db, ids, onRow);
   }
 
   hasLinkedTableRows(tableKey) {

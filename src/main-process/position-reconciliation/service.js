@@ -10,6 +10,8 @@ const {
   MATCH_TYPES,
   FUND_TYPE_PAIRS,
   POSITION_BANK_HEADERS,
+  RAW_ROW_NUMBER_HEADER,
+  RAW_VERSION_HEADER,
   SOURCE_TYPE_BY_FUND_TYPE,
   sourceTypeForFundType
 } = require('./constants');
@@ -17,7 +19,6 @@ const {
   PositionReconciliationError,
   text,
   normalizeDate,
-  stableHash
 } = require('./common');
 const { readBankFiles, readSourceFiles } = require('./readers');
 const { linkHeadersFor, normalizeSourceStructures, sourceDefinitionsFor } = require('./source-structures');
@@ -43,6 +44,8 @@ const {
   filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot
 } = require('./input-staging');
+const { bankResultFields } = require('./bank-row-storage');
+const { sourceExportHeaders } = require('./source-row-storage');
 const {
   parsePositionPendingArchiveFiles
 } = require('./operation-lifecycle');
@@ -54,8 +57,7 @@ const {
   normalizePositionStreamingSourceTypes
 } = require('../../backend/position-reconciliation-import/constants');
 const {
-  dispatchPositionImportPreflight,
-  dispatchPositionLargeImportSchemaMigration
+  dispatchPositionImportPreflight
 } = require('./import-dispatch');
 const {
   positionCheckpointsEqual
@@ -72,6 +74,17 @@ for (const pair of FUND_TYPE_PAIRS) {
   FUND_TYPE_PAIR_BY_VALUE.set(pair[0], pair);
   FUND_TYPE_PAIR_BY_VALUE.set(pair[1], pair);
 }
+
+// 文件本身的问题（表头、非法行、BizId 冲突等）：按「导入失败」结果返回，库内数据不变。
+const BANK_IMPORT_FILE_REJECTION_CODES = new Set([
+  'position-file-type-unsupported',
+  'position-workbook-invalid',
+  'position-bank-sheet-missing',
+  'position-bank-headers-invalid',
+  'position-bank-row-invalid',
+  'position-bank-empty',
+  'position-bank-existing-bizid-conflict'
+]);
 
 function runScopeOf(bankRows) {
   const channels = [...new Set(bankRows.map((row) => row.channel))];
@@ -407,7 +420,7 @@ class PositionReconciliationService {
     this.resolveSourceStructures = typeof resolveSourceStructures === 'function'
       ? resolveSourceStructures
       : null;
-    // 银行对账单导入识别结构的当前用户版本表头（D17，与内置 46 / 49 列同时接受）；内置或未注入时为 null。
+    // 银行对账单导入识别结构的当前用户版本表头（D17，与内置 46 列、平盘结果 20 列同时接受）；内置或未注入时为 null。
     this.resolveBankSourceHeaders = typeof resolveBankSourceHeaders === 'function'
       ? resolveBankSourceHeaders
       : null;
@@ -421,6 +434,9 @@ class PositionReconciliationService {
     });
     this.bankImportTokens = new Map();
     this.sourceImportTokens = new Map();
+    // 单遍导入进行中的作业（银行对账单、链接原始表）：导入进程持有侧库写锁直到提交或回滚。
+    this.writeLockingImportJobs = new Set();
+    this.store.mutationGuard = () => this.assertNoImportHoldingWriteLock();
     const pendingArchiveFiles = parsePositionPendingArchiveFiles(expectedPendingOperation);
     const protectedPaths = pendingArchiveFiles
       ? pendingArchiveFiles.map((file) => file.filePath)
@@ -465,6 +481,14 @@ class PositionReconciliationService {
   clearBankImportTokens() {
     const paths = [];
     for (const parsed of this.bankImportTokens.values()) {
+      if (typeof parsed.rejectGrant === 'function') {
+        // 等待确认的单遍导入：拒绝授权，导入进程自行回滚并清理暂存。
+        parsed.rejectGrant(new PositionReconciliationError(
+          'position-import-cancelled',
+          '平盘导入已取消'
+        ));
+        continue;
+      }
       if (parsed.jobRoot) paths.push(parsed.jobRoot);
       else paths.push(...(parsed.stagingDirs || []));
     }
@@ -484,11 +508,20 @@ class PositionReconciliationService {
 
   async clearBankImportTokensAsync() {
     const paths = [];
+    const awaiting = [];
     for (const parsed of this.bankImportTokens.values()) {
+      if (typeof parsed.rejectGrant === 'function') awaiting.push(parsed);
       if (parsed.jobRoot) paths.push(parsed.jobRoot);
       else paths.push(...(parsed.stagingDirs || []));
     }
     this.bankImportTokens.clear();
+    for (const parsed of awaiting) {
+      parsed.rejectGrant(new PositionReconciliationError(
+        'position-import-cancelled',
+        '平盘导入已取消'
+      ));
+      if (parsed.completion) await parsed.completion;
+    }
     await this.cleanupUnprotectedStagingPathsAsync(paths);
   }
 
@@ -527,8 +560,13 @@ class PositionReconciliationService {
       else paths.push(...(parsed.stagingDirs || []));
     }
     for (const parsed of this.sourceImportTokens.values()) {
-      if (parsed.jobRoot) paths.push(parsed.jobRoot);
-      else if (parsed.stagingDir) paths.push(parsed.stagingDir);
+      if (parsed.jobRoot) {
+        paths.push(parsed.jobRoot);
+        // 保护规则按「目标目录内是否含受保护路径」判断：只登记作业根目录护不住其下的文件目录，
+        // 待确认账户表的暂存文件必须单独列出，否则同批其他文件收尾时会被一并回收。
+        const descriptor = parsed.descriptor || {};
+        if (descriptor.archivePath) paths.push(descriptor.archivePath);
+      } else if (parsed.stagingDir) paths.push(parsed.stagingDir);
     }
     return [...new Set(paths.filter(Boolean).map((value) => path.resolve(value)))];
   }
@@ -695,6 +733,11 @@ class PositionReconciliationService {
   }
 
   dispatchTrackedImport(input, label) {
+    this.assertNoImportHoldingWriteLock();
+    const holdsWriteLock = Boolean(input) && (
+      input.command === POSITION_IMPORT_COMMANDS.BANK_IMPORT
+      || input.command === POSITION_IMPORT_COMMANDS.SOURCE_IMPORT
+    );
     const dispatched = this.positionImportDispatcher({
       ...input,
       protectedStagingPaths: this.protectedStagingPaths,
@@ -735,24 +778,21 @@ class PositionReconciliationService {
         });
       }
     });
-    const ledgerPath = text(
+    const jobRoot = text(
       input
       && input.payload
       && input.payload.preflightReady
-      && input.payload.preflightReady.ledgerEvidence
-      && input.payload.preflightReady.ledgerEvidence.ledgerPath
+      && input.payload.preflightReady.jobRoot
     );
-    const protectedStagingPaths = ledgerPath
-      ? [path.dirname(path.resolve(ledgerPath))]
+    const protectedStagingPaths = jobRoot
+      ? [path.resolve(jobRoot)]
       : [path.join(this.userDataDir, STAGING_RELATIVE_PATH, dispatched.jobId)];
-    return {
-      ...dispatched,
-      promise: this.trackImportDispatch(
-        dispatched,
-        label,
-        protectedStagingPaths
-      )
-    };
+    let promise = this.trackImportDispatch(dispatched, label, protectedStagingPaths);
+    if (holdsWriteLock) {
+      this.writeLockingImportJobs.add(dispatched.jobId);
+      promise = promise.finally(() => this.writeLockingImportJobs.delete(dispatched.jobId));
+    }
+    return { ...dispatched, promise };
   }
 
   assertStagedInputs(files, phase, { beforeCommit = false } = {}) {
@@ -906,69 +946,92 @@ class PositionReconciliationService {
         '请选择至少一份平盘银行对账单'
       );
     }
+    // 上一次等待确认的导入先作废（回滚），再开始新的。
     await this.clearBankImportTokensAsync();
-    // 银行对账单导入识别结构当前用户版本：预检开始时冻结到确认令牌，写入沿用同一份。
+    // 银行对账单导入识别结构当前用户版本：导入开始时冻结。
     const bankSourceHeaders = this.resolveBankSourceHeaders ? await this.resolveBankSourceHeaders() : null;
+    const baseCheckpoint = this.store.persistenceCheckpoint();
+    let resolveReady;
+    const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+    let resolveGrant;
+    let rejectGrant;
+    const grantPromise = new Promise((resolve, reject) => {
+      resolveGrant = resolve;
+      rejectGrant = reject;
+    });
+    grantPromise.catch(() => undefined);
+    // 单遍导入：导入进程一次解析并在未提交的事务里写完，发回 ready 后等待确认授权；
+    // 确认即提交，取消 / 拒绝 / 进程退出即回滚。
     const dispatched = this.dispatchTrackedImport({
       engine: this.positionImportEngine,
-      command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
+      command: POSITION_IMPORT_COMMANDS.BANK_IMPORT,
       files,
       userDataDir: this.userDataDir,
       sideDbPath: this.store.dbPath,
+      expectedCheckpoint: baseCheckpoint,
       ...(bankSourceHeaders ? { contractOptions: { bankSourceHeaders } } : {}),
-      featureFlags: { preflightOnly: true }
-    }, '读取平盘银行对账单');
-    const preflightReady = await dispatched.promise;
+      featureFlags: { bankImport: true },
+      onPreflightReady: (ready) => resolveReady(ready),
+      authorizeApply: () => grantPromise
+    }, '导入平盘银行对账单');
+    const completion = dispatched.promise.then(
+      (result) => ({ kind: 'done', result }),
+      (error) => ({ kind: 'failed', error })
+    );
+    const first = await Promise.race([
+      readyPromise.then((ready) => ({ kind: 'ready', ready })),
+      completion
+    ]);
+    if (first.kind === 'failed') {
+      const error = first.error;
+      if (error && BANK_IMPORT_FILE_REJECTION_CODES.has(text(error.code))) {
+        return {
+          status: 'failed',
+          code: text(error.code),
+          message: error.message || '平盘银行对账单导入失败',
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : []
+        };
+      }
+      throw error;
+    }
+    if (first.kind !== 'ready') {
+      throw new PositionReconciliationError(
+        'position-import-intent-not-durable',
+        '平盘银行导入未经确认授权即结束'
+      );
+    }
+    const preflightReady = first.ready;
     const accepted = Array.isArray(preflightReady.acceptedBankFiles)
       ? preflightReady.acceptedBankFiles
       : [];
-    if (accepted.length !== files.length) {
-      const failed = Array.isArray(preflightReady.orderedFileResults)
-        ? preflightReady.orderedFileResults.find((item) => item.status === 'failed')
-        : null;
-      const ledgerPath = text(
-        preflightReady.ledgerEvidence && preflightReady.ledgerEvidence.ledgerPath
-      );
-      if (ledgerPath) {
-        await cleanupStagingPathsAsync([path.dirname(path.resolve(ledgerPath))]);
-      }
-      return {
-        status: 'failed',
-        code: failed && failed.code
-          ? failed.code
-          : 'position-bank-import-failed',
-        message: failed && failed.message
-          ? failed.message
-          : '平盘银行对账单预检失败',
-        detailLines: failed && Array.isArray(failed.detailLines)
-          ? failed.detailLines
-          : []
-      };
-    }
+    const bankScopes = Array.isArray(preflightReady.bankScopes) ? preflightReady.bankScopes : [];
     const token = crypto.randomUUID();
-    const jobRoot = path.dirname(
-      path.resolve(String(preflightReady.ledgerEvidence.ledgerPath || ''))
-    );
     this.bankImportTokens.set(token, {
       streaming: true,
       preflightReady,
-      jobRoot,
+      jobRoot: text(preflightReady.jobRoot)
+        || path.join(this.userDataDir, STAGING_RELATIVE_PATH, dispatched.jobId),
+      baseCheckpoint,
+      resolveGrant,
+      rejectGrant,
+      completion,
       bankSourceHeaders
     });
-    const scopes = (preflightReady.ledgerEvidence.manifest.bankScopes || []).map(
-      ({ channel, monthKey }) => ({ channel, monthKey })
-    );
-    const existing = this.store.countBankRowsByScopes(scopes).filter(
-      (scope) => scope.rowCount > 0
-    );
     return {
       status: 'needs-confirmation',
       token,
       jobId: preflightReady.jobId || dispatched.jobId,
       fileCount: accepted.length,
-      rowCount: accepted.reduce((sum, file) => sum + Number(file.rowCount || 0), 0),
-      scopes,
-      existing
+      rowCount: Number(preflightReady.rowCount || 0),
+      scopes: bankScopes.map(({ channel, monthKey }) => ({ channel, monthKey })),
+      // 仅列出确实会被替换的渠道 + 月份；为空时界面不弹确认，直接提交。
+      existing: bankScopes
+        .filter((scope) => Number(scope.replacedRowCount) > 0)
+        .map((scope) => ({
+          channel: scope.channel,
+          monthKey: scope.monthKey,
+          rowCount: Number(scope.replacedRowCount)
+        }))
     };
   }
 
@@ -982,50 +1045,40 @@ class PositionReconciliationService {
       );
     }
     this.bankImportTokens.delete(normalizedToken);
-    parsed.preflightReady.acceptedBankFiles.forEach((file, index) => {
+    const acceptedFiles = parsed.preflightReady.acceptedBankFiles;
+    acceptedFiles.forEach((file, index) => {
       file.archivePath = inputPaths[index];
     });
-    const baseCheckpoint = this.store.persistenceCheckpoint();
+    const baseCheckpoint = parsed.baseCheckpoint;
     const operationToken = text(
       this.operationTokenProvider ? this.operationTokenProvider() : ''
     );
+    const refuse = async (error) => {
+      await this.discardStreamingBankImport(parsed, error);
+      throw error;
+    };
     if (!operationToken) {
-      await this.cleanupDiscardedStreamingImport(parsed);
-      throw new PositionReconciliationError(
+      await refuse(new PositionReconciliationError(
         'position-import-intent-not-durable',
         '银行导入缺少外部 operation token'
-      );
+      ));
     }
-    let dispatched;
-    try {
-      const schema = await dispatchPositionLargeImportSchemaMigration({
-        engine: this.positionImportEngine,
-        userDataDir: this.userDataDir,
-        sideDbPath: this.store.dbPath,
-        expectedCheckpoint: baseCheckpoint,
-        batchContext
-      }).promise;
-      dispatched = this.dispatchTrackedImport({
-        engine: this.positionImportEngine,
-        command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
-        files: [],
-        userDataDir: this.userDataDir,
-        sideDbPath: this.store.dbPath,
-        expectedCheckpoint: baseCheckpoint,
-        operationToken,
-        batchContext,
-        payload: {
-          schemaFingerprint: schema.fingerprint,
-          preflightReady: parsed.preflightReady
-        },
-        ...(parsed.bankSourceHeaders ? { contractOptions: { bankSourceHeaders: parsed.bankSourceHeaders } } : {}),
-        featureFlags: { importApply: true }
-      }, '写入平盘银行对账单');
-    } catch (error) {
-      await this.cleanupDiscardedStreamingImport(parsed);
-      throw error;
+    if (!positionCheckpointsEqual(this.store.persistenceCheckpoint(), baseCheckpoint)) {
+      await refuse(new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '银行导入等待确认期间侧库 checkpoint 已变化，请重新导入'
+      ));
     }
-    const result = await dispatched.promise;
+    parsed.resolveGrant({
+      preflightOnly: false,
+      operationToken,
+      baseCheckpoint,
+      batchContext,
+      archivePaths: acceptedFiles.map((file) => file.archivePath)
+    });
+    const settled = await parsed.completion;
+    if (settled.kind !== 'done') throw settled.error;
+    const result = settled.result;
     const currentCheckpoint = this.store.persistenceCheckpoint();
     if (!result
         || !positionCheckpointsEqual(result.nextCheckpoint, currentCheckpoint)
@@ -1041,10 +1094,8 @@ class PositionReconciliationService {
         .filter((item) => scopeKey(item.channel, item.monthKey) === key)
         .map((item) => Number(item.fileIndex)));
       const files = result.fileScopes && result.fileScopes.length > 0
-        ? parsed.preflightReady.acceptedBankFiles.filter(
-          (file) => fileIndexes.has(Number(file.fileIndex))
-        )
-        : parsed.preflightReady.acceptedBankFiles;
+        ? acceptedFiles.filter((file) => fileIndexes.has(Number(file.fileIndex)))
+        : acceptedFiles;
       const filePaths = new Set(files.map((file) => path.resolve(file.archivePath)));
       return {
         ...scope,
@@ -1060,6 +1111,38 @@ class PositionReconciliationService {
       ...result,
       scopeInputs
     };
+  }
+
+  // 作废一次等待确认的单遍导入：拒绝授权 → 导入进程回滚并清理暂存 → 等其退出。
+  async discardStreamingBankImport(parsed, reason = null) {
+    if (!parsed) return;
+    if (typeof parsed.rejectGrant === 'function') {
+      const error = reason || new PositionReconciliationError(
+        'position-import-cancelled',
+        '平盘导入已取消'
+      );
+      parsed.rejectGrant(error);
+      if (parsed.completion) await parsed.completion;
+    }
+    await this.cleanupDiscardedStreamingImport(parsed);
+  }
+
+  // 单遍导入从开始读取到提交 / 回滚期间，导入进程持有侧库写锁；此时其他写操作直接提示，不去排队等锁。
+  assertNoImportHoldingWriteLock() {
+    for (const parsed of this.bankImportTokens.values()) {
+      if (parsed && typeof parsed.rejectGrant === 'function') {
+        throw new PositionReconciliationError(
+          'position-bank-import-awaiting-confirmation',
+          '银行对账单导入正在等待确认，请先确认或取消后再操作'
+        );
+      }
+    }
+    if (this.writeLockingImportJobs.size > 0) {
+      throw new PositionReconciliationError(
+        'position-import-in-progress',
+        '平盘导入正在读取并写入数据，请等待完成或取消后再操作'
+      );
+    }
   }
 
   bankImportArchiveIntent(token) {
@@ -1081,6 +1164,20 @@ class PositionReconciliationService {
   async cancelBankImport() {
     await this.clearBankImportTokensAsync();
     return { status: 'cancelled' };
+  }
+
+  // 确认写入的任务没能接管这次导入（存档初始化失败、任务准入被拒、模块锁被占等）：
+  // 导入进程还握着未提交的事务和侧库写锁，必须按本次令牌拒绝授权并等它回滚，否则后续写操作一直被拒。
+  async abandonPreparedBankImport(token) {
+    const normalizedToken = text(token);
+    const parsed = this.bankImportTokens.get(normalizedToken);
+    if (!parsed) return;
+    this.bankImportTokens.delete(normalizedToken);
+    if (parsed.streaming === true) {
+      await this.discardStreamingBankImport(parsed);
+      return;
+    }
+    await this.cleanupUnprotectedStagingPathsAsync(parsed.stagingDirs || []);
   }
 
   prepareSourceImport(filePaths) {
@@ -1127,9 +1224,6 @@ class PositionReconciliationService {
 
   prepareLegacyStagedSourceImportPlan(staged, sourceDefinitions = SOURCE_DEFINITIONS) {
     const results = readSourceFiles(staged, {
-      identityMode: this.store.usesModernSourceIdentity()
-        ? 'row-hash'
-        : 'business-key',
       sourceDefinitions
     });
     const output = [];
@@ -1247,7 +1341,7 @@ class PositionReconciliationService {
     }
     await this.clearSourceImportTokensAsync();
     const allowedSourceTypes = [...this.streamingSourceTypes];
-    // 本次导入只用开始时的结构：预检、写入与之后的账户确认都读这一份，切换模板版本不影响进行中的导入。
+    // 本次导入只用开始时的结构：读取写入与之后的账户确认都用这一份，切换模板版本不影响进行中的导入。
     const sourceStructures = await this.currentSourceStructures();
     let releaseApply;
     const applyGate = new Promise((resolve) => { releaseApply = resolve; });
@@ -1257,13 +1351,17 @@ class PositionReconciliationService {
       resolvePreflight = resolve;
       rejectPreflight = reject;
     });
+    // 单遍导入：导入进程一次解析并在未提交的事务里写完，发回 ready 后等待写入授权；
+    // 授权即提交，拒绝 / 取消 / 进程退出即回滚。
     const dispatched = this.dispatchTrackedImport({
       engine: this.positionImportEngine,
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      command: POSITION_IMPORT_COMMANDS.SOURCE_IMPORT,
       files,
       userDataDir: this.userDataDir,
       sideDbPath: this.store.dbPath,
+      expectedCheckpoint: this.store.persistenceCheckpoint(),
       featureFlags: {
+        sourceImport: true,
         preflightOnly: false,
         streamingSourceTypes: allowedSourceTypes
       },
@@ -1302,8 +1400,8 @@ class PositionReconciliationService {
       : [];
     if (accepted.length === 0) {
       if (!preflightReady.accountConfirmationDescriptor) {
-        // 全部文件被拒：authorizeApply 拒绝写入，worker 以 FATAL 结束并删除 job root；
-        // 逐文件原因已在预检结果中，按失败结果返回，不让整次导入以异常结束。
+        // 全部文件被拒：authorizeApply 拒绝写入，导入进程回滚、以 FATAL 结束并删除暂存目录；
+        // 逐文件原因已在 ready 结果中，按失败结果返回，不让整次导入以异常结束。
         let streamed;
         try {
           streamed = await dispatched.promise;
@@ -1355,18 +1453,23 @@ class PositionReconciliationService {
         (row) => row.sourceType === SOURCE_TYPES.BANK_ACCOUNT
       );
       accountOldValidCount = current ? Number(current.rowCount) : 0;
-      const ledgerPath = text(streamed.ledgerEvidence && streamed.ledgerEvidence.ledgerPath);
-      if (!ledgerPath) {
+      const jobRoot = text(streamed.jobRoot);
+      if (!jobRoot) {
         throw new PositionReconciliationError(
-          'position-import-job-ledger-invalid',
-          '账户快照预检缺少 sealed ledger'
+          'position-import-intent-not-durable',
+          '账户表待确认结果缺少暂存目录'
         );
       }
       this.sourceImportTokens.set(accountToken, {
         streaming: true,
-        preflightReady: streamed,
+        // 确认写入只需要待确认文件的信息；不把整次导入的结果留在内存里。
+        preflightReady: {
+          jobId: streamed.jobId,
+          jobRoot,
+          accountConfirmationDescriptor: accountDescriptor
+        },
         descriptor: accountDescriptor,
-        jobRoot: path.dirname(path.resolve(ledgerPath)),
+        jobRoot: path.resolve(jobRoot),
         sourceStructures
       });
     }
@@ -1517,6 +1620,7 @@ class PositionReconciliationService {
   }
 
   async applyStreamingAccountImport(token, batchContext, inputPaths) {
+    this.assertNoImportHoldingWriteLock();
     const normalizedToken = text(token);
     const parsed = this.sourceImportTokens.get(normalizedToken);
     if (!parsed || parsed.streaming !== true) {
@@ -1541,13 +1645,6 @@ class PositionReconciliationService {
     }
     let dispatched;
     try {
-      const schema = await dispatchPositionLargeImportSchemaMigration({
-        engine: this.positionImportEngine,
-        userDataDir: this.userDataDir,
-        sideDbPath: this.store.dbPath,
-        expectedCheckpoint: baseCheckpoint,
-        batchContext
-      }).promise;
       dispatched = this.dispatchTrackedImport({
         engine: this.positionImportEngine,
         command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
@@ -1557,10 +1654,7 @@ class PositionReconciliationService {
         expectedCheckpoint: baseCheckpoint,
         operationToken,
         batchContext,
-        payload: {
-          schemaFingerprint: schema.fingerprint,
-          preflightReady: parsed.preflightReady
-        },
+        payload: { preflightReady: parsed.preflightReady },
         ...(parsed.sourceStructures ? { contractOptions: { sourceStructures: parsed.sourceStructures } } : {}),
         featureFlags: { importApply: true }
       }, '替换清结算银行账户表');
@@ -1634,7 +1728,9 @@ class PositionReconciliationService {
       ],
       archived: [],
       differences: this.store.listDifferenceSummary(),
-      scopes: bankManager.scopes
+      scopes: bankManager.scopes,
+      // 银行对账单的原始账单版本（含已被替换的），供界面与排查按版本号追溯存档中的原件。
+      rawFiles: this.store.listRawFiles({ includeSuperseded: true })
     };
   }
 
@@ -1643,7 +1739,10 @@ class PositionReconciliationService {
       status: 'ok',
       linked: this.store.listLinkedSummary(),
       raw: this.store.listRawSummary(),
-      sourceMonths: this.store.listSourceMonths()
+      sourceMonths: this.store.listSourceMonths(),
+      // 各链接原始表的原始文件版本（含已被替换的），按版本号追溯存档中的原件。
+      rawFiles: this.store.listRawFiles({ kind: null, includeSuperseded: true })
+        .filter((file) => Object.prototype.hasOwnProperty.call(SOURCE_DEFINITIONS, file.kind))
     };
   }
 
@@ -1664,6 +1763,7 @@ class PositionReconciliationService {
   }
 
   async runStreamingMaintenance(command, payload, operationContext) {
+    this.assertNoImportHoldingWriteLock();
     const baseCheckpoint = this.store.persistenceCheckpoint();
     const operationToken = text(
       this.operationTokenProvider ? this.operationTokenProvider() : ''
@@ -1674,16 +1774,6 @@ class PositionReconciliationService {
         '平盘维护操作缺少外部 operation token'
       );
     }
-    const schema = this.positionImportDispatcher({
-      engine: this.positionImportEngine,
-      command: POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES,
-      files: [],
-      userDataDir: this.userDataDir,
-      sideDbPath: this.store.dbPath,
-      expectedCheckpoint: baseCheckpoint,
-      operationContext
-    });
-    await schema.promise;
     const dispatched = this.positionImportDispatcher({
       engine: this.positionImportEngine,
       command,
@@ -1824,21 +1914,23 @@ class PositionReconciliationService {
   }
 
   async exportLinked(sourceType, outputPath) {
-    const definitions = await this.currentSourceDefinitions();
     const rows = this.store.listLinkRows(sourceType).map((item) => item.row);
-    await writeLinkedWorkbook({ outputPath, sourceType, rows, headers: linkHeadersFor(sourceType, definitions) });
+    await writeLinkedWorkbook({ outputPath, sourceType, rows, headers: linkHeadersFor(sourceType) });
     return { status: 'ok', filePath: outputPath, rowCount: rows.length };
   }
 
-  // 原始表按当前结构出列：列名与当前版本一致的列取已存值，当前结构没有的列不导出。
+  // 原始表只导出保存下来的必用列，外加原始版本号与原始行号（其余列在存档中心的原件里）。
   async exportRaw(sourceType, outputPath) {
-    const definitions = await this.currentSourceDefinitions();
-    const rows = this.store.sourceRecords(sourceType).map((item) => item.row);
+    const rows = this.store.sourceRecords(sourceType).map((item) => ({
+      ...item.row,
+      [RAW_VERSION_HEADER]: item.rawVersion,
+      [RAW_ROW_NUMBER_HEADER]: item.sourceRowNumber
+    }));
     await writeRawWorkbook({
       outputPath,
       sourceType,
       rows,
-      headers: definitions[sourceType] ? definitions[sourceType].headers : null
+      headers: sourceExportHeaders(sourceType)
     });
     return { status: 'ok', filePath: outputPath, rowCount: rows.length };
   }
@@ -1921,8 +2013,7 @@ class PositionReconciliationService {
       outputPath,
       run,
       filteredSources,
-      reportFiles,
-      sourceDefinitions: await this.currentSourceDefinitions()
+      reportFiles
     });
   }
 
@@ -2068,7 +2159,8 @@ class PositionReconciliationService {
       const resultFundType = priorConflict
         ? text(original.working_fund_type)
         : text(result.resultFundType ?? result.bankRow?.FundType ?? original.working_fund_type);
-      const resultRow = { ...original.workingRow, FundType: resultFundType };
+      // 结果行 = 原始行 + 结果资金性质（与存储层读取时的推导一致）。
+      const resultRow = bankResultFields(original.originalRow, resultFundType);
       const changed = text(original.working_fund_type) !== resultFundType;
       return {
         bizId,

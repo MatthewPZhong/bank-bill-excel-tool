@@ -27,7 +27,6 @@ async function exerciseDialogs() {
   };
   const desktopApi = {
     scenarios: { getFundTypeEnum: async () => ({ values: [] }) },
-    bigAccount: { loadMode: async () => ({ mode: 'unfixed' }), loadOrder: async () => ({ order: [] }) },
     files: {
       extractBigAccountOrder: async () => ({
         status: 'error', errorCode: 'BIG_ACCOUNT_NOT_MAINTAINED',

@@ -162,3 +162,27 @@ test('⑥ atomic write：成功后不留 .tmp 半文件', async () => {
   assert.ok(fs.existsSync(savePath), '最终文件应存在');
   assert.ok(!fs.existsSync(`${savePath}.tmp`), 'tmp 文件应已被 rename 清理');
 });
+
+// ========================================================================
+// 7) v3.2.22（🔴 资金红线）：与主输出同口径按已解码文本编码
+// ========================================================================
+test('⑦ 按已解码文本编码：字面 `_xHHHH_`、含 NUL 的账号与回车读回原值，与同次导出的主输出一致', async () => {
+  const XLSX = require('xlsx');
+  const savePath = path.join(tmpDir, 'decoded.xlsx');
+  const row = {
+    ...makeCleanupRow(1),
+    '加款单号': 'ORDER_x0041_',
+    'MerchantId': 'A\u0000B',
+    'ReconciliationId': 'RID_x0041_',
+    'Payment Detail': 'X\rY'
+  };
+  await writePlatformCleanupOutput([row], savePath);
+
+  const rows = XLSX.utils.sheet_to_json(XLSX.readFile(savePath).Sheets[CLEANUP_SHEET_NAME], { header: 1, raw: true });
+  const at = (header) => rows[1][CLEANUP_TEMPLATE_HEADERS.indexOf(header)];
+  assert.strictEqual(at('加款单号'), 'ORDER_x0041_');
+  assert.strictEqual(at('MerchantId'), 'A\u0000B');
+  assert.strictEqual(at('ReconciliationId'), 'RID_x0041_', '🔴 不读回成 RIDA');
+  assert.strictEqual(at('Payment Detail'), 'X\rY');
+  assert.strictEqual(at('Credit Amount'), 100, '数值照旧');
+});

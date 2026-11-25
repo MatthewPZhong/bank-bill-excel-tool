@@ -5,19 +5,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { insertBankRowFixture } = require('../../helpers/position-bank-rows');
+const { insertFilteredSourceFixture } = require('../../helpers/position-source-rows');
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 
 const {
   MATCH_TYPES,
-  SOURCE_DEFINITIONS,
+  SOURCE_REQUIRED_FIELDS,
   SOURCE_TYPES
 } = require('../../../src/main-process/position-reconciliation/constants');
 const {
-  BANK_STATEMENT_FIELDS
-} = require('../../../src/constants/bank-statement-fields');
-const {
-  DETAIL_META_HEADERS
+  detailHeadersFor
 } = require('../../../src/backend/position-reconciliation-import/anomaly-report');
 const {
   hashFileSha256Async
@@ -32,27 +31,23 @@ const {
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
   createPositionReconciliationStore,
-  serializeJson
 } = require('../../../src/main-process/position-reconciliation/store');
 
-async function writeReport(filePath, { detailCount = 1 } = {}) {
+async function writeReport(filePath, { detailCount = 1, tradeTime = '2026-07-20' } = {}) {
   const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: filePath });
   const summary = workbook.addWorksheet('异常汇总');
   summary.addRow(['文件名', '来源类型', '过滤行数']).commit();
   summary.addRow(['transfer.xlsx', SOURCE_TYPES.FUND_TRANSFER, detailCount]).commit();
   summary.commit();
-  const headers = [
-    ...DETAIL_META_HEADERS,
-    ...SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers
-  ];
-  const raw = Object.fromEntries(
-    SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers.map((header) => [header, ''])
-  );
+  // 异常报告明细：过滤信息（含原始版本号）+ 该来源保存下来的必用列。
+  const headers = detailHeadersFor(SOURCE_TYPES.FUND_TRANSFER);
+  const requiredFields = SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.FUND_TRANSFER];
+  const raw = Object.fromEntries(requiredFields.map((header) => [header, '']));
   Object.assign(raw, {
     调拨单号: '123456789012345678901234567890',
     调拨状态: '付款失败',
     渠道流水号: 'RID-FILTERED-REPORT-1',
-    交易时间: '2026-07-20',
+    交易时间: tradeTime,
     付款金额: '',
     付款币种: 'USD',
     收款金额: '95',
@@ -70,8 +65,8 @@ async function writeReport(filePath, { detailCount = 1 } = {}) {
       `report-row-${index + 1}`, 'transfer.xlsx', 'Sheet1', index + 2,
       SOURCE_TYPES.FUND_TRANSFER, row.调拨单号, row.渠道流水号,
       'FT_NON_SUCCESS_EVIDENCE_INCOMPLETE', '非成功调拨缺少付款金额',
-      '2026-07-20', '2026-07',
-      ...SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers.map((header) => row[header])
+      '2026-07-20', '2026-07', 1,
+      ...requiredFields.map((header) => row[header])
     ];
     detail.addRow(values).commit();
   }
@@ -132,13 +127,45 @@ test('异常报告按 SHA 校验、同字节导出并按运行冻结记录合并
   assert.equal(detail[0].过滤记录标识, 'report-row-1');
   assert.equal(detail[0].调拨单号, '123456789012345678901234567890');
   assert.equal(detail[0].业务日期, '2026-07-20');
-  assert.equal(detail[0].业务日期_1, '');
+  // 明细只含过滤信息与必用列：带原始版本号，不含其余原始列。
+  assert.equal(detail[0].原始版本号, 1);
+  assert.equal(Object.hasOwn(detail[0], '附言'), false);
   const styledWorkbook = new ExcelJS.Workbook();
   await styledWorkbook.xlsx.readFile(runOutput);
   assert.deepEqual(
-    styledWorkbook.getWorksheet('调拨过滤数据').getCell('L2').value,
+    styledWorkbook.getWorksheet('调拨过滤数据').getCell('M2').value,
     { richText: [{ text: '123456789012345678901234567890' }] }
   );
+});
+
+test('运行过滤数据导出保留异常报告里日期单元格的序号', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-filtered-report-date-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const reportPath = path.join(dir, 'report.xlsx');
+  // 报告里的交易时间是日期单元格：序号 46204（2026-07-01 00:00:00）。
+  await writeReport(reportPath, { tradeTime: new Date(Date.UTC(2026, 6, 1)) });
+  const sourceDetail = XLSX.utils.sheet_to_json(XLSX.readFile(reportPath).Sheets['调拨异常明细'], { raw: true });
+  assert.equal(sourceDetail[0].交易时间, 46204);
+  const evidence = await hashFileSha256Async(reportPath);
+  const runOutput = path.join(dir, 'run-filtered.xlsx');
+  await writeRunFilteredSourcesWorkbook({
+    outputPath: runOutput,
+    run: { id: 13, scope: { channels: ['DBS'], months: ['2026-07'] } },
+    filteredSources: [{
+      reportRowKey: 'report-row-1',
+      sourceType: SOURCE_TYPES.FUND_TRANSFER,
+      sourceRevision: 3,
+      reportKey: 'report-date',
+      reportFileName: 'report.xlsx',
+      reportSha256: evidence.sha256
+    }],
+    reportFiles: [{
+      filePath: reportPath, reportKey: 'report-date', sha256: evidence.sha256, sizeBytes: evidence.sizeBytes
+    }]
+  });
+  const detail = XLSX.utils.sheet_to_json(XLSX.readFile(runOutput).Sheets['调拨过滤数据'], { raw: true });
+  // 读取按本地时间、写出按 UTC：不还原序号的话会偏移一个时区（并带上读取器在部分时区的秒级偏差）。
+  assert.ok(Math.abs(detail[0].交易时间 - 46204) < 1e-7, `实际：${detail[0].交易时间}`);
 });
 
 test('文件级分片与批次报告重叠时只从墓碑冻结的报告读取一次', async (t) => {
@@ -359,23 +386,14 @@ test('全量过滤月份仍可在链接表管理中选择并解除活动墓碑',
       token: 'filtered-month-manager-token'
     }
   });
-  store.db.prepare(`
-    INSERT INTO position_filtered_source_rows(
-      report_row_key, source_type, business_key, recon_id,
-      event_date, month_key, error_code, error_reason,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      row_hash, import_operation_token, archive_operation_key,
-      report_key, report_artifact_key, report_file_path, report_file_name,
-      report_sha256, report_size_bytes
-    ) VALUES (
-      'filtered-only-row', ?, 'FT-FILTERED-ONLY', 'RID-FILTERED-ONLY',
-      '2026-07-20', '2026-07', 'FT_FILTER', '测试全量过滤',
-      '/tmp/source.xlsx', 'source.xlsx', 'Sheet1', 2,
-      'filtered-only-row-hash', 'operation', 'archive-operation',
-      'report-filtered-only', 'artifact-filtered-only',
-      '/tmp/report.xlsx', 'report.xlsx', ?, 10
-    )
-  `).run(SOURCE_TYPES.FUND_TRANSFER, 'd'.repeat(64));
+  insertFilteredSourceFixture(store.db, {
+    reportRowKey: 'filtered-only-row', sourceType: SOURCE_TYPES.FUND_TRANSFER,
+    businessKey: 'FT-FILTERED-ONLY', reconId: 'RID-FILTERED-ONLY',
+    eventDate: '2026-07-20', monthKey: '2026-07', errorCode: 'FT_FILTER', errorReason: '测试全量过滤',
+    filePath: '/tmp/source.xlsx', rowNumber: 2, rowHash: 'filtered-only-row-hash',
+    reportKey: 'report-filtered-only', reportArtifactKey: 'artifact-filtered-only',
+    reportSha256: 'd'.repeat(64)
+  });
 
   const raw = store.listRawSummary().find(
     (item) => item.sourceType === SOURCE_TYPES.FUND_TRANSFER
@@ -466,52 +484,30 @@ test('运行信封拒绝被改写的过滤报告引用和来源 revision', (t) =
     }
   });
   const reportSha256 = 'b'.repeat(64);
-  const inserted = store.db.prepare(`
-    INSERT INTO position_filtered_source_rows(
-      report_row_key, source_type, business_key, recon_id,
-      event_date, month_key, error_code, error_reason,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      row_hash, import_operation_token, archive_operation_key,
-      report_key, report_artifact_key, report_file_path, report_file_name,
-      report_sha256, report_size_bytes
-    ) VALUES (
-      'envelope-row', ?, 'FT-ENVELOPE', 'RID-ENVELOPE',
-      '2026-07-20', '2026-07', 'FT_FILTER', '测试过滤',
-      '/tmp/source.xlsx', 'source.xlsx', 'Sheet1', 2,
-      'envelope-row-hash', 'operation', 'archive-operation',
-      'report-envelope', 'artifact-envelope', '/tmp/report.xlsx', 'report.xlsx', ?, 10
-    )
-  `).run(SOURCE_TYPES.FUND_TRANSFER, reportSha256);
+  const inserted = insertFilteredSourceFixture(store.db, {
+    reportRowKey: 'envelope-row', sourceType: SOURCE_TYPES.FUND_TRANSFER,
+    businessKey: 'FT-ENVELOPE', reconId: 'RID-ENVELOPE',
+    eventDate: '2026-07-20', monthKey: '2026-07', errorCode: 'FT_FILTER', errorReason: '测试过滤',
+    filePath: '/tmp/source.xlsx', rowNumber: 2, rowHash: 'envelope-row-hash',
+    reportKey: 'report-envelope', reportArtifactKey: 'artifact-envelope',
+    reportSha256
+  });
   const snapshot = store.currentSnapshot({
     scopes: ['DBS\u00002026-07'],
     sourceTypes: [SOURCE_TYPES.FUND_TRANSFER],
     includeMapping: true
   });
-  const bankRow = Object.fromEntries(BANK_STATEMENT_FIELDS.map((header) => [header, '']));
-  Object.assign(bankRow, {
-    BizId: 'BANK-FILTERED-ENVELOPE',
-    Channel: 'DBS',
-    BillDate: '2026-07-20',
-    FundType: 'FundTransfer-in'
+  insertBankRowFixture(store.db, {
+    fields: {
+      BizId: 'BANK-FILTERED-ENVELOPE',
+      Channel: 'DBS',
+      BillDate: '2026-07-20',
+      FundType: 'FundTransfer-in'
+    },
+    monthKey: '2026-07',
+    billDate: '2026-07-20'
   });
-  store.db.prepare(`
-    INSERT INTO position_bank_rows(
-      biz_id, channel, month_key, bill_date, status,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      import_order, original_fund_type, working_fund_type,
-      original_json, working_json
-    ) VALUES (?, ?, ?, ?, '未处理', '/tmp/bank.xlsx', 'bank.xlsx',
-              '渠道对账单', 2, 0, ?, ?, ?, ?)
-  `).run(
-    bankRow.BizId,
-    bankRow.Channel,
-    '2026-07',
-    '2026-07-20',
-    bankRow.FundType,
-    bankRow.FundType,
-    serializeJson(bankRow),
-    serializeJson(bankRow)
-  );
+  const [{ originalRow: bankRow }] = store.getBankRows({ channels: ['DBS'], months: ['2026-07'] });
   const summary = {
     inputRows: 1,
     changedRows: 0,
@@ -567,7 +563,7 @@ test('运行信封拒绝被改写的过滤报告引用和来源 revision', (t) =
       }
     }],
     filteredSources: [{
-      id: Number(inserted.lastInsertRowid),
+      id: inserted.id,
       reportKey: 'report-envelope',
       reportArtifactKey: 'artifact-envelope',
       archiveOperationKey: 'archive-operation',
@@ -598,7 +594,7 @@ test('运行信封拒绝被改写的过滤报告引用和来源 revision', (t) =
     UPDATE position_filtered_source_rows
     SET error_reason = '被改写的过滤原因'
     WHERE id = ?
-  `).run(Number(inserted.lastInsertRowid));
+  `).run(inserted.id);
   assert.throws(
     () => store.getRun(run.id),
     (error) => error
@@ -609,30 +605,22 @@ test('运行信封拒绝被改写的过滤报告引用和来源 revision', (t) =
     UPDATE position_filtered_source_rows
     SET error_reason = '测试过滤'
     WHERE id = ?
-  `).run(Number(inserted.lastInsertRowid));
+  `).run(inserted.id);
   assert.equal(store.getRun(run.id).filteredRowCount, 1);
 
-  const replacement = store.db.prepare(`
-    INSERT INTO position_filtered_source_rows(
-      report_row_key, source_type, business_key, recon_id,
-      event_date, month_key, error_code, error_reason,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      row_hash, import_operation_token, archive_operation_key,
-      report_key, report_artifact_key, report_file_path, report_file_name,
-      report_sha256, report_size_bytes
-    ) VALUES (
-      'envelope-row-replacement', ?, 'FT-ENVELOPE-REPLACEMENT', 'RID-ENVELOPE-REPLACEMENT',
-      '2026-07-21', '2026-07', 'FT_FILTER', '测试过滤替换行',
-      '/tmp/source.xlsx', 'source.xlsx', 'Sheet1', 3,
-      'envelope-row-hash-replacement', 'operation', 'archive-operation',
-      'report-envelope', 'artifact-envelope', '/tmp/report.xlsx', 'report.xlsx', ?, 10
-    )
-  `).run(SOURCE_TYPES.FUND_TRANSFER, reportSha256);
+  const replacement = insertFilteredSourceFixture(store.db, {
+    reportRowKey: 'envelope-row-replacement', sourceType: SOURCE_TYPES.FUND_TRANSFER,
+    businessKey: 'FT-ENVELOPE-REPLACEMENT', reconId: 'RID-ENVELOPE-REPLACEMENT',
+    eventDate: '2026-07-21', monthKey: '2026-07', errorCode: 'FT_FILTER', errorReason: '测试过滤替换行',
+    filePath: '/tmp/source.xlsx', rowNumber: 3, rowHash: 'envelope-row-hash-replacement',
+    reportKey: 'report-envelope', reportArtifactKey: 'artifact-envelope',
+    reportSha256
+  });
   store.db.prepare(`
     UPDATE position_run_filtered_sources
     SET filtered_source_id = ?
     WHERE run_id = ?
-  `).run(Number(replacement.lastInsertRowid), run.id);
+  `).run(replacement.id, run.id);
   assert.throws(
     () => store.getRun(run.id),
     (error) => error

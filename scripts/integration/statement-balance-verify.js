@@ -177,6 +177,7 @@ function loadRegenerateFunction(deps) {
     buildStatementGenerationConfig: deps.buildStatementGenerationConfig,
     buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: deps.statementGenerationHelpers.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: deps.statementGenerationHelpers.assertNoUnwritableRowText,
     FileValidationError
   });
   const assertVirtualTemplateBalanceOutputPaths = loadMainFunction('assertVirtualTemplateBalanceOutputPaths', {
@@ -233,13 +234,14 @@ function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEnt
     getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   });
   const mergeGeneratedXlsxFiles = loadMainFunction('mergeGeneratedXlsxFiles', {
-    require, fs, path, applyWatermark: () => {}
+    require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
   });
   const buildGenerationConfig = ({ template }) => ({ ...STATEMENT_CONFIG, template });
   const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
   const imported = [];
   const templateConfig = (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] });
   const generateGroups = loadMainFunction('generateMultiTemplateGroupFiles', {
+    isAllTransactionsSkippedByBackfill: loadMainFunction('isAllTransactionsSkippedByBackfill', { hasDetailExportRow: require('../../src/backend/file-service').hasDetailExportRow }),
     groupStatementEntriesForGeneration: loadGroupingFunction(templateConfig),
     ...loadOutputNameConflictFunctions(templates),
     getEntryTemplateConfig: ({ entry }) => ({
@@ -254,7 +256,9 @@ function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEnt
     rebuildMatchedTemplateFileEntries: ({ fileEntries: entries }) => entries,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: generation.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
     FileValidationError,
+    createStatementOutputJournal: require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,

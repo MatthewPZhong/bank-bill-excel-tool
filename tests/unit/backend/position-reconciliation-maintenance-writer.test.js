@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { insertBankRowFixture } = require('../../helpers/position-bank-rows');
+const { insertFilteredSourceFixture, insertSourceRowFixture } = require('../../helpers/position-source-rows');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
@@ -18,14 +20,7 @@ const {
   SOURCE_TYPES
 } = require('../../../src/main-process/position-reconciliation/constants');
 const {
-  stableHash
-} = require('../../../src/main-process/position-reconciliation/common');
-const {
-  ensurePositionLargeImportSchemaAtPath
-} = require('../../../src/main-process/position-reconciliation/large-import-schema');
-const {
-  createPositionReconciliationStore,
-  serializeJson
+  createPositionReconciliationStore
 } = require('../../../src/main-process/position-reconciliation/store');
 
 function createModernSideDb(t, prefix) {
@@ -41,11 +36,6 @@ function createModernSideDb(t, prefix) {
   });
   const sideDbPath = store.dbPath;
   store.close();
-  ensurePositionLargeImportSchemaAtPath({
-    sideDbPath,
-    expectedCheckpoint: checkpoint,
-    availableBytesProvider: () => 10n ** 15n
-  });
   return { checkpoint, sideDbPath };
 }
 
@@ -65,25 +55,15 @@ function insertSource(db, {
   row,
   rowNumber
 }) {
-  const rowHash = stableHash(row);
-  const result = db.prepare(`
-    INSERT INTO position_source_rows(
-      source_type, business_key, event_date, month_key,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      row_hash, raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, 'Sheet1', ?, ?, ?)
-  `).run(
+  return insertSourceRowFixture(db, {
     sourceType,
     businessKey,
-    `${monthKey}-01`,
+    eventDate: `${monthKey}-01`,
     monthKey,
-    `/tmp/${businessKey}.xlsx`,
-    `${businessKey}.xlsx`,
+    row,
     rowNumber,
-    rowHash,
-    serializeJson(row)
-  );
-  return { id: Number(result.lastInsertRowid), rowHash };
+    filePath: `/tmp/${businessKey}.xlsx`
+  });
 }
 
 function insertLink(db, source, {
@@ -114,15 +94,12 @@ function insertBank(db, {
   monthKey,
   order
 }) {
-  db.prepare(`
-    INSERT INTO position_bank_rows(
-      biz_id, channel, month_key, bill_date, status,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      import_order, original_fund_type, working_fund_type,
-      original_json, working_json
-    ) VALUES (?, ?, ?, ?, '未处理', '/tmp/bank.xlsx', 'bank.xlsx',
-              '渠道对账单', ?, ?, 'Inbound', 'Inbound', '{}', '{}')
-  `).run(bizId, channel, monthKey, `${monthKey}-01`, order + 1, order);
+  insertBankRowFixture(db, {
+    fields: { BizId: bizId, Channel: channel, FundType: 'Inbound' },
+    monthKey,
+    importOrder: order,
+    rowNumber: order + 1
+  });
 }
 
 test('来源删除按月份分批执行并依赖 FK cascade 清理链接行', async (t) => {
@@ -167,27 +144,14 @@ test('来源删除按月份分批执行并依赖 FK cascade 清理链接行', as
     businessKey: 'IN-C',
     rowNumber: 4
   });
-  const insertFiltered = db.prepare(`
-    INSERT INTO position_filtered_source_rows(
-      report_row_key, source_type, business_key, recon_id,
-      event_date, month_key, error_code, error_reason,
-      source_file_path, source_file_name, source_sheet, source_row_number,
-      row_hash, import_operation_token, archive_operation_key,
-      report_key, report_artifact_key, report_file_path, report_file_name,
-      report_sha256, report_size_bytes
-    ) VALUES (?, ?, ?, '', ?, ?, 'TEST_FILTER', '测试过滤',
-              '/tmp/filter.xlsx', 'filter.xlsx', 'Sheet1', 2,
-              ?, 'operation', 'archive-operation',
-              'report', 'artifact', '/tmp/report.xlsx', 'report.xlsx', ?, 10)
-  `);
-  insertFiltered.run(
-    'filtered-july', SOURCE_TYPES.GATEWAY_INBOUND, 'FILTER-JULY',
-    '2026-07-01', '2026-07', 'filtered-row-july', 'a'.repeat(64)
-  );
-  insertFiltered.run(
-    'filtered-august', SOURCE_TYPES.GATEWAY_INBOUND, 'FILTER-AUGUST',
-    '2026-08-01', '2026-08', 'filtered-row-august', 'a'.repeat(64)
-  );
+  insertFilteredSourceFixture(db, {
+    reportRowKey: 'filtered-july', sourceType: SOURCE_TYPES.GATEWAY_INBOUND, businessKey: 'FILTER-JULY',
+    eventDate: '2026-07-01', monthKey: '2026-07', rowHash: 'filtered-row-july'
+  });
+  insertFilteredSourceFixture(db, {
+    reportRowKey: 'filtered-august', sourceType: SOURCE_TYPES.GATEWAY_INBOUND, businessKey: 'FILTER-AUGUST',
+    eventDate: '2026-08-01', monthKey: '2026-08', rowHash: 'filtered-row-august'
+  });
   db.close();
 
   const result = await runPositionMaintenanceJob({
@@ -236,6 +200,20 @@ test('来源删除按月份分批执行并依赖 FK cascade 清理链接行', as
         resolvedAt: false,
         resolutionReason: null
       }
+    ]
+  );
+  // 行已全部删除的原始文件版本标为已被替换；仍有行或未处理过滤记录引用的版本保持当前。
+  assert.deepEqual(
+    verify.prepare(`
+      SELECT original_name AS name, status
+      FROM position_raw_files
+      ORDER BY version
+    `).all().map((row) => ({ ...row })),
+    [
+      { name: 'IN-A.xlsx', status: 'superseded' },
+      { name: 'IN-B.xlsx', status: 'superseded' },
+      { name: 'IN-C.xlsx', status: 'active' },
+      { name: 'filter.xlsx', status: 'active' }
     ]
   );
   assert.equal(

@@ -21,7 +21,8 @@ const {
   findPreviousBalanceSeed,
   readBalanceSeedRecords,
   splitTemplateName,
-  upsertBalanceSeedRecord
+  upsertBalanceSeedRecord,
+  writeBalanceSeedRecords
 } = require('../../../src/backend/balance-seed-store');
 const { readBalanceAdjustments } = require('../../../src/backend/balance-adjustment-store');
 const { createStatementGenerationHelpers, selectBalanceAccountRows } = require('../../../src/main-process/statement-generation');
@@ -164,11 +165,14 @@ function regenerationPlanDeps({
   const assertStatementBatchWritable = statementGenerationHelpers
     ? statementGenerationHelpers.assertStatementBatchWritable
     : () => {};
+  const assertNoCollectedUnwritableText = statementGenerationHelpers
+    ? statementGenerationHelpers.assertNoUnwritableRowText
+    : () => {};
   return {
     planVirtualTemplateBalanceRegeneration: loadMainFunction(
       'planVirtualTemplateBalanceRegeneration',
-      ['getStatementSessionEntries', 'groupStatementEntriesForGeneration', 'buildStatementGenerationConfig', 'buildPreparedStatementBatchFromEntries', 'assertStatementBatchWritable', 'FileValidationError'],
-      [getStatementSessionEntries, groupStatementEntriesForGeneration, buildStatementGenerationConfig, buildPreparedStatementBatchFromEntries, assertStatementBatchWritable, FileValidationError]
+      ['getStatementSessionEntries', 'groupStatementEntriesForGeneration', 'buildStatementGenerationConfig', 'buildPreparedStatementBatchFromEntries', 'assertStatementBatchWritable', 'assertNoCollectedUnwritableText', 'FileValidationError'],
+      [getStatementSessionEntries, groupStatementEntriesForGeneration, buildStatementGenerationConfig, buildPreparedStatementBatchFromEntries, assertStatementBatchWritable, assertNoCollectedUnwritableText, FileValidationError]
     ),
     assertVirtualTemplateBalanceOutputPaths: loadMainFunction(
       'assertVirtualTemplateBalanceOutputPaths',
@@ -533,6 +537,49 @@ test('断档补录日期必须晚于断档前最后一个账单日', (t) => {
   assert.equal(accepted.plan.record.merchantId, 'M001');
 });
 
+// v3.2.22：核对上一账单日余额（seedMismatch）时，早于已有余额日期的补录不会被采用，预检直接拒绝
+test('核对上一账单日余额：补录日期不能早于已有余额的日期；等于或晚于照常', (t) => {
+  const storageRoot = createTempRoot(t);
+  const seed = (billDate, extra = {}) => upsertBalanceSeedRecord(storageRoot, {
+    templateName: TEMPLATE_NAME, merchantId: 'M001', currency: 'USD', billDate, endBalance: 100, overwrite: true, ...extra
+  });
+  seed('2026-09-29');
+  // 其他账号 / 币种、当前账单日期及以后的种子不影响下限
+  seed('2026-09-30', { currency: 'EUR' });
+  seed('2026-09-30', { merchantId: 'M002' });
+  seed('2026-10-01');
+  const prompt = {
+    templateName: TEMPLATE_NAME, merchantId: 'M001', currency: 'USD', targetBillDate: '2026-10-01',
+    seedMismatch: { seedDate: '2026-09-29', seedBalance: 0, anchorBalance: 0, billDate: '2026-10-01', statementBalances: [1] }
+  };
+  const build = (billDate, pendingPrompt = prompt) => buildManualBalanceSeedPlan({
+    payload: { billDate, endBalance: '500' },
+    pendingPrompt,
+    importContext: { template: { name: TEMPLATE_NAME } },
+    storageRoot
+  });
+  const rejected = build('2026-09-28');
+  assert.equal(rejected.stopResult.status, 'manual-balance-invalid');
+  assert.equal(rejected.stopResult.message, '上一账单日日期不能早于已有余额的日期 2026-09-29（更早的余额不会用于本次核对）');
+  assert.equal(rejected.stopResult.manualBalancePrompt.merchantId, 'M001');
+  for (const billDate of ['2026-09-29', '2026-09-30']) {
+    const accepted = build(billDate);
+    assert.equal(accepted.stopResult, undefined, billDate);
+    assert.equal(accepted.plan.record.billDate, billDate);
+  }
+  // 普通缺种子补录不受限制
+  assert.equal(build('2026-09-01', { ...prompt, seedMismatch: undefined }).stopResult, undefined);
+
+  // 下限按当前种子记录取，不沿用提示里记下的日期：提示生成后种子被改到更晚，按更晚的日期拒绝
+  seed('2026-09-30');
+  assert.equal(build('2026-09-29').stopResult.message, '上一账单日日期不能早于已有余额的日期 2026-09-30（更早的余额不会用于本次核对）');
+  // 种子被恢复到不含该账号的版本：没有已有余额，更早的日期照常保存
+  writeBalanceSeedRecords(storageRoot, splitTemplateName(TEMPLATE_NAME).bankName, []);
+  const restored = build('2026-09-28');
+  assert.equal(restored.stopResult, undefined);
+  assert.equal(restored.plan.record.billDate, '2026-09-28');
+});
+
 function writeSourceWorkbook(root, fileName, rows) {
   const filePath = path.join(root, fileName);
   const workbook = XLSX.utils.book_new();
@@ -830,6 +877,7 @@ function virtualExportAllDeps({ session, groups, generated }) {
     // v3.2.21：导出全部执行时先逐组校验渠道余额（这里的组都不是余额方式不同的渠道）与写出前的检查（桩条目不含明细行）
     resolveEntryBalancePlan: () => null,
     assertStatementEntriesWritable: () => {},
+    assertNoCollectedUnwritableText: () => {},
     FileValidationError,
     // 生成配置失败的组按会话明细校验渠道余额（这里的组都没有问题）
     collectGroupBalanceIssuesWithoutConfig: () => {},
@@ -974,7 +1022,7 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
       const lastGeneratedExports = { detail: { filePath: '/tmp/detail.xlsx' }, balance: null };
       const capture = (reason) => (items, pendingFiles) => {
         calls.results.push({ reason, items, pendingFiles });
-        return { status: 'manual-balance-required', manualBalancePrompt: { reason, [kind.itemsField]: items } };
+        return { status: 'manual-balance-required', message: '请确认', manualBalancePrompt: { reason, [kind.itemsField]: items } };
       };
       const execute = loadSaveBalanceSeedExecute({
         FILENAME_MAPPING_TEMPLATE_ID,
@@ -982,7 +1030,10 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
         isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
         ...seedSaveGroupingDeps(),
         // v3.2.19：补录后重算的提示附去重行数，按会话条目统计（真实生成辅助函数）
-        statementGenerationHelpers: createStatementGenerationHelpers({}),
+        statementGenerationHelpers: createStatementGenerationHelpers({
+          appendActivityLogEntry: (entry) => calls.logs.push(entry),
+          buildImportWarningDetailLines: (warnings) => warnings.map((warning) => `第${warning.rowNumber}行`)
+        }),
         rememberAcknowledgedBalanceGaps: (input) => {
           calls.remembered.push(input.gapKeys);
           return true;
@@ -993,7 +1044,12 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
         formatBalanceSeedReplaceLine: (item) => `替换 ${item.merchantId} ${item.billDate}`,
         regenerateVirtualTemplateBalanceFromSession: () => (regenOutcome === 'success'
           ? { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: [] } }
-          : { needsSeed: true, [kind.itemsField]: [{ ...kind.item, billDate: '2026-09-02' }], warnings: [] }),
+          : {
+            needsSeed: true,
+            [kind.itemsField]: [{ ...kind.item, billDate: '2026-09-02' }],
+            // v3.2.21：其他模板组的「跨 Sheet 回填」跳过行，后续提示同样带上
+            warnings: [{ type: 'cross-sheet-backfill-skipped', rowNumber: 7 }]
+          }),
         buildBalanceGapConfirmResult: () => {
           throw new Error('不应进入断档确认');
         },
@@ -1018,7 +1074,7 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
       }, { fileEvidence: { filePlan: { inputs: [{ filePath: '/tmp/a.xlsx' }] } } });
 
       assert.deepEqual(calls.remembered, [[kind.item.key]], label);
-      assert.equal(calls.logs[0].level, 'warn', label);
+      assert.equal(calls.logs[0].level, 'warning', label);
       assert.equal(calls.logs[0].message, kind.logMessage, label);
       assert.equal(calls.logs[0].details.length, 2, label);
       if (regenOutcome === 'success') {
@@ -1028,6 +1084,9 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
         assert.equal(result.manualBalancePrompt.reason, kind.reason, label);
         assert.equal(calls.results[0].reason, kind.reason, label);
         assert.equal(calls.results[0].items[0].billDate, '2026-09-02', label);
+        assert.match(result.message, /^请确认；「跨 Sheet 回填」1行未配上，已跳过、未写入明细/, label);
+        assert.equal(result.crossSheetBackfillSkippedRowCount, 1, label);
+        assert.deepEqual(calls.logs.at(-1).details, ['第7行'], label);
       }
     }
   }
@@ -1318,8 +1377,8 @@ function loadOutputPathHelpers(storageRoot, today) {
   );
   const mergeGeneratedXlsxFiles = loadMainFunction(
     'mergeGeneratedXlsxFiles',
-    ['require', 'fs', 'path', 'applyWatermark'],
-    [require, fs, path, () => {}]
+    ['require', 'fs', 'path', 'applyWatermark', 'prepareWorkbookTextForWrite'],
+    [require, fs, path, () => {}, require('../../../src/backend/file-service/writers').prepareWorkbookTextForWrite]
   );
   return {
     buildOutputFilePath,
@@ -1666,6 +1725,15 @@ test('写出前的只读校验与生成时的检查同口径：收支同时有�
       { rows: [['2026-09-01', 'M001', 'USD', '1', ''], ['2026-09-02', 'M001', 'USD', '2', '']], noMetas: true },
       { rows: [['2026-09-03', 'M001', 'USD', '5', '6'], ['2026-09-04', 'M001', 'USD', '7', '8']], metaBase: 10 }
     ] },
+    // v3.2.22 B113：映射后才写进的值（按币种回填或手动选择的大账号）含无法写入 Excel 的字符时，预检与生成同样按最终明细拒绝，
+    //   报合并后的源行号；只出现在不导出的行（收支都为 0）时不拒绝
+    { label: '回填的大账号含无法写入的字符', rawFiles: [
+      { rows: [['2026-09-01', 'M001', 'USD', '1', '']] },
+      { rows: [['2026-09-02', 'M\uFFFF', 'USD', '2', ''], ['2026-09-03', 'M\ud83d', 'USD', '3', '']], metaBase: 7 }
+    ] },
+    { label: '无法写入的字符只在不导出的行', rawFiles: [
+      { rows: [['2026-09-01', 'M001', 'USD', '1', ''], ['2026-09-02', 'M\uFFFF', 'USD', '0', '0']] }
+    ] },
     { label: '只有收支都为 0 的行、日期有效', files: [[['2026-09-01', 'M001', 'USD', '0', '']]] },
     { label: '只有收支都为 0 的行、没有日期', files: [[['', 'M001', 'USD', '0', '']]] },
     { label: '出余额未映射 MerchantId', files: [[['2026-09-01', 'M001', 'USD', '100', '']]], config: { mappingByTargetField: {} } },
@@ -1695,6 +1763,9 @@ test('写出前的只读校验与生成时的检查同口径：收支同时有�
     ['账单日期无效', '账单日期存在无效值：abc', []],
     ['收支同时有值（前一段无行元数据）', '存在2条明细的 Credit Amount 与 Debit Amount 同时有值',
       ['第4行，Credit Amount="5"，Debit Amount="6"', '第5行，Credit Amount="7"，Debit Amount="8"']],
+    ['回填的大账号含无法写入的字符',
+      '源文件第 7 行写进「MerchantId」列的值含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）等 2 处，请按值的来源修正源文件或模板的大账号、固定值配置后重新生成',
+      ['第 7 行写进「MerchantId」列的值', '第 8 行写进「MerchantId」列的值']],
     ['只有收支都为 0 的行、没有日期', '导入文件中未找到有效的 BillDate', []],
     ['出余额未映射 MerchantId', '当前模板启用 Balance 时必须映射 MerchantId 字段', []]
   ]);
@@ -1713,7 +1784,7 @@ function findFileNames(root, pattern) {
 }
 
 test('主进程：按文件名映射多模板导入，任一模板组需补录或确认断档时不合并、不缓存部分余额', (t) => {
-  for (const scenario of ['gap', 'seed-required', 'bulk-warnings', 'invalid-date', 'merged-dates']) {
+  for (const scenario of ['gap', 'seed-required', 'bulk-warnings', 'invalid-date', 'merged-dates', 'unwritable']) {
     const root = createTempRoot(t);
     const storageRoot = path.join(root, 'storage');
     const generation = createGenerationSeam(storageRoot);
@@ -1733,8 +1804,13 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
         billDate: '2026-08-31', endBalance: 1000, generationMethod: '人工录入'
       });
     }
+    // v3.2.22 B113（Codex 第六轮）：前两组各 12 行的账号含无法写入的字符——各组校验完一并拒绝，列全批前 20 处、总计 24 处
+    const unwritableRows = (group) => Array.from({ length: 12 }, (_value, index) => [
+      `2026-09-${String(index + 1).padStart(2, '0')}`, `${group.merchantId}\uFFFF`, 'USD', '100', '']);
     const fileEntries = groups.map((group) => ({
-      ...mappedSourceEntry(root, `${scenario}-${group.id}.xlsx`, group.dates.map((date) => [date, group.merchantId, 'USD', '100', ''])
+      ...mappedSourceEntry(root, `${scenario}-${group.id}.xlsx`, scenario === 'unwritable' && group.id <= 2
+        ? unwritableRows(group)
+        : group.dates.map((date) => [date, group.merchantId, 'USD', '100', ''])
         // 只有一条零金额行的日期：生成时跳过，不进明细与余额文件，也不进汇总文件名
         .concat(scenario === 'merged-dates' && group.id === 1 ? [['2026-08-30', group.merchantId, 'USD', '0', '']] : [])),
       matchedTemplateId: group.id
@@ -1765,7 +1841,9 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
       },
       buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
       assertStatementBatchWritable: generation.assertStatementBatchWritable,
+      assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
       FileValidationError,
+      createStatementOutputJournal: require('../../../src/main-process/statement-output-rollback').createStatementOutputJournal,
       removeStatementSessionEntriesByFilePath: () => {},
       generateStatementFiles: (options) => {
         const result = generation.generateStatementFiles(options);
@@ -1779,6 +1857,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
         }
         return result;
       },
+      isAllTransactionsSkippedByBackfill: loadMainFunction('isAllTransactionsSkippedByBackfill', ['hasDetailExportRow'], [require('../../../src/backend/file-service').hasDetailExportRow]),
       parseRequiredBillDates,
       buildDateRangeLabel,
       getToday: () => '2026-10-29',
@@ -1805,6 +1884,26 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
       Object.values(dependencies)
     );
 
+    if (scenario === 'unwritable') {
+      let rejected = null;
+      try {
+        generateGroups({
+          fileEntries,
+          fallbackTemplateConfig: {},
+          selectedBigAccount: null,
+          session: { key: 'session-1' },
+          inputFilePaths: fileEntries.map((entry) => entry.filePath)
+        });
+      } catch (error) {
+        rejected = error;
+      }
+      assert.ok(rejected && rejected.positionsOnly, scenario);
+      assert.match(rejected.message, /含无法写入 Excel 的字符.*等 24 处/, scenario);
+      assert.equal(rejected.detailLines.length, 21, scenario);
+      assert.equal(rejected.detailLines[20], '另有 4 处，共 24 处', scenario);
+      assert.deepEqual([imported, findFileNames(storageRoot, /COMMON|BALANCE/)], [[], []], scenario);
+      continue;
+    }
     if (scenario === 'invalid-date') {
       // v3.2.21：最后一组有交易却没有有效账单日期时，在任何组写出之前拦下：前两组不写出明细、余额，也不写当日种子
       assert.throws(() => generateGroups({
@@ -2050,6 +2149,7 @@ test('主进程：导出全部时后一组写出前检查失败，任何组都�
       resolvedTids.push(config.template.id);
       return null;
     },
+    assertNoCollectedUnwritableText: () => {},
     assertStatementEntriesWritable: ({ config, balancePlan, includeBalance }) => {
       checked.push([config.template.id, balancePlan, includeBalance]);
       if (config.template.id === 2) throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
@@ -2070,6 +2170,7 @@ test('主进程：导出全部时后一组写出前检查失败，任何组都�
       configuredTids.push(template.id);
       return { template };
     },
+    assertNoCollectedUnwritableText: () => {},
     assertStatementEntriesWritable: ({ config }) => {
       if (config.template.id === 1) throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
     }
@@ -2380,8 +2481,11 @@ test('主进程：导入多组生成与补录重算中，其他组错误不遮�
         if (writableFailures[preparedBatch.tid]) throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
       },
       buildChannelBalancePlanningError,
+      // 跨 Sheet 回填：本用例的组都不是被回填跳过全部交易的组
+      isAllTransactionsSkippedByBackfill: () => false,
       assertGenerationOutputNameUnique: () => {},
       findGenerationGroupOutputPathConflicts: () => null,
+      createStatementOutputJournal: require('../../../src/main-process/statement-output-rollback').createStatementOutputJournal,
       removeStatementSessionEntriesByFilePath: () => {},
       generateStatementFiles: ({ preparedBatch }) => {
         calls.generated.push(preparedBatch.tid);
@@ -2536,7 +2640,12 @@ test('主进程：导出另存为确认后复检遇到渠道余额错误时在�
       },
       createPreflightErrorResult: (payload) => ({ status: 'error', ...payload }),
       dialog: { showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/out.xlsx' }) },
-      mainWindow: null
+      mainWindow: null,
+      // 跨 Sheet 回填：导出余额不附带回填后的原始账单
+      path,
+      collectCrossSheetBackfillExportItems: () => [],
+      isCrossSheetBackfillSourceUnchanged: () => true,
+      allocateCrossSheetBackfillOutputPaths: () => []
     };
     return loadNestedMainDeclaration('prepareStatementExport', deps);
   };
@@ -2791,4 +2900,143 @@ test('generateStatementFiles：明细与余额结果的 billDates 只有首末�
   const preparedBatch = generation.buildPreparedStatementBatchFromEntries({ config, fileEntries: [entry] });
   const result = generation.generateStatementFiles({ config, preparedBatch, scope: 'current' });
   assert.deepEqual([result.detail.billDates, result.balance.billDates], [['2026-09-01', '2026-09-02'], ['2026-09-01', '2026-09-02']]);
+});
+
+// v3.2.22 B113：多组明细合并时读回的字面 _xHHHH_ 已还原成原文，合并写出须同样转义，合并文件中原样保留
+test('mergeGeneratedXlsxFiles：各组明细中的字面 _xHHHH_ 合并写出后读回原样保留', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-escape-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { writeWorkbookRows } = require('../../../src/backend/file-service');
+  const { mergeGeneratedXlsxFiles } = loadOutputPathHelpers(dir, '2026-11-23');
+  const first = writeWorkbookRows({ rows: [['Ref'], ['FEE_x0041_']], outputFilePath: path.join(dir, 'a.xlsx') });
+  const second = writeWorkbookRows({ rows: [['Ref'], ['REF_x0041\r\nB']], outputFilePath: path.join(dir, 'b.xlsx') });
+  const merged = mergeGeneratedXlsxFiles([first, second], path.join(dir, 'merged.xlsx'));
+  const workbook = XLSX.readFile(merged);
+  assert.deepEqual(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }),
+    [['Ref'], ['FEE_x0041_'], ['REF_x0041\r\nB']]);
+});
+
+// v3.2.22 B45（Codex 第六轮）：写出期间的系统异常写入日志前去掉消息——Node 文件异常的消息带完整路径，内部文件名含完整账号
+test('主进程：多模板写出期间的系统异常写入日志时不带内部文件名，保留错误代码、系统调用与调用栈', () => {
+  const statementOutputErrorForLog = loadMainFunction('statementOutputErrorForLog');
+  const logged = [];
+  const restoredResult = loadMainFunction(
+    'createRestoredStatementRuntimeFailureResult',
+    ['appendLog', 'ensureStorageRoot', 'appendActivityLogEntry', 'statementOutputErrorForLog'],
+    [(_root, error) => { logged.push(error.stack); return 'logs/x.log'; }, () => '/storage', () => {}, statementOutputErrorForLog]
+  );
+  let busy = null;
+  try {
+    fs.openSync(path.join(os.tmpdir(), 'no-such-dir-b45', '1-中行-6222020200012345678-COMMON.xlsx'), 'r');
+  } catch (error) {
+    busy = error;
+  }
+  assert.match(busy.message, /6222020200012345678/, '前置：Node 文件异常的消息带路径');
+  const result = restoredResult(busy, { step: '生成网银账单', errorCode: 'STATEMENT_GENERATE_FAILED' });
+  assert.equal(result.preservesSession, true);
+  assert.equal(logged.length, 1);
+  assert.doesNotMatch(logged[0], /6222020200012345678|no-such-dir-b45/);
+  assert.match(logged[0], /^Error（ENOENT，open）：/);
+  assert.match(logged[0], /\n\s+at /, '保留调用栈');
+});
+
+test('v3.2.21 跨 Sheet 回填：等待余额处理（补录 / 断档）的结果同样提示回填跳过的笔数并另记活动日志，明细仍可导出', () => {
+  const logs = [];
+  const helpers = createStatementGenerationHelpers({
+    appendActivityLogEntry: (entry) => logs.push(entry),
+    buildImportWarningDetailLines: (warnings, options = {}) => warnings.map((warning) => (
+      `第${warning.rowNumber}行${options.forLog ? '' : `="${warning.matchValue}"`}`
+    )),
+    buildManualBalanceRequiredResult: () => ({ status: 'manual-balance-required', message: '请补录上一账单日余额', detailReady: true }),
+    buildBalanceGapConfirmResult: () => ({ status: 'manual-balance-required', message: '请确认断档', detailReady: true }),
+    normalizeInputFilePaths: (value) => [].concat(value || [])
+  });
+  const skipped = { type: 'cross-sheet-backfill-skipped', rowNumber: 7, matchValue: 'ACC-SECRET' };
+  const manual = helpers.buildImportResultFromGeneratedFiles({
+    generatedFiles: { detail: {}, warnings: [{ type: 'balance-seed-required', prompt: {} }, skipped] },
+    templateName: 'T'
+  });
+  assert.equal(manual.detailReady, true);
+  assert.equal(manual.crossSheetBackfillSkippedRowCount, 1);
+  assert.match(manual.message, /^请补录上一账单日余额；「跨 Sheet 回填」1行未配上，已跳过、未写入明细/);
+  assert.deepEqual(logs.map((entry) => [entry.message, entry.details]), [['跨 Sheet 回填：部分行未配上，已跳过', ['第7行']]]);
+
+  const gap = helpers.buildImportResultFromGeneratedFiles({
+    generatedFiles: { detail: {}, warnings: [{ type: 'balance-gap-confirm', gaps: [{}] }, skipped] },
+    templateName: 'T'
+  });
+  assert.match(gap.message, /^请确认断档；「跨 Sheet 回填」1行未配上/);
+
+  const plain = helpers.buildImportResultFromGeneratedFiles({
+    generatedFiles: { detail: {}, warnings: [{ type: 'balance-seed-required', prompt: {} }] },
+    templateName: 'T'
+  });
+  assert.equal(plain.message, '请补录上一账单日余额');
+});
+
+// ---- v3.2.21 审查回归（第十六轮）----
+
+test('v3.2.21 跨 Sheet 回填：明细没有可导出的交易、只剩带日期且收支为空的期初余额行时，生成在写出文件之前报错并逐行列出跳过原因；没有回填跳过时沿用原行为', () => {
+  const { FileValidationError } = require('../../../src/backend/file-service');
+  const { cloneRowsWithMetadata } = require('../../../src/main-process/statement-session');
+  const outputs = [];
+  const helpers = createStatementGenerationHelpers({
+    buildDetailExportRows,
+    cloneRowsWithMetadata,
+    FileValidationError,
+    buildImportWarningDetailLines: (warnings, options = {}) => warnings.map((warning) => (
+      `第${warning.rowNumber}行${options.forLog ? '' : `="${warning.matchValue}"`}`
+    )),
+    parseRequiredBillDates: () => { outputs.push('parse-bill-dates'); return ['2026-09-01']; },
+    buildStatementOutputFilePath: () => { outputs.push('output-path'); return { outputFilePath: '/tmp/x.xlsx', fileName: 'x.xlsx' }; },
+    writeWorkbookRows: () => { outputs.push('write'); }
+  });
+  const detailRows = [['BillDate', 'Credit Amount', 'Debit Amount'], ['2026-09-01', '', '']];
+  const skipped = { type: 'cross-sheet-backfill-skipped', rowNumber: 3, matchValue: 'ACC-SECRET' };
+  assert.throws(() => helpers.generateStatementFiles({
+    config: { template: { name: 'T' } },
+    preparedBatch: { detailRows, warnings: [skipped], inputFilePaths: ['/private/a.xlsx'] }
+  }), (error) => {
+    assert.ok(error instanceof FileValidationError);
+    assert.match(error.message, /^导入文件中没有账号存在交易数据（「跨 Sheet 回填」跳过了1行/);
+    assert.ok(error.detailLines.some((line) => line.includes('ACC-SECRET')));
+    assert.ok(error.logDetailLines.every((line) => !line.includes('ACC-SECRET')));
+    return true;
+  });
+  assert.deepEqual(outputs, [], '没有取账单日期、没有写出');
+  // 收、支同时有值的行仍按原有校验报错（行号来自该行），不当成交易全部被跳过
+  const conflictRows = cloneRowsWithMetadata([['BillDate', 'Credit Amount', 'Debit Amount'], ['2026-09-01', '30', '10']]);
+  conflictRows.rowMetas = [{ sourceRowNumber: 5 }];
+  assert.throws(() => helpers.generateStatementFiles({
+    config: { template: { name: 'T' } },
+    preparedBatch: { detailRows: conflictRows, warnings: [skipped], inputFilePaths: ['/private/a.xlsx'] }
+  }), /Credit Amount 与 Debit Amount 同时有值/);
+});
+
+test('v3.2.21 跨 Sheet 回填：判定交易是否全部被跳过时，收、支同时有值的行不算跳过（留给生成阶段报出原有校验错误）', () => {
+  const { hasDetailExportRow } = require('../../../src/backend/file-service');
+  const isAllSkipped = loadMainFunction('isAllTransactionsSkippedByBackfill', ['hasDetailExportRow'], [hasDetailExportRow]);
+  const entry = (rows) => ({ detailRows: Object.assign(rows, { issues: [{ type: 'cross-sheet-backfill-skipped', rowNumber: 3 }] }) });
+  const header = ['BillDate', 'Credit Amount', 'Debit Amount'];
+  assert.equal(isAllSkipped([entry([header, ['2026-09-01', '', '']])]), true, '只剩期初余额行');
+  assert.equal(isAllSkipped([entry([header, ['2026-09-01', '30', '10']])]), false, '收支同时有值');
+  assert.equal(isAllSkipped([entry([header, ['2026-09-01', '30', '']])]), false, '有交易');
+});
+
+// ---- v3.2.21 审查回归（第十七轮）----
+
+test('v3.2.21 跨 Sheet 回填：已配上但来源值为空、未填入的行，报错文件逐行列出两边行号与空字段，导入结果提示条数', () => {
+  const buildLines = loadMainFunction(
+    'buildImportWarningDetailLines',
+    ['formatBalanceGapLine', 'formatBalanceMismatchLine', 'formatBalanceSeedReplaceLine'],
+    [String, String, String]
+  );
+  const warning = { type: 'cross-sheet-backfill-matched-empty', rowNumber: 3, sourceRowNumber: 2, sourceSheetName: 'USD', emptyFields: ['Channel OrderNo'], sourceFileName: 'a.xlsx' };
+  assert.deepEqual(buildLines([warning]), [
+    '以下行「跨 Sheet 回填」已配上来源行，但来源行中要回填的字段都为空，未填入任何值（该来源行已被占用；该行是否写入明细仍按「过滤账单」等后续处理）：',
+    '「a.xlsx」第3行，来源 Sheet「USD」第2行，为空的字段：Channel OrderNo'
+  ]);
+  const buildImportWarningMessage = loadMainFunction('buildImportWarningMessage');
+  assert.match(buildImportWarningMessage({ warnings: [warning], balanceReady: true, balanceRequested: true }),
+    /跨 Sheet 回填：1行已配上但来源值为空，未填入，请核对/);
 });

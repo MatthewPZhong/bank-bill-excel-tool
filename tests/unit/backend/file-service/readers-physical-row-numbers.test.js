@@ -45,3 +45,34 @@ test('有效范围从 C3 开始：列偏移不影响取值，行号仍为物理�
   assert.deepEqual(readRowsWithMetadata(filePath, ['日期', '收入']).rowNumbers, [3, 4]);
   assert.deepEqual(readRows(filePath), [['日期', '收入'], ['2026-11-02', '30']]);
 });
+
+// v3.2.22 R20：有的导出工具追加行后不更新工作表声明的范围（dimension），读取结果只到声明范围为止；表头以下的非空行数
+//   （rowsBelowHeader，网银账单据此区分「原表只有表头」）把声明范围以外仍有内容的行计入，不把这类文件判为只有表头
+test('声明范围只到表头：范围以外仍有内容的行计入表头以下的非空行数；范围以外只有空白文本的行不计入', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'readers-out-of-range-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const write = (name, rows, dimension) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
+    const cfb = XLSX.CFB.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+    const entry = cfb.FileIndex[cfb.FullPaths.findIndex((fullPath) => fullPath.endsWith('xl/worksheets/sheet1.xml'))];
+    const text = Buffer.from(entry.content).toString('utf8');
+    assert.match(text, /<dimension ref="[^"]+"\/>/);
+    entry.content = Buffer.from(text.replace(/<dimension ref="[^"]+"\/>/, `<dimension ref="${dimension}"/>`), 'utf8');
+    entry.size = entry.content.length;
+    const filePath = path.join(dir, name);
+    fs.writeFileSync(filePath, XLSX.CFB.write(cfb, { type: 'buffer', fileType: 'zip' }));
+    return filePath;
+  };
+  const rows = [['日期', '收入'], ['2026-11-01', '100'], ['2026-11-02', '200']];
+  const stale = readRowsWithMetadata(write('stale.xlsx', rows, 'A1:B1'), ['日期', '收入']);
+  assert.deepEqual([stale.rows, stale.rowsBelowHeader], [[['日期', '收入']], 2]);
+  // 数据只在声明范围以外的列（C 列）
+  const sideways = readRowsWithMetadata(write('sideways.xlsx', [['日期', '收入'], ['', '', '备注']], 'A1:B2'), ['日期', '收入']);
+  assert.equal(sideways.rowsBelowHeader, 1);
+  // 声明范围以外只有空白文本：仍按只有表头
+  const blank = readRowsWithMetadata(write('blank.xlsx', [['日期', '收入'], ['  ', '']], 'A1:B1'), ['日期', '收入']);
+  assert.equal(blank.rowsBelowHeader, 0);
+  // 范围正确时照常计数，不重复计入
+  assert.equal(readRowsWithMetadata(write('normal.xlsx', rows, 'A1:B3'), ['日期', '收入']).rowsBelowHeader, 2);
+});

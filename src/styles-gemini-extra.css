@@ -341,7 +341,6 @@ td .muted { color: var(--muted); }
 .monthly-balance-export-card { width: min(100%, 520px); }
 .manual-balance-card { width: min(100%, 560px); }
 .template-rename-card { width: min(100%, 520px); }
-.remember-order-mismatch-card { width: min(100%, 460px); }
 .app-update-settings-card {
   --app-settings-footer-inline-padding: 24px;
   --app-settings-confirm-width: 72px;
@@ -2315,16 +2314,6 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
   display: flex; align-items: center; gap: 10px;
   margin-left: auto;
 }
-.big-account-mode-label {
-  font-size: 12px; color: var(--muted);
-}
-.big-account-mode-select {
-  height: 36px;
-  width: 180px;
-  padding: 0 36px 0 14px;
-  border-radius: var(--pill);
-  font-size: 13px;
-}
 .big-account-split-body {
   flex: 1; padding: 8px 12px 0;
   overflow: hidden;
@@ -2480,8 +2469,7 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 .big-account-search-input {
   width: 200px; height: 36px;
 }
-.ba-multi-mode-label,
-.big-account-remember-label {
+.ba-multi-mode-label {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--muted);
   white-space: nowrap;
@@ -2520,7 +2508,7 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 .feature-filter-body {
   padding: 18px 28px 16px;
 }
-/* 映射行：映射字段下拉框右侧「选择特征值」+ 下拉框 +【特征值管理】 */
+/* 映射行：映射字段下拉框右侧「选择特征值」+ 下拉框（v3.2.22 起【管理】在「特征值设置」行） */
 .mapping-feature-value-label {
   font-size: 13px; color: var(--text);
   white-space: nowrap;
@@ -2817,6 +2805,21 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 /* 运算符含「不包含（字段）」等较长选项，比场景弹窗的 100px 窄下拉框放宽，避免截断 */
 .row-filter-rules-card .scenario-config-input-narrow { flex: 0 0 136px; width: 136px; }
 
+/* v3.2.21 原始账单预处理「跨 Sheet 回填」规则设置（沿用 scenario-config-* 样式；待回填行条件复用上方过滤规则设置弹窗） */
+.scenario-config-card.cross-sheet-backfill-card .dialog-header .icon-close { margin-left: auto; }
+.cross-sheet-backfill-card .scenario-config-multi-wrap { min-width: 0; }
+.cross-sheet-backfill-card .scenario-config-input.is-stale { border-color: var(--danger); color: var(--danger); }
+.cross-sheet-backfill-card .scenario-config-input-narrow { flex: 0 0 136px; width: 136px; }
+.cross-sheet-backfill-card .scenario-config-input-narrow.cross-sheet-backfill-date-order { flex-basis: 200px; width: 200px; }
+.cross-sheet-backfill-condition-summary {
+  flex: 1; min-width: 0;
+  font-size: 13px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cross-sheet-backfill-condition-summary.is-empty { color: var(--muted); }
+.cross-sheet-backfill-hint { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); }
+.cross-sheet-backfill-arrow { flex: 0 0 auto; color: var(--muted); }
+
 /* v3.2.19 映射字段「逻辑取值」：映射行的候补顺序预览与【设置】弹窗（组件参考月度 pending 规则管理「对账字段」） */
 .mapping-logic-value-preview {
   min-width: 0; max-width: 320px;
@@ -3069,6 +3072,30 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
 .manual-balance-source-tag.is-saved { background: var(--bg-soft); color: var(--muted); }
 .manual-balance-confirm-row.is-saved td { color: var(--muted); }
 .manual-balance-source-reason { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.manual-balance-source-tag.is-chosen { background: var(--chip-active-bg); color: var(--primary); }
+/* v3.2.22：导入余额文件「选择余额」——同日多个不同余额逐账号单选；卡片加宽，正文滚动，按钮常驻 */
+.manual-balance-card.balance-file-choice-card {
+  width: min(100%, 1120px);
+  max-height: calc(100vh - 56px);
+  display: flex; flex-direction: column;
+}
+.balance-file-choice-card .dialog-actions { flex: 0 0 auto; }
+.balance-file-choice-actions .balance-file-choice-message { margin: 0 auto 0 0; }
+.balance-file-choice-group { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; scroll-margin-top: 12px; }
+.balance-file-choice-title { font-weight: 600; }
+.balance-file-choice-table-wrap {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  overflow: auto;
+}
+.balance-file-choice-group.is-invalid .balance-file-choice-table-wrap { border-color: var(--danger, #d93025); }
+.balance-file-choice-table thead th { padding: 10px 12px 8px; white-space: nowrap; }
+.balance-file-choice-table tbody td { padding: 8px 12px; white-space: nowrap; }
+.balance-file-choice-row { cursor: pointer; }
+.balance-file-choice-row:hover td { background: var(--bg-soft); }
+.balance-file-choice-row:has(.balance-file-choice-radio:checked) td { background: var(--chip-active-bg); }
+.balance-file-choice-amount { font-variant-numeric: tabular-nums; font-weight: 600; }
+.balance-file-choice-table tbody td.balance-file-choice-text { white-space: normal; min-width: 6em; max-width: 16em; overflow-wrap: break-word; }
 
 /* Alert card */
 .alert-card .alert-body {
@@ -3776,8 +3803,8 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
 
 /* Mapping-card 表格：模板字段列定宽（放得下最长字段名 + 勾选框），映射字段列占余下宽度。
    v3.2.19：映射字段下拉框由撑满改为 362px（原 1120px 弹窗下约 723px 的一半），「选择特征值」下拉框 180px → 90px。
-   映射值为「字段筛选特征值」时，特征值一组（文字 + 下拉框 + 按钮）与主下拉框同行：主下拉框右边界左移，
-   使特征值下拉框右边界与其他行下拉框右边界对齐、【特征值管理】与其他行按钮（如【维护大账号】）左对齐；
+   映射值为「字段筛选特征值」时，特征值一组（文字 + 下拉框）与主下拉框同行：主下拉框右边界左移，
+   使特征值下拉框右边界与其他行下拉框右边界对齐；
    放大缩放等空间不足时整组换到下一行兜底。 */
 .mapping-card {
   --mapping-select-width: 362px;
@@ -3823,26 +3850,12 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
 .mapping-toggle-label:has(.mapping-toggle-checkbox:disabled) { cursor: not-allowed; color: var(--dim); }
 .mapping-toggle-checkbox:disabled { cursor: not-allowed; }
 /* v3.2.21：勾选行固定为显示按钮时的行高（按钮隐藏为 display:none，见 styles-gemini.css [hidden]），勾选前后不跳动 */
-.mapping-card .mapping-toggle-row .mapping-field-editor { min-height: var(--mapping-toggle-editor-min-height); }
-/* v3.2.21「启用」列：「原始账单预处理」标题行的「启用」字号同标题（12px）、暗绿色；两侧竖线自文字顶部贯穿到最后一个勾选行
-   文字下方 4px，勾选框居于竖线中间、行垂直居中。各行用首列单元格（标题行为跨两列的单元格，左缘同样是表格左缘）定位，
-   竖线超出单元格上下各 1px 盖住行间分隔线，保证连续；列落在两列之间的内边距里，不挤占字段名与按钮。 */
+.mapping-card .mapping-toggle-row .mapping-field-editor,
+.mapping-card .mapping-setting-row .mapping-field-editor { min-height: var(--mapping-toggle-editor-min-height); }
+/* v3.2.21「启用」列：「原始账单预处理」标题行的「启用」字号同标题（12px）、暗绿色；勾选框居于列头正下方、行垂直居中。
+   各行用首列单元格（标题行为跨两列的单元格，左缘同样是表格左缘）定位；列落在两列之间的内边距里，不挤占字段名与按钮。
+   v3.2.22：去掉列两侧的竖线。 */
 .mapping-card .mapping-enable-span > td:first-child { position: relative; }
-.mapping-card .mapping-enable-span > td:first-child::after {
-  content: '';
-  position: absolute;
-  left: var(--mapping-enable-left);
-  width: var(--mapping-enable-width);
-  top: -1px;
-  bottom: -1px;
-  box-sizing: border-box;
-  border-left: 1px solid var(--mapping-enable-color);
-  border-right: 1px solid var(--mapping-enable-color);
-  pointer-events: none;
-}
-.mapping-card .mapping-enable-span-start > td:first-child::after { top: calc(50% - 8px); }
-.mapping-card .mapping-enable-span-end > td:first-child::after { bottom: calc(50% - 14px); }
-.mapping-card .mapping-enable-span-start.mapping-enable-span-end > td:first-child::after { bottom: -1px; }
 .mapping-card .mapping-enable-head {
   position: absolute;
   left: var(--mapping-enable-left);
@@ -4085,12 +4098,6 @@ select.mapping-text-input {
      min-width:24px 保证 a/b/c 字母列至少 24px 宽；text-align:center 字母居中（与其它 letter 列视觉一致）*/
   min-width: 24px;
   text-align: center;
-}
-.big-account-order-text-item {
-  font-size: 13px; font-weight: 500;
-  color: var(--text);
-  font-family: "Roboto Mono", ui-monospace, monospace;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .big-account-order-empty {
   font-size: 12px; color: var(--muted);

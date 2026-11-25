@@ -13,9 +13,14 @@
 // 标黄约定：
 //   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } }
 
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const ExcelJS = require('exceljs');
 const { errorCodeToCause } = require('../backend/file-service/error-causes');
 const { applyWatermark } = require('./workbook-watermark');
+const { withBoundedWorkbook } = require('./bounded-xlsx-writer');
+const { EXCEL_CELL_TEXT_MAX_UTF16_UNITS } = require('../backend/xlsx/excel-text');
 // v3.1.7：Payment线下调拨核对 sheet 用——银行原表列序 + 调拨对账单派生字段列序。
 const { BANK_STATEMENT_FIELDS } = require('../constants/bank-statement-fields');
 const { FT_RECON_FIELD_MAP } = require('../constants/fund-transfer-recon-fields');
@@ -103,10 +108,13 @@ function cellToString(value) {
 //     纯数字（123）、数字英文混合（T54SWIC494447）、千分位都归此类；
 //   完全不含数字（trim 后无 /\d/，含空串/纯英文/纯符号/中文）→ 半角尖括号<v>（显示原始 cellToString 结果，不 trim，空串→<>）。
 //   例：T54SWIC494447→“T54SWIC494447”；123→“123”；Fundtransfer-out→<Fundtransfer-out>；空串→<>。
-function wrapHitValue(value) {
+// v3.2.22：字段名、旧值、新值各自按已解码文本编码后再包裹拼接（见 encodeBankRowCellValue），各值读回与其所在列一致，
+//   整格不再含控制字符，写盘前的整本编码不再改动它。包裹符与分隔符不含下划线和十六进制字符，拼接不会拼出新的
+//   `_xHHHH_`。是否含数字按编码前的值判断（显示口径不变）。
+function wrapHitValue(value, encode) {
   const s = cellToString(value);
   const t = s.trim();
-  return /\d/.test(t) ? `“${t}”` : `<${s}>`;
+  return /\d/.test(t) ? `“${encode(t)}”` : `<${encode(s)}>`;
 }
 
 // 把一行的 modifications（多条字段级变更）拼成命中明细文本（v3.0.7 需求B/C/D 格式）：
@@ -120,13 +128,14 @@ function wrapHitValue(value) {
 function buildHitDetail(mods) {
   if (!Array.isArray(mods) || mods.length === 0) return '';
   return mods
-    .map((m) => `${cellToString(m.column)}:${wrapHitValue(m.oldValue)}→${wrapHitValue(m.newValue)}`)
+    .map((m) => `${encodeDecodedExcelJsCellText(cellToString(m.column))}:` +
+      `${wrapHitValue(m.oldValue, encodeDecodedExcelJsCellText)}→${wrapHitValue(m.newValue, encodeDecodedExcelJsCellText)}`)
     .join('; ');
 }
 
 // ===== v3.1.7：Payment线下调拨核对 3 sheet =====
 //   pairs 项 = { bankRow, bankRowOriginal, reconRow, round, oldReconciliationId, dayDiff }（引擎产出，见
-//   r5-payment-offline-allocation-backfill.js 返回值）。pairs 为 null/空数组 → 完全不加 sheet（主文件形态零变化）。
+//   r5-payment-offline-allocation-backfill.js 返回值）；v3.2.22 编排器另附 modifiedColumnsBeforePayment（列名数组）。pairs 为 null/空数组 → 完全不加 sheet（主文件形态零变化）。
 const PAYMENT_OFFLINE_SHEET = Object.freeze({
   match: '匹配对照',
   bankRaw: '银行行-原始',
@@ -174,13 +183,17 @@ function applyPaymentAuditSheetLayout(sheet, { maxWidth = 30 } = {}) {
 
 // 在 workbook 追加 3 核对 sheet（仅 pairs 非空数组时调用）。
 //   bankHeaders：银行契约列序（BANK_STATEMENT_FIELDS）；reconHeaders：真实派生字段列序。
+// v3.2.22（🔴 资金红线）：Payment 核对页的银行字段、调拨对账单字段与写入前快照（含 oldReconciliationId）都按已解码文本
+//   编码（见 encodeBankRowCellValue），读回与主输出同一列一致。
 function appendPaymentOfflineSheets(workbook, pairs) {
+  const enc = encodeDecodedExcelJsCellText;
   const { weekTag, parseFtaDate } = require('./scenario-engines/engine-week-utils');
   // 生产链路中派生行来自链接表 raw_json：「交易时间」可能是字符串 Excel 序列号（如 '46179'）、
   //   「金额」可能是字符串数字（如 '7587133'）。引擎匹配走 toDate/parseNumber 不受影响，但「匹配对照」sheet
   //   若原样写入会显示无法阅读的 46179 → 仅本 shet 的 4 个值列规整展示形态（两张「-原始」sheet 保持忠实 dump）。
   const { toDate } = require('./scenario-engines/engine-date-utils');
   const { parseNumber } = require('./scenario-engines/engine-utils');
+  const RECON = FT_RECON_FIELD_MAP.recon;
   // 日期列：toDate 解析后取【本地时区】年月日 'YYYY-MM-DD'（⚠️ 禁 toISOString——UTC 转换会差一天）；失败回退原值。
   const fmtDate = (value) => {
     const d = toDate(value);
@@ -214,19 +227,19 @@ function appendPaymentOfflineSheets(workbook, pairs) {
       fmtDate(billDate),
       // Credit Amount / 派生金额：规整为数字（字符串数字 → number）
       fmtNumber(b[POF.bank.creditAmount]),
-      b[POF.bank.currency],
-      b[POF.bank.merchantId],
-      b[POF.bank.draweeCardNo],
+      enc(b[POF.bank.currency]),
+      enc(b[POF.bank.merchantId]),
+      enc(b[POF.bank.draweeCardNo]),
       // 原值：引擎覆盖前捕获的 oldReconciliationId（非银行行当前最新值）
-      cellToString(p.oldReconciliationId),
-      r[POF.recon.reconId],
-      r[POF.recon.dispatchNo],
+      enc(cellToString(p.oldReconciliationId)),
+      enc(r[POF.recon.reconId]),
+      enc(r[POF.recon.dispatchNo]),
       fmtDate(txTime),
       fmtNumber(r[POF.recon.amount]),
-      r[POF.recon.currency],
-      r[POF.recon.payAccount],
-      r[POF.recon.receiveChannel],
-      r[POF.recon.bigAccount],
+      enc(r[POF.recon.currency]),
+      enc(r[POF.recon.payAccount]),
+      enc(r[POF.recon.receiveChannel]),
+      enc(r[RECON.bigAccount]),
       weekTag(billDate),
       weekTag(parseFtaDate(r[POF.recon.dispatchNo])),
       interval,
@@ -240,8 +253,10 @@ function appendPaymentOfflineSheets(workbook, pairs) {
   sb.addRow(['配对序号', ...BANK_STATEMENT_FIELDS]);
   sb.getRow(1).font = { bold: true, size: 10 };
   pairs.forEach((p, idx) => {
-    const cleaned = stripInternalFields(p.bankRowOriginal || {});
-    sb.addRow([idx + 1, ...BANK_STATEMENT_FIELDS.map((h) => cleaned[h])]);
+    const original = p.bankRowOriginal || {};
+    const cleaned = stripInternalFields(original);
+    // v3.2.22：Payment 写入前的快照，按已解码文本编码。
+    sb.addRow([idx + 1, ...BANK_STATEMENT_FIELDS.map((h) => enc(cleaned[h]))]);
   });
   applyPaymentAuditSheetLayout(sb, { maxWidth: 32 });
 
@@ -252,9 +267,107 @@ function appendPaymentOfflineSheets(workbook, pairs) {
   sr.getRow(1).font = { bold: true, size: 10 };
   pairs.forEach((p, idx) => {
     const r = p.reconRow || {};
-    sr.addRow([idx + 1, ...reconHeaders.map((h) => r[h])]);
+    sr.addRow([idx + 1, ...reconHeaders.map((h) => enc(r[h]))]);
   });
   applyPaymentAuditSheetLayout(sr, { maxWidth: 28 });
+}
+
+// ===== v3.2.22（🔴 资金红线）：单元格文本保真 =====
+//   ExcelJS 写出时会直接丢弃 XML 不允许的控制字符（0x00–0x08、0x0B、0x0C、0x0E–0x1F、0x7F），含 NUL 的账号
+//   （如 `A\0B`）导出后会变成另一个账号（`AB`），回填的对账ID 看起来属于别的账号。回车（0x0D）原样写出会被 XML 解析
+//   规范成换行（`X\rY` 与 `X\nY` 读回相同）。这些字符按 OOXML ST_Xstring 写成 `_xHHHH_`（与 Excel 自身写法一致）；
+//   制表符、换行照旧原样写出。
+//   本函数只动控制字符本身，用于写盘前的整本兜底与错误报告的生成文案（已按 encodeDecodedExcelJsCellText 编码的单元格
+//   不再含控制字符，不受影响）：按读取端自左向右的扫描，已成对的 `_xHHHH_`（十六进制不分大小写）原样保留；不属于已成对写法
+//   的下划线，若后接 `xHHHH` 再接控制字符（编码后会与之拼出新的写法），写成 `_x005F_`。读取端（Excel / SheetJS / ExcelJS
+//   富文本与共享字符串中不分大小写的部分）对编码结果与对原文的解码一致；不含控制字符的文本逐字节不变。
+const EXCELJS_CONTROL_CHAR_TEST = /[\u0000-\u0008\u000B-\u001F\u007F]/;
+const OOXML_ESCAPE_STICKY = /_x[0-9A-Fa-f]{4}_/iy;
+const OOXML_ESCAPE_HEX_RUN = /^[xX][0-9A-Fa-f]{4}$/;
+function isExcelJsControlCode(code) {
+  return code <= 0x08 || (code >= 0x0B && code <= 0x1F) || code === 0x7F;
+}
+function ooxmlEscapeAt(text, index) {
+  OOXML_ESCAPE_STICKY.lastIndex = index;
+  return OOXML_ESCAPE_STICKY.test(text);
+}
+function ooxmlEscapeFor(code) {
+  return `_x${code.toString(16).toUpperCase().padStart(4, '0')}_`;
+}
+function encodeExcelJsCellText(value) {
+  if (typeof value !== 'string' || !EXCELJS_CONTROL_CHAR_TEST.test(value)) return value;
+  let out = '';
+  let i = 0;
+  while (i < value.length) {
+    if (ooxmlEscapeAt(value, i)) {
+      out += value.slice(i, i + 7);
+      i += 7;
+      continue;
+    }
+    const code = value.charCodeAt(i);
+    if (isExcelJsControlCode(code)) {
+      out += ooxmlEscapeFor(code);
+    } else if (code === 0x5F && i + 6 < value.length && OOXML_ESCAPE_HEX_RUN.test(value.slice(i + 1, i + 6)) &&
+      isExcelJsControlCode(value.charCodeAt(i + 6))) {
+      out += '_x005F_';
+    } else {
+      out += value[i];
+    }
+    i += 1;
+  }
+  return out;
+}
+// v3.2.22（🔴 资金红线）：已解码文本（银行账单经 SheetJS / CSV 读取的原值、表头、配置文案）的写法：控制字符与回车写成
+//   `_xHHHH_`；会被读取端当成转义写法起点的下划线（后接 `xHHHH` 再接下划线或控制字符，`x` 与十六进制不分大小写）写成
+//   `_x005F_`。读取端（SheetJS / Excel、ExcelJS）读回即原值：含真实 NUL 的 `A\0B` 与字面 `A_x0000_B` 两个账号导出后
+//   仍可区分（按原文写出会都读回 `A\0B`）。不含这两类字符的文本逐字节不变。
+const EXCELJS_DECODED_UNSAFE_PATTERN = /[\u0000-\u0008\u000B-\u001F\u007F]|_(?=[xX][0-9A-Fa-f]{4}(?:_|[\u0000-\u0008\u000B-\u001F\u007F]))/;
+const EXCELJS_DECODED_UNSAFE_PATTERN_GLOBAL = new RegExp(EXCELJS_DECODED_UNSAFE_PATTERN.source, 'g');
+function encodeDecodedExcelJsCellText(value) {
+  if (typeof value !== 'string' || !EXCELJS_DECODED_UNSAFE_PATTERN.test(value)) return value;
+  return value.replace(EXCELJS_DECODED_UNSAFE_PATTERN_GLOBAL, (ch) => ooxmlEscapeFor(ch.charCodeAt(0)));
+}
+// v3.2.22（🔴 资金红线）：银行行单元格一律按已解码文本编码。银行账单原值（SheetJS / CSV 读取）与 C1 / C2 / C3 自定义值本就
+//   是已解码文本；场景回填值来自链接表，链接表各导入路径同样落库已解码文本：单工作表 `.xlsx` 流式导入自 v3.2.22 起按 SheetJS
+//   同一口径还原 `_xHHHH_`、无法确认原值时整批拒绝（B113，fix/statement-xlsx-io-boundary D4b），多工作表经 SheetJS 读取，
+//   CSV 即字面文本。源表字面 `RID_x0041_` 落库为 `RID_x0041_`，写成 `RID_x005F_x0041_` 才能读回源值（按原文写出会读回
+//   `RIDA`）。v3.2.22 之前经流式导入、按转义原文落库的旧记录读回显示为转义写法，需人工核对（见 knowledge/backlog.md B134）。
+function encodeBankRowCellValue(row, header) {
+  return encodeDecodedExcelJsCellText(row ? row[header] : undefined);
+}
+// v3.2.22（🔴 资金红线）：多对多「异常说明」分段编码后拼接（many-to-many-detector noteHit）：账号、币种段（{ column, value }）
+//   与其余文字都按已解码文本编码（与结果列读回一致）。各段之间是空格、斜杠等，不含下划线与十六进制字符，拼接不会拼出新的
+//   `_xHHHH_`。
+function encodeManyToManyNoteParts(parts) {
+  return parts.map((part) => encodeDecodedExcelJsCellText(typeof part === 'string' ? part : cellToString(part && part.value)))
+    .join('');
+}
+// 读取端自左向右把每个 `_xHHHH_`（不分大小写）还原成一个 UTF-16 单元：读回长度 = 写出文本长度 − 6 × 写法个数。
+const OOXML_ESCAPE_GLOBAL = /_x[0-9A-Fa-f]{4}_/gi;
+function excelReadbackLength(text) {
+  const escapes = text.match(OOXML_ESCAPE_GLOBAL);
+  return text.length - 6 * (escapes ? escapes.length : 0);
+}
+// 写盘前的兜底：按原文口径编码整本工作簿中仍含控制字符的文本（已按已解码文本编码的单元格不再含控制字符，不受影响），
+//   并校验每格读回后的长度。读回超过 Excel 单格 32,767 个 UTF-16 单元时整本拒绝写出（Excel 与项目读取器都会拒读这样的
+//   文件），报出工作表与单元格，不截断（截断会改变对账ID 等标识）。v3.2.22 起导出按已解码文本编码，v3.2.22 之前按转义原文
+//   落库的链接表旧记录读回即转义写法本身，可能比源单元格长（见 knowledge/backlog.md B134）。
+function encodeWorkbookCellTexts(workbook) {
+  workbook.eachSheet((sheet) => {
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const encoded = encodeExcelJsCellText(cell.value);
+        if (encoded !== cell.value) cell.value = encoded;
+        if (typeof encoded !== 'string') return;
+        const readbackLength = excelReadbackLength(encoded);
+        if (readbackLength > EXCEL_CELL_TEXT_MAX_UTF16_UNITS) {
+          throw new Error(`工作表「${sheet.name}」单元格 ${cell.address} 的文本有 ${readbackLength} 个字符，超过 Excel 单元格 ` +
+            `${EXCEL_CELL_TEXT_MAX_UTF16_UNITS} 个字符的上限，未生成文件（不截断，以免改变对账ID 等标识）。若该行来自 v3.2.22 之前` +
+            '导入的链接表记录，可能是按转义写法保存的旧记录，请按源表核对。');
+        }
+      });
+    });
+  });
 }
 
 // ===== v3.0.12 功能1：异常说明（🔴 资金红线·只读检测产物）=====
@@ -262,6 +375,7 @@ function appendPaymentOfflineSheets(workbook, pairs) {
 //   v3.0.13 起不再追加独立「异常-人工判断」sheet；note 并入「命中场景」第 2 列。
 const SHEET_MANY_TO_MANY_NAME = '异常-人工判断';
 
+// rowId -> 说明分段（多条按 '; ' 拼接）。没有 noteParts 的旧调用方按整段文字处理（已解码文本）。
 function buildManyToManyNoteByRowId(manyToManyRows) {
   const map = new Map();
   if (!Array.isArray(manyToManyRows)) return map;
@@ -269,10 +383,14 @@ function buildManyToManyNoteByRowId(manyToManyRows) {
   for (const rv of manyToManyRows) {
     const row = rv && rv.row;
     if (!row || row._rowId === undefined || row._rowId === null) continue;
-    const note = cellToString(rv.note).trim();
-    if (!note) continue;
+    const parts = Array.isArray(rv.noteParts) && rv.noteParts.length > 0
+      ? rv.noteParts
+      : [cellToString(rv.note).trim()];
+    const text = parts.map((part) => (typeof part === 'string' ? part : cellToString(part && part.value))).join('');
+    if (!text.trim()) continue;
     const prev = map.get(row._rowId);
-    map.set(row._rowId, prev ? `${prev}; ${note}` : note);
+    // 只读使用分段：首条直接沿用（检测器同组各行共用同一分段），同一行多条时才拼成新数组。
+    map.set(row._rowId, prev ? [...prev, '; ', ...parts] : parts);
   }
 
   return map;
@@ -310,12 +428,13 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     const headerRow1 = s1.getRow(1);
     headers.forEach((h, idx) => {
       const cell = headerRow1.getCell(idx + 2);          // B1 起表头（A1 留给提醒；font 逐格设以不覆盖 A1 提醒字体）
-      cell.value = h;
+      cell.value = encodeDecodedExcelJsCellText(h);
       cell.font = { bold: true, size: 10 };
     });
     sortedUnmatched.forEach((row, rowIdx) => {
       const r = s1.getRow(rowIdx + 2);                   // 第 2 行起数据（B 列起）
-      headers.forEach((h, colIdx) => { r.getCell(colIdx + 2).value = row[h]; });
+      // v3.2.22：未命中行没有被场景改写的列，全部是银行账单原值（按已解码文本编码）。
+      headers.forEach((h, colIdx) => { r.getCell(colIdx + 2).value = encodeBankRowCellValue(row, h); });
     });
   }
 
@@ -325,7 +444,7 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
   const s2 = workbook.addWorksheet(SHEET2_HIT_NAME);
   const hitHeaders = [HIT_DETAIL_HEADER, MANY_TO_MANY_NOTE_HEADER, ...headers];
   const hitDataColumnOffset = hitHeaders.length - headers.length + 1;
-  s2.addRow(hitHeaders);
+  s2.addRow(hitHeaders.map(encodeDecodedExcelJsCellText));
   s2.getRow(1).font = { bold: true, size: 10 };
 
   // 按 rowId group modifications（rowId === row._rowId，已核实）
@@ -346,10 +465,12 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     //   v3.0.7 需求C 单行布局：append 分隔符由 '\n' 改为 '; '（半角分号+空格），空 detail 时直接用提醒串 —— 确保命中明细列绝不含 '\n'。
     if (staleHitNotesByRowId && typeof staleHitNotesByRowId.get === 'function') {
       const note = staleHitNotesByRowId.get(row._rowId);
-      if (note) detail = detail ? detail + '; ' + note : note;
+      // v3.2.22：提醒同样单独编码后再拼接（见 wrapHitValue）。
+      if (note) detail = detail ? detail + '; ' + encodeDecodedExcelJsCellText(note) : encodeDecodedExcelJsCellText(note);
     }
-    const abnormalNote = manyToManyNoteByRowId.get(row._rowId) || '';
-    const cells = [detail, abnormalNote, ...headers.map((h) => row[h])];
+    const noteParts = manyToManyNoteByRowId.get(row._rowId);
+    const abnormalNote = noteParts ? encodeManyToManyNoteParts(noteParts) : '';
+    const cells = [detail, abnormalNote, ...headers.map((h) => encodeBankRowCellValue(row, h))];
     const r = s2.addRow(cells);
     // v3.0.7 需求C：命中明细单行紧凑显示，关闭自动换行（wrapText:false）→ 不再撑高行；仅保留顶端对齐。
     r.getCell(1).alignment = { wrapText: false, vertical: 'top' };
@@ -370,6 +491,7 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     appendPaymentOfflineSheets(workbook, paymentOfflinePairs);
   }
 
+  encodeWorkbookCellTexts(workbook);
   applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return { filePath: savePath };
@@ -378,12 +500,14 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
 // v3.0.4 F3：error-report 第 3 列「对账ID」取值——三级回退链。
 //   ReconciliationId 可能是 number（bank-statement-io readBankStatement raw 读入），
 //   判空须 String(v).trim()；空串 / null / undefined 视为未命中继续回退。
+// v3.2.22：返回逻辑文本；写出时与其余列一起按已解码文本编码（见 errorReportRecordRows）。
 function resolveReconIdCell(w) {
   const candidates = [w.reconciliationId, w.reconId, w.rowId];
   for (const v of candidates) {
     if (v === null || v === undefined) continue;
     const s = String(v).trim();
-    if (s !== '') return s;
+    if (s === '') continue;
+    return s;
   }
   return '';
 }
@@ -395,35 +519,302 @@ function resolveReconIdCell(w) {
 //       → rowId（旧 shape 调用方未传 bankRows 时回退 _rowId，向后兼容）→ ''
 //   注：引擎 warning 其余透传字段（fields/matchedRowIds/phase/severity 等）不写盘。
 // savePath: 绝对路径（含 .xlsx）
-async function writeErrorReport(warnings, savePath) {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('error-report');
+// options.maxDataRowsPerSheet：单表数据行上限，缺省为 Excel 单表上限（1,048,576 行减表头）；仅供单测注入小值。
+// options.createOutput：输出流工厂，缺省同 withBoundedWorkbook（'wx' 独占新建）；仅供单测观察流关闭。
+// options.temporaryFileMarkerDir：临时文件归属登记目录（应用私有目录）；传入时中断遗留的临时文件可在下次启动按登记回收。
+//   v3.2.22：经 withBoundedWorkbook 流式写出（同 VCC 导出），按输出流背压与队列字节上限等待，
+//   内存不随告警条数累积；写盘早期失败（目录不存在、磁盘满等）立即结束导出并关闭流。
+//   超出单表上限时续写 error-report_2、error-report_3 …，每张表重复表头，不截断需人工复核的记录；
+//   未超上限时仍只有一张 error-report。先写同目录临时文件，成功后改名为 savePath；失败时先关闭写入流
+//   再删除临时文件，不留下半份报告。删除遇到文件占用（Windows 共享冲突等）时有界重试；仍删不掉时保留原错误，
+//   在其 message 末尾写明临时文件路径，并附 temporaryFileCleanup = { path, code }，提示需手动清理。
+const ERROR_REPORT_SHEET_NAME = 'error-report';
+const TEMPORARY_FILE_REMOVE_ATTEMPTS = 5;
+const TEMPORARY_FILE_REMOVE_RETRY_MS = 100;
+const TEMPORARY_FILE_REMOVE_RETRY_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+async function removeTemporaryFile(filePath) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fs.promises.rm(filePath, { force: true });
+      return null;
+    } catch (error) {
+      if (attempt >= TEMPORARY_FILE_REMOVE_ATTEMPTS || !TEMPORARY_FILE_REMOVE_RETRY_CODES.has(error && error.code)) return error;
+      await new Promise((resolve) => setTimeout(resolve, TEMPORARY_FILE_REMOVE_RETRY_MS));
+    }
+  }
+}
+// v3.2.22：错误报告先写同目录临时文件「<savePath>.<UUID>.tmp」，成功后改名。应用在写入中被终止（崩溃、强制退出、断电）
+//   时来不及删除，按归属登记回收：调用方传 options.temporaryFileMarkerDir（应用私有目录，生产为 userData 下）时，
+//   写临时文件前先在其中新建登记文件「<UUID>.json」（记录本进程归属标记与临时文件路径；先独占写出清理器不识别的
+//   「.<UUID>.json.partial」再改名，清理器不会读到写了一半的登记、把它当损坏撤销；登记失败则不写报告），
+//   改名成功或临时文件已删除后撤销登记，删不掉时保留登记供下次重试。
+//   cleanupInterruptedErrorReportTemporaryFiles 在启动时只按这些登记回收：跳过本进程自己的登记（正在写的不动）；
+//   临时文件名须以「.<登记 UUID>.tmp」结尾且是普通文件（不跟随链接）才删除；其余同名后缀文件（其他写出器、其他
+//   userData 的实例）一律不碰。登记目录本身须是真实目录。
+const PROCESS_OWNER_TOKEN = crypto.randomUUID();
+const MARKER_FILE_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json$/;
+async function registerTemporaryFile(markerDir, uuid, temporaryPath) {
+  await fs.promises.mkdir(markerDir, { recursive: true });
+  // 与启动清理同一真实目录检查：登记目录是符号链接或不是目录时，清理器不会读取其中的登记，拒绝写报告。
+  const markerDirStat = await fs.promises.lstat(markerDir);
+  if (markerDirStat.isSymbolicLink() || !markerDirStat.isDirectory()) {
+    const error = new Error('错误报告临时文件登记目录不是真实目录（可能是符号链接），已停止写出');
+    error.code = 'ERROR_REPORT_MARKER_DIR_INVALID';
+    throw error;
+  }
+  const markerPath = path.join(markerDir, `${uuid}.json`);
+  const partialPath = path.join(markerDir, `.${uuid}.json.partial`);
+  await fs.promises.writeFile(
+    partialPath,
+    JSON.stringify({ version: 1, owner: PROCESS_OWNER_TOKEN, temporaryPath }),
+    { flag: 'wx' }
+  );
+  try {
+    await fs.promises.rename(partialPath, markerPath);
+  } catch (error) {
+    await fs.promises.rm(partialPath, { force: true }).catch(() => {});
+    throw error;
+  }
+  return markerPath;
+}
+async function cleanupInterruptedErrorReportTemporaryFiles(markerDir) {
+  const removed = [];
+  const failures = [];
+  const skipped = [];
+  const record = (list, filePath, error) => list.push({ path: filePath, code: (error && error.code) || null });
+  let rootStat;
+  try {
+    rootStat = await fs.promises.lstat(markerDir);
+  } catch (error) {
+    if (error && error.code !== 'ENOENT') record(failures, markerDir, error);
+    return { removed, failures, skipped };
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return { removed, failures, skipped };
+  let entries;
+  try {
+    entries = await fs.promises.readdir(markerDir, { withFileTypes: true });
+  } catch (error) {
+    record(failures, markerDir, error);
+    return { removed, failures, skipped };
+  }
+  for (const entry of entries) {
+    const match = entry.isFile() ? MARKER_FILE_RE.exec(entry.name) : null;
+    if (!match) continue;
+    const markerPath = path.join(markerDir, entry.name);
+    const dropMarker = async () => {
+      try { await fs.promises.rm(markerPath, { force: true }); } catch (error) { record(failures, markerPath, error); }
+    };
+    let marker = null;
+    let markerText;
+    try {
+      markerText = await fs.promises.readFile(markerPath, 'utf8');
+    } catch (error) {
+      record(failures, markerPath, error); // 读不到（权限、I/O）：保留登记，下次启动重试
+      continue;
+    }
+    try {
+      marker = JSON.parse(markerText);
+    } catch (_error) {
+      marker = null; // 登记写入中被终止：临时文件尚未创建，撤销登记即可
+    }
+    if (marker && marker.owner === PROCESS_OWNER_TOKEN) continue; // 本进程正在写
+    const temporaryPath = marker && typeof marker.temporaryPath === 'string' ? marker.temporaryPath : '';
+    if (!path.isAbsolute(temporaryPath) || !path.basename(temporaryPath).endsWith(`.${match[1]}.tmp`)) {
+      if (temporaryPath) record(skipped, temporaryPath, null);
+      await dropMarker();
+      continue;
+    }
+    let stat;
+    try {
+      stat = await fs.promises.lstat(temporaryPath);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') { await dropMarker(); continue; }
+      record(failures, temporaryPath, error);
+      continue;
+    }
+    if (!stat.isFile()) {
+      record(skipped, temporaryPath, null); // 已被替换为链接或目录：不是本模块写的文件，不跟随、不删除
+      await dropMarker();
+      continue;
+    }
+    const cleanupError = await removeTemporaryFile(temporaryPath);
+    if (cleanupError) {
+      record(failures, temporaryPath, cleanupError);
+      continue;
+    }
+    removed.push(temporaryPath);
+    await dropMarker();
+  }
+  return { removed, failures, skipped };
+}
+const EXCEL_MAX_DATA_ROWS_PER_SHEET = 1048576 - 1;
 
+// v3.2.22：错误报告单元格文本保真。
+//   ⓪ 各列按已解码文本编码（encodeDecodedExcelJsCellText）：对账ID 与告警正文里插入的对账ID、账号都是已解码文本，与主输出
+//     同口径读回（如告警写明的 `RID_x0041_` 不会读成 `RIDA`）；告警里需要看清的转义写法已由引擎显示为 ⟨U+HHHH⟩。
+//   ① 单元格文本上限 32,767 个 UTF-16 单元（按解码后的字符计，即按编码前的逻辑文本判断）。告警正文（如争用告警写明双方
+//     网关记录的业务键与对账ID）可能超过上限，Excel 与项目读取器都会拒读；任一单元格超限时整条记录拆成连续若干行：超过 ERROR_REPORT_SEGMENT_UNITS
+//     的单元格按段依次写入（不拆开代理对），其余单元格每行重复，「原因」列加「（第 k/n 段）」前缀关联续行，不截断。
+//   ② 流式写出不用共享字符串，普通文本写成 t="str"；ExcelJS 读取这类单元格会把 XML 实体再解一次（`A&amp;B` 读成 `A&B`，
+//     与另一 ID 混同），也不解 `_xHHHH_`（主输出的共享字符串会解：对账ID `RID_x0041_` 编码为 `RID_x005F_x0041_` 后在主输出
+//     读回 `RID_x0041_`、在错误报告却读回编码后的写法，按 ID 关联两份报表会漏行）。含 `&` 或 `_xHHHH_` 写法的文本改写成单段富文本
+//     （inlineStr），ExcelJS、SheetJS、Excel 读回都与主输出一致。
+//   ③ 分段前先按写出口径编码整格文本，分界不落在任何 `_xHHHH_` 写法中间（十六进制不分大小写、含相互重叠的写法），也不
+//     落在解码后的代理对中间（高、低代理各自是字面字符或转义写法都算，如 `_xD83D_` + `_xDE00_`）：各段独立解码后拼接
+//     即整格的读回值，每段都是合法 UTF-16。分界按读取端自左向右的解码单元找；限长内找不到合法分界时按解码单元切开
+//     （实际数据不会出现）。
+const ERROR_REPORT_SEGMENT_UNITS = 32000;
+const OOXML_ESCAPE_WINDOW_TEST = /^_x[0-9A-Fa-f]{4}_$/i;
+const OOXML_ESCAPE_ANY_TEST = /_x[0-9A-Fa-f]{4}_/i;
+// 跨过分界 cut（cut 落在写法内部）的 `_xHHHH_` 写法中最靠前的起点；没有则 -1。
+function escapeWindowStartAcross(text, cut) {
+  for (let start = Math.max(0, cut - 6); start < cut; start += 1) {
+    if (text.charCodeAt(start) === 0x5F && OOXML_ESCAPE_WINDOW_TEST.test(text.slice(start, start + 7))) return start;
+  }
+  return -1;
+}
+function splitTextSegments(text, size) {
+  // 读取端口径的解码单元：起点与解码后的 UTF-16 单元。
+  const starts = [];
+  const units = [];
+  for (let i = 0; i < text.length;) {
+    starts.push(i);
+    if (ooxmlEscapeAt(text, i)) {
+      units.push(Number.parseInt(text.slice(i + 2, i + 6), 16));
+      i += 7;
+    } else {
+      units.push(text.charCodeAt(i));
+      i += 1;
+    }
+  }
+  const isHighSurrogate = (unit) => unit >= 0xD800 && unit <= 0xDBFF;
+  const isLowSurrogate = (unit) => unit >= 0xDC00 && unit <= 0xDFFF;
+  const canCutBefore = (k) => escapeWindowStartAcross(text, starts[k]) < 0 &&
+    !(isHighSurrogate(units[k - 1]) && isLowSurrogate(units[k]));
+  const lastStartAtMost = (limit) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= limit) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  };
+  const segments = [];
+  let first = 0;
+  while (first < starts.length) {
+    const limit = starts[first] + size;
+    if (limit >= text.length) {
+      segments.push(text.slice(starts[first]));
+      break;
+    }
+    const last = Math.max(first + 1, lastStartAtMost(limit)); // 每段至少一个解码单元
+    let cut = last;
+    while (cut > first && !canCutBefore(cut)) cut -= 1;
+    if (cut === first) cut = last;
+    segments.push(text.slice(starts[first], starts[cut]));
+    first = cut;
+  }
+  return segments;
+}
+function errorReportRecordRows(cells, messageIndex) {
+  const texts = cells.map((value) => (typeof value === 'string' ? value : String(value ?? '')));
+  const encodedTexts = texts.map((text) => encodeDecodedExcelJsCellText(text));
+  if (texts.every((text) => text.length <= EXCEL_CELL_TEXT_MAX_UTF16_UNITS)) return [encodedTexts];
+  const segmented = encodedTexts.map((text, column) => (
+    texts[column].length > ERROR_REPORT_SEGMENT_UNITS ? splitTextSegments(text, ERROR_REPORT_SEGMENT_UNITS) : null
+  ));
+  const total = Math.max(...segmented.map((segments) => (segments ? segments.length : 1)));
+  return Array.from({ length: total }, (_v, k) => encodedTexts.map((text, column) => {
+    const value = segmented[column] ? (segmented[column][k] ?? '') : text;
+    return column === messageIndex ? `（第 ${k + 1}/${total} 段）${value}` : value;
+  }));
+}
+// 已编码的文本不再含控制字符，再次编码不变（续行各段可直接交本函数）。
+function errorReportCellValue(text) {
+  const encoded = encodeExcelJsCellText(text);
+  return typeof encoded === 'string' && (encoded.includes('&') || OOXML_ESCAPE_ANY_TEST.test(encoded))
+    ? { richText: [{ text: encoded }] }
+    : encoded;
+}
+async function writeErrorReport(warnings, savePath, options = {}) {
+  const maxDataRows = Number.isSafeInteger(options.maxDataRowsPerSheet) && options.maxDataRowsPerSheet > 0
+    ? Math.min(options.maxDataRowsPerSheet, EXCEL_MAX_DATA_ROWS_PER_SHEET)
+    : EXCEL_MAX_DATA_ROWS_PER_SHEET;
   const headers = ['时间戳', '场景名', '对账ID', '原因', '可能原因'];
-  sheet.addRow(headers);
-  // 表头加粗 + 字号 10（v2.0.0 GA：所有导出表头统一 size 10）
-  sheet.getRow(1).font = { bold: true, size: 10 };
-
   const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-  warnings.forEach((w) => {
-    sheet.addRow([
-      timestamp,
-      w.scenarioName ?? `场景 #${w.scenarioId}`,
-      resolveReconIdCell(w),
-      w.message ?? w.code ?? '',
-      errorCodeToCause(w.code)
-    ]);
-  });
-
-  applyWatermark(workbook);
-  await workbook.xlsx.writeFile(savePath);
+  const temporaryId = crypto.randomUUID();
+  const temporaryPath = `${savePath}.${temporaryId}.tmp`;
+  const markerPath = typeof options.temporaryFileMarkerDir === 'string' && options.temporaryFileMarkerDir !== ''
+    ? await registerTemporaryFile(options.temporaryFileMarkerDir, temporaryId, temporaryPath)
+    : null;
+  const unregister = async () => {
+    if (markerPath) await fs.promises.rm(markerPath, { force: true });
+  };
+  const boundedOptions = { filePath: temporaryPath };
+  if (typeof options.createOutput === 'function') boundedOptions.createOutput = options.createOutput;
+  try {
+    await withBoundedWorkbook(boundedOptions, async (session) => {
+      let sheetIndex = 0;
+      let sheet = null;
+      let dataRows = 0;
+      const openSheet = async () => {
+        if (sheet) await session.commitSheet(sheet);
+        sheetIndex += 1;
+        dataRows = 0;
+        sheet = session.addWorksheet(sheetIndex === 1 ? ERROR_REPORT_SHEET_NAME : `${ERROR_REPORT_SHEET_NAME}_${sheetIndex}`);
+        const headerRow = sheet.addRow(headers.map(errorReportCellValue));
+        // 表头加粗 + 字号 10（v2.0.0 GA：所有导出表头统一 size 10）
+        headerRow.font = { bold: true, size: 10 };
+        await session.commitRow(headerRow);
+      };
+      await openSheet();
+      for (const w of warnings) {
+        const recordRows = errorReportRecordRows([
+          timestamp,
+          w.scenarioName ?? `场景 #${w.scenarioId}`,
+          resolveReconIdCell(w),
+          w.message ?? w.code ?? '',
+          errorCodeToCause(w.code)
+        ], 3);
+        // 同一条记录的续行尽量留在同一张表（续行数不超过单表上限时）。
+        if (dataRows > 0 && dataRows + Math.min(recordRows.length, maxDataRows) > maxDataRows) await openSheet();
+        for (const cells of recordRows) {
+          if (dataRows >= maxDataRows) await openSheet();
+          dataRows += 1;
+          await session.commitRow(sheet.addRow(cells.map(errorReportCellValue)));
+        }
+      }
+      await session.commitSheet(sheet);
+      return {};
+    });
+    await fs.promises.rename(temporaryPath, savePath);
+  } catch (error) {
+    // withBoundedWorkbook 失败时已销毁并等待输出流关闭，此处删除不会与写入竞争。
+    const cleanupError = await removeTemporaryFile(temporaryPath);
+    if (!cleanupError) await unregister().catch(() => {});
+    if (cleanupError) {
+      const reported = error instanceof Error ? error : new Error(String(error));
+      reported.temporaryFileCleanup = { path: temporaryPath, code: cleanupError.code || null };
+      reported.message = `${reported.message}（错误报告临时文件未能删除，请手动清理：${temporaryPath}）`;
+      throw reported;
+    }
+    throw error;
+  }
+  // 撤销登记失败不影响已完成的报告：残留登记在下次启动时因临时文件已不存在而被清掉。
+  await unregister().catch(() => {});
   return { filePath: savePath };
 }
 
 module.exports = {
   writeBankStatementOutput,
   writeErrorReport,
+  cleanupInterruptedErrorReportTemporaryFiles,
   resolveReconIdCell,      // v3.0.4 F3：error-report 第 3 列「对账ID」三级回退（unit 直测）
+  encodeExcelJsCellText,   // v3.2.22：单元格文本保真（unit 直测）
+  encodeDecodedExcelJsCellText, // v3.2.22：已解码文本（银行账单原值）保真
+  encodeBankRowCellValue,  // v3.2.22：银行行单元格按已解码文本编码（命中场景独立报表复用）
+  encodeWorkbookCellTexts, // v3.2.22：整本工作簿文本保真（命中场景独立报表复用）
   stripInternalFields,     // v2.1.7 round 3 F8 (spec §9.8.4)
   YELLOW_FILL,
   INTERNAL_FIELDS,

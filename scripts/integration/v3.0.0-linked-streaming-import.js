@@ -18,7 +18,10 @@ const { LINKED_IMPORT_SIGNATURES } = require('../../src/constants/table-signatur
 const { AppDatabase } = require('../../src/backend/database');
 const linkedRepo = require('../../src/backend/database/linked-table-repository');
 const { streamLinkedRowsToInsert } = require('../../src/main-process/linked-table-stream-source');
+const { writeWorkbookRows } = require('../../src/backend/file-service');
 const { CHANNEL_VALUE, ADM_FUND_TYPES } = require('../../src/constants/adm-bank-deposit-fields');
+const JSZip = require('jszip');
+const ExcelJS = require('exceljs');
 
 let passed = 0;
 let failed = 0;
@@ -143,6 +146,182 @@ async function run() {
     }, { sourceFileName: 'single-blank.xlsx' });
     assertEq(retBlank.rowCount, 5, 'Step6.含1空行文件流式落库 rowCount=5（空行被跳过，非 6）');
     assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit').length, 5, 'Step6.DB 实际 5 行（无空 key 垃圾行）');
+
+    // Step7（v3.2.22 B113，Codex 第十一至十三轮）：本应用写出的明细中含空字符（写成 _x0000_）的值经真实入库路径
+    //   （按 BizId 幂等更新的入金表流式导入）：
+    //   7a 先按 BizId 建一条记录；7b 首行以同一 BizId 更新金额、次行落库列 ReconciliationId 含空字符 → 整批拒绝，
+    //   报物理行与列，该 BizId 仍是旧金额、全部记录不变；7c 只有不落库的列（Transaction Description）含空字符时照常入库
+    const importDepositFile = (filePath) => appDb.upsertLinkedBankDepositStreaming(async (writeOne) => {
+      // 与 main.js 一致：入金表按 BizId 幂等写入，传入落库键字段（Codex 第十七轮）；认不出表头时报错
+      const { matched } = await streamLinkedRowsToInsert(filePath, SIG, writeOne, linkedRepo.pickBankDepositFields, { keyField: 'BizId' });
+      if (!matched) throw new Error('当前导入文件未匹配到该链接表的表头');
+    }, { sourceFileName: path.basename(filePath) });
+    const upsertDepositFile = (fileName, rows) => {
+      const filePath = path.join(tmpDir, fileName);
+      writeWorkbookRows({ rows: [HEADERS, ...rows.map(rowAoa)], outputFilePath: filePath });
+      return importDepositFile(filePath);
+    };
+    const depositAmount = (bizId) => {
+      const row = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit').find((item) => item.BizId === bizId);
+      return row ? row['Credit Amount'] : null;
+    };
+    await upsertDepositFile('nul-base.xlsx', [{ ...DATA[0], BizId: 'BZ-NUL-1', 'Credit Amount': '1.2' }]);
+    assertEq(depositAmount('BZ-NUL-1'), '1.2', 'Step7a.按 BizId 建立旧记录');
+    const rowsBeforeNul = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let nulError = null;
+    try {
+      await upsertDepositFile('single-nul.xlsx', [
+        { ...DATA[0], BizId: 'BZ-NUL-1', 'Credit Amount': '9.9' },
+        { ...DATA[1], BizId: 'BZ-NUL-2', ReconciliationId: 'R-NUL\u0000X' }
+      ]);
+    } catch (error) {
+      nulError = error;
+    }
+    assertEq(nulError && nulError.message.startsWith('源文件第 3 行「ReconciliationId」列的文本含空字符（U+0000）'), true,
+      `Step7b.落库列含空字符拒绝并报物理行与列：${nulError && nulError.message}`);
+    assertEq(depositAmount('BZ-NUL-1'), '1.2', 'Step7b.首行对同一 BizId 的更新随整批回滚（仍是旧金额）');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeNul, 'Step7b.全部记录与行数不变');
+    await upsertDepositFile('nul-unstored.xlsx', [{ ...DATA[1], BizId: 'BZ-NUL-3', 'Transaction Description': 'memo\u0000x' }]);
+    assertEq(depositAmount('BZ-NUL-3'), '2.5', 'Step7c.只有不落库的列含空字符：照常入库');
+
+    // Step8（v3.2.22 B113，Codex 第十四轮 P1 ⚠️ 资金口径）：XlsxWriter 等按字面保存的大写「_X0041_」：
+    //   SheetJS 口径会读成「A」，与另一笔 BizId「TXA」合并、覆盖其金额。流式导入按无法确认原值整批拒绝，报物理行与列
+    await upsertDepositFile('upper-base.xlsx', [{ ...DATA[0], BizId: 'TXA', 'Credit Amount': '9.9' }]);
+    const upperFile = path.join(tmpDir, 'upper-escape.xlsx');
+    writeWorkbookRows({
+      rows: [HEADERS, rowAoa({ ...DATA[0], BizId: 'TXA', 'Credit Amount': '9.9' }), rowAoa({ ...DATA[1], BizId: 'TXUPPERPLACEHOLDER', 'Credit Amount': '1.2' })],
+      outputFilePath: upperFile
+    });
+    const zip = await JSZip.loadAsync(fs.readFileSync(upperFile));
+    let replaced = 0;
+    for (const name of Object.keys(zip.files).filter((item) => item.endsWith('.xml'))) {
+      const xml = await zip.file(name).async('string');
+      if (!xml.includes('TXUPPERPLACEHOLDER')) continue;
+      replaced += 1;
+      zip.file(name, xml.replace('TXUPPERPLACEHOLDER', 'TX_X0041_'));
+    }
+    assertEq(replaced, 1, 'Step8.构造文件：字面大写转义按其他写出端的写法保存');
+    fs.writeFileSync(upperFile, await zip.generateAsync({ type: 'nodebuffer' }));
+    const rowsBeforeUpper = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let upperError = null;
+    try {
+      await importDepositFile(upperFile);
+    } catch (error) {
+      upperError = error;
+    }
+    assertEq(Boolean(upperError) && upperError.message.startsWith('源文件第 3 行「BizId」列的文本含无法确认原值的 Excel 文本转义'), true,
+      `Step8.大写转义拒绝并报物理行与列：${upperError && upperError.message}`);
+    assertEq(depositAmount('TXA'), '9.9', 'Step8.TXA 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeUpper, 'Step8.全部记录与行数不变');
+
+    // Step9（v3.2.22 B113，Codex 第十五轮 P1 ⚠️ 资金口径）：ExcelJS（不转义的真实写出端）原样写出字面「TX_x004a_」，
+    //   Excel 与 SheetJS 口径读成「TXJ」，与另一笔「TXJ」合并、覆盖其金额。流式导入按无法确认原值整批拒绝，数据库不变
+    await upsertDepositFile('lower-base.xlsx', [{ ...DATA[0], BizId: 'TXJ', 'Credit Amount': '9.9' }]);
+    const lowerFile = path.join(tmpDir, 'exceljs-lower-escape.xlsx');
+    const lowerBook = new ExcelJS.Workbook();
+    const lowerSheet = lowerBook.addWorksheet('Sheet1');
+    lowerSheet.addRow(HEADERS);
+    lowerSheet.addRow(rowAoa({ ...DATA[0], BizId: 'TXJ', 'Credit Amount': '9.9' }));
+    lowerSheet.addRow(rowAoa({ ...DATA[1], BizId: 'TX_x004a_', 'Credit Amount': '1.2' }));
+    await lowerBook.xlsx.writeFile(lowerFile);
+    const rowsBeforeLower = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let lowerError = null;
+    try {
+      await importDepositFile(lowerFile);
+    } catch (error) {
+      lowerError = error;
+    }
+    assertEq(Boolean(lowerError) && lowerError.message.startsWith('源文件第 3 行「BizId」列的文本含无法确认原值的 Excel 文本转义'), true,
+      `Step9.可打印字符的转义拒绝并报物理行与列：${lowerError && lowerError.message}`);
+    assertEq(depositAmount('TXJ'), '9.9', 'Step9.TXJ 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeLower, 'Step9.全部记录与行数不变');
+
+    // Step10（v3.2.22 B113，Codex 第十六轮 P1 ⚠️ 资金口径）：ExcelJS 写出富文本「TX_x005f_」+「x0041_」（ExcelJS 读回
+    //   「TX_x005f_x0041_」），保护目标跨段时 SheetJS 口径读成「TX_x0041_」，与另一笔「TX_x0041_」合并、覆盖其金额。
+    //   流式导入按无法确认原值整批拒绝，数据库不变
+    // 键列含转义的文件不经流式导入（第十八轮），已有记录「TX_x0041_」按非流式导入的结果直接写入
+    appDb.upsertLinkedBankDeposit([linkedRepo.pickBankDepositFields({ ...DATA[0], BizId: 'TX_x0041_', 'Credit Amount': '9.9' })],
+      { sourceFileName: 'rich-base.xlsx' });
+    assertEq(depositAmount('TX_x0041_'), '9.9', 'Step10.前置：已有记录「TX_x0041_」');
+    const richFile = path.join(tmpDir, 'exceljs-rich-escape.xlsx');
+    const richBook = new ExcelJS.Workbook();
+    const richSheet = richBook.addWorksheet('Sheet1');
+    richSheet.addRow(HEADERS);
+    richSheet.addRow(rowAoa({ ...DATA[1], 'Credit Amount': '1.2' }));
+    richSheet.getCell(2, HEADERS.indexOf('BizId') + 1).value = { richText: [{ text: 'TX_x005f_' }, { text: 'x0041_' }] };
+    await richBook.xlsx.writeFile(richFile);
+    const rowsBeforeRich = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let richError = null;
+    try {
+      await importDepositFile(richFile);
+    } catch (error) {
+      richError = error;
+    }
+    assertEq(Boolean(richError) && richError.message.startsWith('源文件第 2 行「BizId」列的文本含无法确认原值的 Excel 文本转义'), true,
+      `Step10.跨段的保护目标拒绝并报物理行与列：${richError && richError.message}`);
+    assertEq(depositAmount('TX_x0041_'), '9.9', 'Step10.TX_x0041_ 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeRich, 'Step10.全部记录与行数不变');
+
+    // Step11（v3.2.22 B113，Codex 第十七轮 P1 ⚠️ 资金口径）：ExcelJS 原样写出的字面「TXK_x000D_」读成「TXK」加回车，入库前
+    //   去掉首尾空白后与已有的「TXK」同键、覆盖其金额。流式导入按交易标识首尾含还原出的空白整批拒绝，数据库不变
+    await upsertDepositFile('edge-base.xlsx', [{ ...DATA[0], BizId: 'TXK', 'Credit Amount': '9.9' }]);
+    const edgeFile = path.join(tmpDir, 'exceljs-edge-escape.xlsx');
+    const edgeBook = new ExcelJS.Workbook();
+    const edgeSheet = edgeBook.addWorksheet('Sheet1');
+    edgeSheet.addRow(HEADERS);
+    edgeSheet.addRow(rowAoa({ ...DATA[1], BizId: 'TXK_x000D_', 'Credit Amount': '1.2' }));
+    await edgeBook.xlsx.writeFile(edgeFile);
+    const rowsBeforeEdge = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let edgeError = null;
+    try {
+      await importDepositFile(edgeFile);
+    } catch (error) {
+      edgeError = error;
+    }
+    assertEq(Boolean(edgeError) && edgeError.message.startsWith('源文件第 2 行「BizId」列（交易标识）含 Excel 文本转义'), true,
+      `Step11.键列首尾的还原空白拒绝并报物理行与列：${edgeError && edgeError.message}`);
+    assertEq(depositAmount('TXK'), '9.9', 'Step11.TXK 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeEdge, 'Step11.全部记录与行数不变');
+
+    // Step12（v3.2.22 B113，Codex 第十八轮 P1 ⚠️ 资金口径）：ExcelJS 在同一文件写出含换行的「J↵K」（金额 8.8）与字面「J_x000a_K」
+    //   （金额 2.2），ExcelJS 读回两个键，还原后同键、后者覆盖前者。键列含转义整批拒绝，两笔都不入库
+    const sameKeyFile = path.join(tmpDir, 'exceljs-same-key.xlsx');
+    const sameKeyBook = new ExcelJS.Workbook();
+    const sameKeySheet = sameKeyBook.addWorksheet('Sheet1');
+    sameKeySheet.addRow(HEADERS);
+    sameKeySheet.addRow(rowAoa({ ...DATA[0], BizId: 'J\nK', 'Credit Amount': '8.8' }));
+    sameKeySheet.addRow(rowAoa({ ...DATA[1], BizId: 'J_x000a_K', 'Credit Amount': '2.2' }));
+    await sameKeyBook.xlsx.writeFile(sameKeyFile);
+    const rowsBeforeSameKey = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let sameKeyError = null;
+    try {
+      await importDepositFile(sameKeyFile);
+    } catch (error) {
+      sameKeyError = error;
+    }
+    assertEq(Boolean(sameKeyError) && sameKeyError.message.startsWith('源文件第 3 行「BizId」列（交易标识）含 Excel 文本转义'), true,
+      `Step12.键列含转义拒绝并报物理行与列：${sameKeyError && sameKeyError.message}`);
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeSameKey, 'Step12.两笔都不入库，全部记录不变');
+
+    // Step13（v3.2.22 B113，Codex 第十八轮 P1 ⚠️ 资金口径）：ExcelJS 写出的表头为字面「BizId_x000d_」，ExcelJS 读回该字面列名；
+    //   还原并去首尾空白后与「BizId」相同。表头格不认作表头，认不出表头时不入库，已有「ROW1」的金额不被覆盖
+    await upsertDepositFile('header-base.xlsx', [{ ...DATA[0], BizId: 'ROW1', 'Credit Amount': '9.9' }]);
+    const headerFile = path.join(tmpDir, 'exceljs-edge-header.xlsx');
+    const headerBook = new ExcelJS.Workbook();
+    const headerSheet = headerBook.addWorksheet('Sheet1');
+    headerSheet.addRow(HEADERS.map((header) => (header === 'BizId' ? 'BizId_x000d_' : header)));
+    headerSheet.addRow(rowAoa({ ...DATA[1], BizId: 'ROW1', 'Credit Amount': '1.2' }));
+    await headerBook.xlsx.writeFile(headerFile);
+    const rowsBeforeHeader = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let headerError = null;
+    try {
+      await importDepositFile(headerFile);
+    } catch (error) {
+      headerError = error;
+    }
+    assertEq(headerError && headerError.message, '当前导入文件未匹配到该链接表的表头', 'Step13.表头格不认作表头');
+    assertEq(depositAmount('ROW1'), '9.9', 'Step13.ROW1 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeHeader, 'Step13.全部记录与行数不变');
   } finally {
     try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }

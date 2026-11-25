@@ -1,6 +1,6 @@
 // 平盘资金性质校验 side DB 集成回放
 // 覆盖：银行/链接导入、原子拒绝、跨重启草稿恢复、版本快照失效、
-//       重新运行、49 列导出、确认写入及主库零批量明细。
+//       重新运行、结果导出（审计列 + 交互字段 + 原始版本号 / 行号）、确认写入及主库零批量明细。
 //
 // 用法：node scripts/integration/position-reconciliation-side-db-parity.js
 
@@ -188,10 +188,10 @@ async function run() {
       header: 1,
       defval: ''
     });
-    assertEq(firstRows[0].length, POSITION_BANK_HEADERS.length, '结果文件固定49列表头');
+    assertEq(firstRows[0].length, POSITION_BANK_HEADERS.length, '结果文件固定 20 列表头');
     assertTrue(
       firstRows[0].every((header, index) => header === POSITION_BANK_HEADERS[index]),
-      '结果文件49列表头顺序严格一致'
+      '结果文件 20 列表头顺序严格一致'
     );
     assertEq(
       firstRows[1][POSITION_BANK_HEADERS.indexOf('FundType')],
@@ -236,13 +236,34 @@ async function run() {
     assertEq(confirmed.confirmedRows, 1, '成功导出后确认一行');
 
     const savedBank = service.store.getBankRows()[0];
+    const diagnostics0 = service.diagnostics();
     assertEq(savedBank.status, '已校验性质', '确认后银行状态更新为已校验性质');
     assertEq(savedBank.workingRow.FundType, 'Inbound', '系统工作表库保存确认后的 FundType');
     assertEq(savedBank.originalRow.FundType, 'Inbound&FX', '原始银行行快照保持导入值不变');
     assertEq(
-      JSON.parse(savedBank.original_json).FundType,
-      'Inbound&FX',
-      '持久化 original_json 未被确认动作改写'
+      [savedBank.original_fund_type, savedBank.working_fund_type].join(' → '),
+      'Inbound&FX → Inbound',
+      '持久化的导入原值未被确认动作改写，确认结果只写入工作资金性质'
+    );
+    assertEq(
+      [savedBank.originalRow['原始版本号'], savedBank.originalRow['原始行号']].join('/'),
+      '1/2',
+      '银行行可追溯到原始账单版本号与行号'
+    );
+    assertEq(
+      service.store.listRawFiles({ includeSuperseded: true }).length,
+      1,
+      'side DB 登记银行原始账单版本'
+    );
+    assertEq(
+      service.linkedManager().rawFiles.map((file) => file.kind).join(','),
+      `${SOURCE_TYPES.GATEWAY_INBOUND},${SOURCE_TYPES.GATEWAY_INBOUND}`,
+      '链接原始表每次导入登记一个原始文件版本'
+    );
+    assertEq(
+      diagnostics0.tableCounts.position_raw_files,
+      3,
+      'side DB 原始文件版本总数 = 银行 1 + 链接原始表 2'
     );
 
     const diagnostics = service.diagnostics();

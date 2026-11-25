@@ -16,6 +16,7 @@ const {
   normalizeMultiSplitInput,
   validateToolboxMultiGenerationResult
 } = require('./generation-contract');
+const { sourceSnapshotMatchesStat } = require('../archive-center/source-snapshot');
 const { operationContextFromBatch } = require('./generation-validator');
 const { inspectSealedRouteDb, outputPlanHash } = require('./route-db-contract');
 
@@ -200,6 +201,23 @@ async function validateMultiGenerationResult({ filePlan, generationInput, result
   return Object.freeze({ artifacts: Object.freeze(artifacts), route });
 }
 
+// 后台生成失败后在主进程核对源文件：异步读取，源文件所在的网络盘断连时不阻塞主进程（口径同 generation-core 的
+//   assertSourcesFresh，v3.2.22 B58，Codex 第十、十一轮）
+async function assertSourcesFreshAsync(sources) {
+  for (const source of sources) {
+    let stat;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      stat = await fs.promises.lstat(source.filePath, { bigint: true });
+    } catch (_error) {
+      throw validationError('ARCHIVE_INPUT_CHANGED', '输入文件在生成期间已变化');
+    }
+    if (stat.isSymbolicLink() || !stat.isFile() || !sourceSnapshotMatchesStat(source.sourceSnapshot, stat)) {
+      throw validationError('ARCHIVE_INPUT_CHANGED', '输入文件在生成期间已变化');
+    }
+  }
+}
+
 async function generateValidateAndPublishMultiOutput(options = {}) {
   const {
     runtime,
@@ -230,6 +248,8 @@ async function generateValidateAndPublishMultiOutput(options = {}) {
     input: generationInput
   });
   if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
+    // 生成失败（如找不到所选字段）时先核对源文件：生成期间被替换时报输入已变化（v3.2.22 B58，Codex 第十轮）
+    if (!(execution && execution.outcome === 'cancelled')) await assertSourcesFreshAsync(generationInput.sources);
     if (execution && execution.error) throw fromProtocolError(execution.error);
     throw validationError('TOOLBOX_GENERATION_FAILED', '多文件拆分后台生成失败');
   }

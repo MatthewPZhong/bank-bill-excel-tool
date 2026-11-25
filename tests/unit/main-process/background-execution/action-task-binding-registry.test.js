@@ -60,10 +60,10 @@ test('生产 authority 一次读取真实 TaskPolicy list 并冻结 39-action in
 
   assert.equal(listCalls, 1);
   assert.equal(registry.summary.actionKeys.length, 39);
-  assert.equal(registry.summary.taskPolicyInventory.length, 100);
+  assert.equal(registry.summary.taskPolicyInventory.length, 98);
   assert.equal(registry.summary.pairCount, 45);
   assert.equal(registry.summary.boundTaskKeyCount, 38);
-  assert.equal(registry.summary.unboundTaskPolicyCount, 62);
+  assert.equal(registry.summary.unboundTaskPolicyCount, 60);
   assert.equal(
     registry.summary.taskPolicyInventory.filter(
       (taskKey) => !bindingSnapshotValues().has(taskKey)
@@ -72,7 +72,7 @@ test('生产 authority 一次读取真实 TaskPolicy list 并冻结 39-action in
   );
   assert.equal(
     registry.summary.taskPolicyInventorySha256,
-    'a7123f6c24236358aed90791baae775e2e9f6da195959bb3cf62a5200c5c08d7'
+    'ccc8a7dc7218d7c6c26af0e0b3128352d00b71e2d2aff99a6f7f35477c92acb4'
   );
   assert.equal(registry.summary.sha256, ACTION_TASK_BINDING_CONTRACT.sha256);
   assert.equal(Object.isFrozen(registry.summary), true);
@@ -337,7 +337,7 @@ test('真实 inventory taskKey/channel mismatch 与 duplicate 均给稳定结构
   );
 });
 
-test('等数量 unbound substitution 由冻结100-key digest拒绝', () => {
+test('等数量 unbound substitution 由冻结98-key digest拒绝', () => {
   const policies = mutableTaskPolicies();
   replacePolicyIdentity(
     policies,
@@ -346,7 +346,7 @@ test('等数量 unbound substitution 由冻结100-key digest拒绝', () => {
   );
   assert.equal(
     policies.filter((policy) => ['reserve', 'no-file'].includes(policy.batchPolicy)).length,
-    100
+    98
   );
   assert.throws(
     () => initializeActionTaskBindingRegistry(fakeTaskPolicyRegistry(policies)),

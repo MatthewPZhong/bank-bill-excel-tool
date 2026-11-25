@@ -67,10 +67,14 @@ const {
   writeManualBalanceSeedPlan
 } = require('../../src/main-process/manual-balance-seed-preflight');
 const {
+  appendStatementSessionImport,
+  buildStatementFileEntry,
   cloneRowsWithMetadata,
+  createStatementImportSession,
   getStatementSessionEntries,
   mergeMappedDetailRows,
   normalizeInputFilePaths,
+  removeStatementSessionEntriesByFilePath,
   resolveSinglePreparedFieldValue
 } = require('../../src/main-process/statement-session');
 const channelIdentity = require('../../src/main-process/statement-channel-identity');
@@ -255,7 +259,9 @@ function readDetailColumns(filePath, names) {
 // 每步打开的主库须在删除临时目录前关闭（Windows 不允许删除仍被打开的 SQLite 文件）。
 const openedDatabases = [];
 
-function createEnvironment(dir, label) {
+// overrides（v3.2.22 B45 故障注入）：writeWorkbookRows(options, realWrite)、mergeGeneratedXlsxFiles(paths, out, realMerge)、
+//   storeGeneratedBalanceSeeds(input, realStore)；realSession: true 时会话条目、批次与导出缓存用真实实现（statement-session）
+function createEnvironment(dir, label, overrides = {}) {
   const storageRoot = path.join(dir, `storage-${label}`);
   fs.mkdirSync(storageRoot, { recursive: true });
   const database = new AppDatabase(path.join(dir, `${label}.sqlite`));
@@ -285,11 +291,13 @@ function createEnvironment(dir, label) {
     getToday: () => TODAY, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   }));
   const generation = createStatementGenerationHelpers({
-    appendLog: (_root, error) => { throw error; },
+    appendLog: overrides.appendLog || ((_root, error) => { throw error; }),
     buildDateRangeLabel,
     buildDetailExportRows,
     buildFieldIndexMap,
-    buildStatementOutputFilePath: fns.buildStatementOutputFilePath,
+    buildStatementOutputFilePath: overrides.buildStatementOutputFilePath
+      ? (options) => overrides.buildStatementOutputFilePath(options, fns.buildStatementOutputFilePath)
+      : fns.buildStatementOutputFilePath,
     cloneRowsWithMetadata,
     deriveBalanceRecords,
     ensureStorageRoot: () => storageRoot,
@@ -307,15 +315,24 @@ function createEnvironment(dir, label) {
     resolveSinglePreparedFieldValue,
     scanBalanceSeedStatus: (input) => scanBalanceSeedStatus(input, storageRoot),
     splitTemplateName,
-    storeGeneratedBalanceSeeds: ({ templateName, seedRecords }) => {
-      seedRecords.forEach((record) => upsertBalanceSeedRecord(storageRoot, { templateName, ...record, overwrite: true }));
-    },
-    writeBalanceWorkbook,
-    writeWorkbookRows
+    storeGeneratedBalanceSeeds: (() => {
+      const realStore = ({ templateName, seedRecords }) => {
+        seedRecords.forEach((record) => upsertBalanceSeedRecord(storageRoot, { templateName, ...record, overwrite: true }));
+      };
+      return overrides.storeGeneratedBalanceSeeds ? (input) => overrides.storeGeneratedBalanceSeeds(input, realStore) : realStore;
+    })(),
+    writeBalanceWorkbook: overrides.writeBalanceWorkbook
+      ? (options) => overrides.writeBalanceWorkbook(options, writeBalanceWorkbook)
+      : writeBalanceWorkbook,
+    writeWorkbookRows: overrides.writeWorkbookRows
+      ? (options) => overrides.writeWorkbookRows(options, writeWorkbookRows)
+      : writeWorkbookRows
   });
 
   const removedSessionPaths = [];
+  const realMergeGeneratedXlsxFiles = loadMainFunctions(['mergeGeneratedXlsxFiles'], { require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite }).mergeGeneratedXlsxFiles;
   const mainDeps = {
+    hasDetailExportRow: require('../../src/backend/file-service').hasDetailExportRow,
     database,
     getTemplateMappingConfig,
     getStatementSessionEntries,
@@ -336,6 +353,9 @@ function createEnvironment(dir, label) {
     // v3.2.19：重复账单过滤与逻辑取值（本脚本不使用，仅满足生成配置的依赖）
     DUPLICATE_ROW_FILTER_MAPPING_FIELD: '重复账单过滤',
     DUPLICATE_ROW_FILTER_ENABLED_OPTION: '是',
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」（本脚本不使用，仅满足生成配置的依赖）
+    CROSS_SHEET_BACKFILL_MAPPING_FIELD: '跨 Sheet 回填',
+    CROSS_SHEET_BACKFILL_ENABLED_OPTION: '是',
     LOGIC_VALUE_MAPPING_FIELD: '逻辑取值',
     BALANCE_DISABLED_OPTION: '无',
     BALANCE_CALCULATED_OPTION: '通过发生额计算',
@@ -388,17 +408,24 @@ function createEnvironment(dir, label) {
     resolveAccountBalanceModes,
     isZeroOrBlankAmount: require('../../src/backend/file-service/normalizers').isZeroOrBlankAmount,
     mergeMappedDetailRows,
-    removeStatementSessionEntriesByFilePath: (_session, filePath) => { removedSessionPaths.push(filePath); },
+    createStatementOutputJournal: overrides.createStatementOutputJournal
+      || require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
+    removeStatementSessionEntriesByFilePath: (session, filePath) => {
+      removedSessionPaths.push(filePath);
+      if (overrides.realSession) removeStatementSessionEntriesByFilePath(session, filePath);
+    },
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,
     buildDateRangeLabel,
     getToday: () => TODAY,
     buildOutputFilePath: fns.buildOutputFilePath,
-    mergeGeneratedXlsxFiles: loadMainFunctions(['mergeGeneratedXlsxFiles'], { require, fs, path, applyWatermark: () => {} }).mergeGeneratedXlsxFiles,
-    buildStatementFileEntry: (entry) => entry,
-    buildStatementFileEntryId: () => 'entry',
-    appendStatementSessionImport: () => 'batch',
-    buildStatementBatchId: () => 'batch',
+    mergeGeneratedXlsxFiles: overrides.mergeGeneratedXlsxFiles
+      ? (paths, outputPath) => overrides.mergeGeneratedXlsxFiles(paths, outputPath, realMergeGeneratedXlsxFiles)
+      : realMergeGeneratedXlsxFiles,
+    buildStatementFileEntry: overrides.realSession ? buildStatementFileEntry : (entry) => entry,
+    buildStatementFileEntryId: overrides.realSession ? sequence('entry') : () => 'entry',
+    appendStatementSessionImport: overrides.realSession ? appendStatementSessionImport : () => 'batch',
+    buildStatementBatchId: overrides.realSession ? sequence('batch') : () => 'batch',
     lastGeneratedExports,
     updateStatementSessionCache: (session, batchId, generatedFiles) => {
       generation.updateStatementSessionCache(session, batchId, generatedFiles, lastGeneratedExports);
@@ -408,7 +435,7 @@ function createEnvironment(dir, label) {
       return { status: 'captured' };
     },
     FILENAME_MAPPING_TEMPLATE_ID: '__FILENAME_MAPPING__',
-    appendActivityLogEntry: () => {},
+    appendActivityLogEntry: overrides.appendActivityLogEntry || (() => {}),
     extractManualBalancePromptWarning: generation.extractManualBalancePromptWarning,
     statementGenerationHelpers: generation,
     scopedMergedOutputFileName: fns.scopedMergedOutputFileName
@@ -419,7 +446,7 @@ function createEnvironment(dir, label) {
     'normalizeMappedFields',
     'getMappingFieldValues',
     'getPrimaryMappedField',
-    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'buildCrossSheetBackfillRule', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'resolveStatementFeatureFilters',
     'buildCurrencyBigAccountMappingConfig',
     'buildMappedRowsForFile',
@@ -449,8 +476,11 @@ function createEnvironment(dir, label) {
     'resolveEntryBalancePlan',
     'inspectBalanceEntryRows',
     'generateMultiTemplateGroupFiles',
+    'statementOutputErrorForLog',
     'assertStatementBatchWritable',
     'assertStatementEntriesWritable',
+    'assertNoCollectedUnwritableText',
+    'isAllTransactionsSkippedByBackfill',
     'planVirtualTemplateBalanceRegeneration',
     'assertVirtualTemplateBalanceOutputPaths',
     'regenerateVirtualTemplateBalanceFromSession',
@@ -519,6 +549,8 @@ function createEnvironment(dir, label) {
     acknowledgedKeys,
     exportMappingsByTemplateId,
     bigAccountsByTemplateId,
+    lastGeneratedExports,
+    imported,
     mainDeps,
     getTemplateMappingConfig,
     defineTemplate,
@@ -533,6 +565,11 @@ function createEnvironment(dir, label) {
       }).sort();
     }
   };
+}
+
+function sequence(prefix) {
+  let next = 0;
+  return () => `${prefix}-${next += 1}`;
 }
 
 function seed(env, bankTemplateName, merchantId, currency, billDate, endBalance) {
@@ -1147,8 +1184,6 @@ async function verifyBigAccountCompletionRejectsInjectedConflict(dir) {
       clearGeneratedExports: record('clearGeneratedExports'),
       statementDuplicateReview: { clear: record('statementDuplicateReview.clear'), cancel: record('statementDuplicateReview.cancel') },
       executeFilenameMappingImportPlan: record('executeFilenameMappingImportPlan'),
-      readBigAccountMode: () => null,
-      readBigAccountOrder: () => null,
       ensureStorageRoot: () => env.storageRoot,
       createErrorResult: (payload) => ({ status: 'error', ...payload }),
       appendActivityLogEntry: () => {}
@@ -1186,6 +1221,173 @@ async function verifyBigAccountCompletionRejectsInjectedConflict(dir) {
   assertEq(env.exportFiles(), [], 'Step2h.预检不产出文件');
 }
 
+// 记录 fn 执行期间业务代码对路径中含 markers 的文件 / 目录的任何访问（读、查存在、列目录、写、删）
+async function watchFsAccess(markers, fn) {
+  const methods = ['readFileSync', 'openSync', 'existsSync', 'statSync', 'lstatSync', 'accessSync', 'readdirSync', 'writeFileSync',
+    'renameSync', 'unlinkSync', 'rmSync', 'copyFileSync', 'mkdirSync', 'createReadStream', 'readFile', 'open', 'stat', 'readdir', 'writeFile'];
+  const promiseMethods = ['readFile', 'open', 'stat', 'readdir', 'writeFile', 'access', 'rename', 'unlink', 'rm'];
+  const touched = [];
+  const hit = (method, args) => {
+    const target = String(args[0] == null ? '' : args[0]);
+    if (markers.some((marker) => target.includes(marker))) touched.push(`${method}:${path.basename(target)}`);
+  };
+  const originals = [];
+  const wrap = (owner, name, label) => {
+    if (typeof owner[name] !== 'function') return;
+    const original = owner[name];
+    originals.push([owner, name, original]);
+    owner[name] = function watched(...args) { hit(label, args); return original.apply(this, args); };
+  };
+  methods.forEach((name) => wrap(fs, name, name));
+  promiseMethods.forEach((name) => wrap(fs.promises, name, `promises.${name}`));
+  try {
+    return { result: await fn(), touched };
+  } finally {
+    originals.reverse().forEach(([owner, name, original]) => { owner[name] = original; });
+  }
+}
+
+// (h2) v3.2.22 去掉「账号顺序固定」：升级前留下的固定模式与记住的顺序文件不再读取——多大账号导入仍进入手动选择，
+//   选择结果不带 forceMode / 含空段的行；完成选择后照常生成，整个过程不读取、不改写这些文件
+async function verifyResidualFixedOrderFilesIgnored(dir) {
+  const env = createEnvironment(dir, 'step2h2');
+  const owner = env.defineTemplate('招商银行-上海', 'A', { balance: '无', merchant: `${FIXED}M601` });
+  const channelId = env.saveWithChannel(owner, { mode: 'create' }).channelId;
+  const child = env.defineTemplate('CMB-SH', 'D', { balance: 'Bal', merchant: `${FIXED}${MULTI}` });
+  env.saveWithChannel(child, { mode: 'join', channelId });
+  env.bigAccountsByTemplateId.set(child.id, [{ merchantId: 'M601', currencies: ['USD'] }, { merchantId: 'M602', currencies: ['USD'] }]);
+  const fileA = path.join(dir, 'step2h2-a.xlsx');
+  const fileB = path.join(dir, 'step2h2-b.xlsx');
+  writeSource(fileA, 'A', [['2026-09-01', 'IGNORED', 'USD', '1', '']]);
+  writeSource(fileB, 'D', [['2026-09-01', 'IGNORED', 'USD', '2', '', '12']]);
+  // 与 v3.2.21 big-account-mode-store / big-account-order-store 相同的文件格式；按文件名映射入口与各模板 id 都写一份
+  const residualFiles = [];
+  for (const templateId of ['__FILENAME_MAPPING__', owner.id, child.id]) {
+    for (const [folder, payload] of [
+      ['big-account-modes', { templateId: String(templateId), mode: 'fixed', updatedAt: '2026-11-01T00:00:00.000Z' }],
+      ['big-account-orders', {
+        templateId: String(templateId),
+        assignments: [{ rowIndex: 0, merchantId: 'M601', currency: 'USD' }, { rowIndex: 1, merchantId: 'M602', currency: 'USD' }],
+        fileCount: 2,
+        files: [
+          { fileIndex: 0, accountCount: 1, accounts: [{ merchantId: 'M601', currency: 'USD' }] },
+          { fileIndex: 1, accountCount: 1, accounts: [{ merchantId: 'M602', currency: 'USD' }] }
+        ],
+        updatedAt: '2026-11-01T00:00:00.000Z'
+      }]
+    ]) {
+      const filePath = path.join(env.storageRoot, folder, `${templateId}.json`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+      residualFiles.push(filePath);
+    }
+  }
+  const snapshot = () => residualFiles.map((filePath) => fs.readFileSync(filePath, 'utf8'))
+    .concat(['big-account-modes', 'big-account-orders'].map((folder) => fs.readdirSync(path.join(env.storageRoot, folder)).sort().join(',')));
+  const before = snapshot();
+
+  const scope = createMainScope({
+    ...env.mainDeps,
+    ...env.fns,
+    fileImportInProgress: false,
+    lastPendingBigAccountSelection: null,
+    lastFileImportContext: null,
+    statementImportSessions: new Map(),
+    getEnumConfig: () => ({}),
+    getStatementChannelMigrationPendingMessage: () => null,
+    clearPendingManualBalancePrompt: () => {},
+    clearGeneratedExports: () => {},
+    statementDuplicateReview: { clear: () => {}, cancel: () => {}, review: ({ entries }) => ({ status: 'ok', entries }) },
+    executeFilenameMappingImportPlan: () => {},
+    ensureStorageRoot: () => env.storageRoot,
+    createErrorResult: (payload) => ({ status: 'error', ...payload }),
+    appendActivityLogEntry: () => {}
+  });
+  const prepared = { previewOnly: true, inputFilePaths: [fileA, fileB], selectionResult: { filePaths: [fileA, fileB] } };
+  const { result: run, touched } = await watchFsAccess(['big-account-modes', 'big-account-orders'], async () => {
+    const preview = await scope.handleFilenameMappingImport(prepared);
+    const contextId = scope.rememberPendingBigAccountSelection(prepared.pendingBigAccountSelection);
+    const rows = prepared.pendingBigAccountSelection.rows;
+    const handler = scope.nested('completeBigAccountSelectionHandler');
+    const outcome = scope.markContinuationPrepareRejection(await handler.prepare(null, {
+      contextId,
+      // 旧版界面会多带 mode / rememberOrder：忽略，按不固定口径校验
+      mode: 'fixed',
+      rememberOrder: true,
+      assignments: rows.map((row) => ({ index: row.index, merchantId: row.filePath === fileA ? 'M601' : 'M602', currency: 'USD' }))
+    }), { keepErrorCodes: ['BIG_ACCOUNT_SELECTION_INVALID'] });
+    const generated = outcome.proceed
+      ? await handler.execute(null, outcome, { fileEvidence: { filePlan: outcome.filePlan } })
+      : null;
+    return { preview, rows, outcome, generated };
+  });
+  assertEq([
+    run.preview && run.preview.status,
+    Object.hasOwn(run.preview || {}, 'forceMode'),
+    Object.hasOwn(run.preview || {}, 'rowsWithEmptyBlocks'),
+    run.rows.length
+  ], ['select-big-account', false, false, 2], 'Step2h2.残留固定模式与记住的顺序时仍进入手动选择，不自动分配');
+  assertEq([run.outcome.proceed, run.outcome.result], [true, undefined], 'Step2h2.手动选择完成照常放行');
+  assertEq([run.generated && run.generated.status, env.exportFiles().length > 0], ['captured', true], 'Step2h2.按所选账号照常生成');
+  const probe = await watchFsAccess(['big-account-modes'], async () => fs.readFileSync(residualFiles[0], 'utf8'));
+  assertEq(probe.touched, [`readFileSync:${path.basename(residualFiles[0])}`], 'Step2h2.前提：访问记录能观测到对残留文件的读取');
+  assertEq(touched, [], 'Step2h2.导入预检、完成选择与生成全程不访问残留的模式 / 顺序文件');
+  assertEq(snapshot(), before, 'Step2h2.残留文件原样保留');
+}
+
+// (h3) v3.2.22 按文件名映射入口（真实读取与映射）：MerchantId 由大账号决定的模板，整批原表只有表头时在混合模式检查、
+//   直接识别与手动选择之前报「没有交易数据」，预检阶段按未开始导入处理（保留上一批界面）；混有交易文件时只为它留选择位置
+async function verifyFilenameMappingHeaderOnlyBatch(dir) {
+  const env = createEnvironment(dir, 'step2h3');
+  const template = env.defineTemplate('CMB-SH', 'D', { balance: 'Bal', merchant: `${FIXED}${MULTI}` });
+  env.saveWithChannel(template, { mode: 'create' });
+  env.bigAccountsByTemplateId.set(template.id, [{ merchantId: 'M601', currencies: ['USD'] }, { merchantId: 'M602', currencies: ['USD'] }]);
+  const emptyA = path.join(dir, 'step2h3-empty-a.xlsx');
+  const emptyB = path.join(dir, 'step2h3-empty-b.xlsx');
+  const withRows = path.join(dir, 'step2h3-rows.xlsx');
+  writeSource(emptyA, 'D', []);
+  writeSource(emptyB, 'D', []);
+  writeSource(withRows, 'D', [['2026-09-01', 'IGNORED', 'USD', '2', '', '12']]);
+  const run = async (filePaths) => {
+    const scope = createMainScope({
+      ...env.mainDeps,
+      ...env.fns,
+      fileImportInProgress: false,
+      lastPendingBigAccountSelection: null,
+      getEnumConfig: () => ({}),
+      getStatementChannelMigrationPendingMessage: () => null,
+      clearPendingManualBalancePrompt: () => {},
+      clearGeneratedExports: () => {},
+      statementDuplicateReview: { clear: () => {}, cancel: () => {} },
+      executeFilenameMappingImportPlan: () => {},
+      ensureStorageRoot: () => env.storageRoot,
+      createErrorResult: (payload) => ({ status: 'error', ...payload }),
+      appendActivityLogEntry: () => {}
+    });
+    const prepared = { previewOnly: true, inputFilePaths: filePaths, selectionResult: { filePaths } };
+    return { result: await scope.handleFilenameMappingImport(prepared), prepared };
+  };
+  const headerOnly = await run([emptyA, emptyB]);
+  assertEq([
+    headerOnly.result && headerOnly.result.status,
+    headerOnly.result && headerOnly.result.errorCode,
+    headerOnly.result && headerOnly.result.message,
+    headerOnly.result && headerOnly.result.preservesSession,
+    headerOnly.prepared.pendingBigAccountSelection || null
+  ], ['error', 'NO_TRANSACTION_DATA', '导入文件中没有账号存在交易数据', true, null], 'Step2h3.整批只有表头：报没有交易数据，按未开始导入处理，不进入大账号选择');
+  // 一个候选大账号（直接识别）、没有候选大账号（只维护了自有账号）：同样在识别前拦截，不误报未识别到大账号
+  for (const [label, bigAccounts] of [['一个候选大账号', [{ merchantId: 'M601', currencies: ['USD'] }]], ['没有候选大账号', []]]) {
+    env.bigAccountsByTemplateId.set(template.id, bigAccounts);
+    const { result } = await run([emptyA, emptyB]);
+    assertEq([result && result.errorCode, result && result.preservesSession], ['NO_TRANSACTION_DATA', true], `Step2h3.整批只有表头（${label}）`);
+  }
+  env.bigAccountsByTemplateId.set(template.id, [{ merchantId: 'M601', currencies: ['USD'] }, { merchantId: 'M602', currencies: ['USD'] }]);
+  const mixed = await run([emptyA, withRows]);
+  assertEq([mixed.result && mixed.result.status, (mixed.result && mixed.result.rows || []).map((row) => row.fileName)],
+    ['select-big-account', ['step2h3-rows.xlsx']], 'Step2h3.混有交易文件：只为有交易的文件留选择位置');
+  assertEq(env.exportFiles(), [], 'Step2h3.预检不产出文件');
+}
+
 // (i) release 审查：进入大账号选择时，各账号块的账号、币种都由用户的选择覆盖。原行中余额方式不同的两个子模板暂时是同一账户时，
 //   预检不按原行拒绝（进入选择），完成选择后按分配结果判断：两边分到不同账号时放行，分到同一账号时按未开始拒绝
 async function verifyBigAccountSelectionDefersProvisionalConflict(dir) {
@@ -1216,8 +1418,6 @@ async function verifyBigAccountSelectionDefersProvisionalConflict(dir) {
       clearGeneratedExports: record('clearGeneratedExports'),
       statementDuplicateReview: { clear: record('statementDuplicateReview.clear'), cancel: record('statementDuplicateReview.cancel') },
       executeFilenameMappingImportPlan: record('executeFilenameMappingImportPlan'),
-      readBigAccountMode: () => null,
-      readBigAccountOrder: () => null,
       ensureStorageRoot: () => env.storageRoot,
       createErrorResult: (payload) => ({ status: 'error', ...payload }),
       appendActivityLogEntry: () => {}
@@ -1291,8 +1491,6 @@ async function verifyAutoBigAccountUsesInjectedRows(dir) {
       clearGeneratedExports: () => {},
       statementDuplicateReview: { clear: () => {}, cancel: () => {} },
       executeFilenameMappingImportPlan: () => {},
-      readBigAccountMode: () => null,
-      readBigAccountOrder: () => null,
       ensureStorageRoot: () => env.storageRoot,
       createErrorResult: (payload) => ({ status: 'error', ...payload }),
       appendActivityLogEntry: () => {},
@@ -1869,6 +2067,599 @@ function verifyOutputPathConcatenationConflict(dir) {
   assertEq(writtenFiles(), [], 'Step17.补录重算拦下前没有写出文件');
 }
 
+// ⑳ v3.2.22 B45：按文件名映射多模板导入写出期间失败（第二组明细 / 余额写出被占用、汇总余额合并写到一半失败）时，
+//    还原本批已写的明细 / 余额 / 汇总文件与余额种子，旧会话条目不替换；业务校验失败仍在写出前拦下。重试成功后文件与会话
+//    各替换一次；同一账户跨组的余额链在失败与重试后正确。
+//    appendLog 用不抛错的桩：余额写出失败若被转成「余额生成失败」告警，批次会继续提交，本步须能识别出来。
+//    会话条目、批次与导出缓存用真实实现（realSession）。
+function verifyMultiTemplateGenerationRollback(dir) {
+  const faults = { writeCalls: 0, failWriteAt: 0, balanceCalls: 0, failBalanceAt: 0, balancePathCalls: 0, failBalancePathAt: 0,
+    mergeCalls: 0, failMergeAt: 0,
+    seedCalls: 0, failSeedAt: 0, failSeedReadAt: 0, partialSeedWrites: 0, seedRecordsStored: 0, afterJournalWrite: null,
+    failTemplateReadAt: 0, cleanupFailedDirectory: null };
+  const activityLog = [];
+  // 在真实的种子读写处注入（balance-seed-store 经 fs.readFileSync / fs.writeFileSync 读写种子 JSON）：只拦截余额种子文件
+  const isSeedFile = (target) => typeof target === 'string' && /[\\/]balance-seeds[\\/][^\\/]+\.json$/.test(target);
+  const withPatchedFs = (method, replacement, use) => {
+    const original = fs[method];
+    fs[method] = (...args) => replacement(original, ...args);
+    try {
+      return use();
+    } finally {
+      fs[method] = original;
+    }
+  };
+  const { createStatementOutputJournal: realJournal } = require('../../src/main-process/statement-output-rollback');
+  const busy = (what) => Object.assign(new Error(`EBUSY: resource busy or locked（注入：${what}被占用）`), { code: 'EBUSY' });
+  // 写进诊断日志的异常（核对不含种子文件路径等内部文件名）
+  const loggedErrors = [];
+  const env = createEnvironment(dir, 'step20', {
+    realSession: true,
+    // 余额输出路径准备（建导出目录）的注入点
+    buildStatementOutputFilePath: (options, original) => {
+      if (options.kind === 'balance') {
+        faults.balancePathCalls += 1;
+        if (faults.failBalancePathAt && faults.balancePathCalls === faults.failBalancePathAt) {
+          throw Object.assign(new Error('EIO: i/o error, mkdir（注入：余额导出目录）'), { code: 'EIO' });
+        }
+      }
+      return original(options);
+    },
+    appendLog: (_root, error) => {
+      loggedErrors.push(error);
+      return 'logs/step20.log';
+    },
+    // 写出记录的 write 返回后（本笔已核对、已记下写后身份）、下一笔开始前的注入点
+    // 备份放进测试自有目录（随 dir 统一清理），不依赖提示文案反解析备份位置（Codex 第十轮）
+    createStatementOutputJournal: (options = {}) => {
+      const journal = realJournal({ ...options, stagingRoot: dir });
+      return {
+        ...journal,
+        write: (filePath, writeFn) => {
+          const result = journal.write(filePath, writeFn);
+          if (faults.afterJournalWrite) faults.afterJournalWrite(path.resolve(filePath));
+          return result;
+        },
+        // 首次读取种子前的路径检查本身失败（如目录没有遍历权限）
+        checkTarget: (filePath) => {
+          const injected = faults.checkTargetError && faults.checkTargetError(path.resolve(filePath));
+          if (injected) throw injected;
+          return journal.checkTarget(filePath);
+        },
+        // 批次目录重试后仍未能删除（如被扫描程序长时间占用）
+        commit: () => {
+          const result = journal.commit();
+          return faults.cleanupFailedDirectory ? { cleanupFailedDirectory: faults.cleanupFailedDirectory } : result;
+        }
+      };
+    },
+    appendActivityLogEntry: (entry) => activityLog.push(entry),
+    storeGeneratedBalanceSeeds: (input, realStore) => {
+      faults.seedCalls += 1;
+      if (faults.failSeedAt && faults.seedCalls === faults.failSeedAt) {
+        // 真实写种子 JSON 时只写出前一半字节即磁盘已满
+        return withPatchedFs('writeFileSync', (original, target, data, ...rest) => {
+          if (!isSeedFile(target)) return original(target, data, ...rest);
+          const text = String(data);
+          original(target, text.slice(0, Math.floor(text.length / 2)), ...rest);
+          faults.partialSeedWrites += 1;
+          throw Object.assign(new Error('ENOSPC: no space left on device（注入：种子写入）'), { code: 'ENOSPC' });
+        }, () => realStore(input));
+      }
+      if (faults.failSeedReadAt && faults.seedCalls === faults.failSeedReadAt) {
+        // 写入前重读种子 JSON 时读取失败（本笔尚未写入）
+        return withPatchedFs('readFileSync', (original, target, ...rest) => {
+          if (isSeedFile(target)) throw Object.assign(new Error('EIO: i/o error（注入：种子重读）'), { code: 'EIO' });
+          return original(target, ...rest);
+        }, () => realStore(input));
+      }
+      const stored = realStore(input);
+      faults.seedRecordsStored += input.seedRecords.length;
+      return stored;
+    },
+    writeWorkbookRows: (options, write) => {
+      faults.writeCalls += 1;
+      if (faults.failWriteAt && faults.writeCalls === faults.failWriteAt) throw busy('明细文件');
+      return write(options);
+    },
+    writeBalanceWorkbook: (options, write) => {
+      faults.balanceCalls += 1;
+      if (faults.failBalanceAt && faults.balanceCalls === faults.failBalanceAt) throw busy('余额文件');
+      if (faults.failTemplateReadAt && faults.balanceCalls === faults.failTemplateReadAt) {
+        // 写出器读余额模板时读取失败（发生在写目标文件之前，原生异常）
+        const xlsxStyle = require('xlsx-js-style');
+        const readFile = xlsxStyle.readFile;
+        xlsxStyle.readFile = (target, ...rest) => {
+          if (path.resolve(String(target)) === path.resolve(options.templateFilePath)) {
+            throw Object.assign(new Error('EIO: i/o error, read（注入：余额模板）'), { code: 'EIO' });
+          }
+          return readFile(target, ...rest);
+        };
+        try {
+          return write(options);
+        } finally {
+          xlsxStyle.readFile = readFile;
+        }
+      }
+      return write(options);
+    },
+    mergeGeneratedXlsxFiles: (paths, outputPath, merge) => {
+      faults.mergeCalls += 1;
+      if (faults.failMergeAt && faults.mergeCalls === faults.failMergeAt) {
+        // 模拟写到一半失败（如磁盘已满）：目标已被截断
+        fs.writeFileSync(outputPath, 'partial');
+        throw new Error('合并失败（注入）');
+      }
+      return merge(paths, outputPath);
+    }
+  });
+  const templateA = env.defineTemplate('回滚-A', 'A');
+  const templateB = env.defineTemplate('回滚-B', 'B');
+  // 两个模板同属银行段「回滚」，共用一份种子文件：前组写入的种子须随后组失败一并还原
+  seed(env, '回滚-A', 'M001', 'USD', '2026-08-31', '100');
+  seed(env, '回滚-B', 'M002', 'USD', '2026-08-31', '200');
+  const seedFile = path.join(env.storageRoot, 'balance-seeds', '回滚.json');
+  const fileA = path.join(dir, 'step20-a.xlsx');
+  const fileB = path.join(dir, 'step20-b.xlsx');
+  const writeSources = (amountA, amountB, debitB = '') => {
+    writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', amountA, '']]);
+    writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', amountB, debitB]]);
+    return [env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)];
+  };
+  const snapshot = () => {
+    const files = {};
+    for (const base of [path.join(env.storageRoot, 'exports'), path.join(env.storageRoot, 'balance-seeds')]) {
+      if (!fs.existsSync(base)) continue;
+      for (const name of fs.readdirSync(base, { recursive: true })) {
+        const full = path.join(base, String(name));
+        if (fs.statSync(full).isFile()) files[path.relative(env.storageRoot, full)] = fs.readFileSync(full).toString('base64');
+      }
+    }
+    return files;
+  };
+  const defaultSession = createStatementImportSession({ templateId: '__FILENAME_MAPPING__', templateName: '按文件名映射模板' });
+  const run = (entries, fallbackTemplateId = templateA.id, { session = defaultSession, replacePaths = ['/old/replaced.xlsx'] } = {}) => {
+    faults.writeCalls = 0;
+    faults.balanceCalls = 0;
+    faults.balancePathCalls = 0;
+    faults.mergeCalls = 0;
+    faults.seedCalls = 0;
+    try {
+      env.fns.generateMultiTemplateGroupFiles({
+        fileEntries: entries,
+        fallbackTemplateConfig: env.getTemplateMappingConfig(fallbackTemplateId),
+        selectedBigAccount: null,
+        reuseMappedRows: true,
+        session,
+        replacePaths,
+        inputFilePaths: entries.map((entry) => entry.filePath)
+      });
+      return null;
+    } catch (error) {
+      return error;
+    }
+  };
+
+  // （1）首次导入，第二组明细写出时被占用：第一组新写的明细、余额删除，种子文件还原（同一文件身份）
+  const initial = snapshot();
+  const seedIno = fs.statSync(seedFile).ino;
+  faults.failWriteAt = 2;
+  const writeError = run(writeSources('10', '20'));
+  faults.failWriteAt = 0;
+  assertEq(writeError && writeError.code, 'EBUSY', 'Step20.写出失败原样抛出');
+  assertEq(snapshot(), initial, 'Step20.首次导入写出失败：新写的明细、余额删除，种子文件内容还原');
+  assertEq(fs.statSync(seedFile).ino, seedIno, 'Step20.种子文件原地还原，文件身份不变');
+  assertEq(env.removedSessionPaths, [], 'Step20.写出失败时不替换旧会话条目');
+
+  // （2）重试成功：写出两组与汇总，旧会话条目替换一次
+  const firstError = run(writeSources('10', '20'));
+  assertEq(firstError, null, 'Step20.重试成功');
+  const baseline = snapshot();
+  const baselineExports = Object.keys(baseline).filter((name) => name.endsWith('.xlsx')).sort();
+  assertEq(baselineExports.length, 6, `Step20.两组明细、余额与两份汇总：${baselineExports.join(',')}`);
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.成功后替换一次旧会话条目');
+
+  // （3）覆盖导入（金额变化、文件名相同），余额汇总合并失败：已覆盖的明细、余额、明细汇总全部还原为上次内容，种子还原
+  faults.failMergeAt = 2;
+  const mergeError = run(writeSources('11', '21'));
+  faults.failMergeAt = 0;
+  assertEq(mergeError && mergeError.message, '合并失败（注入）', 'Step20.合并失败原样抛出');
+  assertEq(snapshot(), baseline, 'Step20.合并写到一半失败：余额汇总逐字节还原，已覆盖的同名输出与种子还原为上次内容');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.合并失败时不再替换旧会话条目');
+
+  // （3b）覆盖导入，第二组余额文件写出被占用：整批还原（不转成「余额生成失败」告警继续提交），种子不留第一组的新值
+  faults.failBalanceAt = 2;
+  const balanceError = run(writeSources('11', '21'));
+  faults.failBalanceAt = 0;
+  assertEq(balanceError && balanceError.code, 'EBUSY', 'Step20.余额写出失败原样抛出');
+  assertEq(snapshot(), baseline, 'Step20.余额写出失败：已覆盖的同名输出与种子还原为上次内容');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.余额写出失败时不替换旧会话条目');
+
+  // （3c）第二组准备余额输出路径时建导出目录失败一次：与写出失败同样整批还原，不转成「余额生成失败」告警提交第一组的种子
+  //   （Codex 第十七轮 P1 ⚠️ 资金口径）
+  faults.failBalancePathAt = 2;
+  const balancePathError = run(writeSources('11', '21'));
+  faults.failBalancePathAt = 0;
+  assertEq(balancePathError && balancePathError.code, 'EIO', 'Step20.余额输出路径准备失败原样抛出');
+  assertEq(snapshot(), baseline, 'Step20.余额输出路径准备失败：已覆盖的同名输出与种子还原为上次内容');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.余额输出路径准备失败时不替换旧会话条目');
+
+  // （4）第二组业务校验失败（收支同时有值）：写出前拦下，输出与种子不变
+  const validationError = run(writeSources('11', '21', '5'));
+  assertTrue(Boolean(validationError) && /同时有值/.test(validationError.message), `Step20.业务校验失败被拦下：${validationError && validationError.message}`);
+  assertEq(snapshot(), baseline, 'Step20.业务校验失败：输出与种子不变');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.业务校验失败时不替换旧会话条目');
+
+  // （5）再次重试成功：同名文件替换为新内容，不多出文件，旧会话条目再替换一次
+  const retryError = run(writeSources('11', '21'));
+  assertEq(retryError, null, 'Step20.再次重试成功');
+  const retried = snapshot();
+  const retriedExports = Object.keys(retried).filter((name) => name.endsWith('.xlsx')).sort();
+  assertEq(retriedExports, baselineExports, 'Step20.重试后输出文件与上次同名同数，不重复');
+  assertTrue(retriedExports.some((name) => retried[name] !== baseline[name]), 'Step20.重试后输出为新内容');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx', '/old/replaced.xlsx'], 'Step20.每次成功各替换一次旧会话条目');
+
+  // （5b）第二组种子写到一半失败（第二组第一笔已写入、第二笔在真实写 JSON 时只写出一半即磁盘已满）：异常原样传出，
+  //   种子字节与文件身份还原，会话不提交；
+  //   重试后余额按链正确（两组都换了金额，第一组与第二组首笔的新种子都须还原）
+  const seedFaultSources = () => {
+    writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '13', '']]);
+    writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', '23', ''], ['2026-09-02', 'M002', 'USD', '5', '']]);
+    return [env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)];
+  };
+  const beforeSeedFault = snapshot();
+  const seedInoBeforeFault = fs.statSync(seedFile).ino;
+  faults.failSeedAt = 3;
+  const seedError = run(seedFaultSources());
+  faults.failSeedAt = 0;
+  assertEq(faults.partialSeedWrites, 1, 'Step20.前置：第二组第二笔种子在真实写入时写出一半');
+  assertEq(seedError && seedError.code, 'ENOSPC', 'Step20.种子写到一半失败原样抛出');
+  assertEq(snapshot(), beforeSeedFault, 'Step20.种子写到一半失败：已写的新余额与同批输出全部还原');
+  assertEq(fs.statSync(seedFile).ino, seedInoBeforeFault, 'Step20.种子写到一半失败：种子原地还原，文件身份不变');
+  assertEq(env.removedSessionPaths.length, 2, 'Step20.种子写到一半失败时不替换旧会话条目');
+  assertEq(run(seedFaultSources()), null, 'Step20.种子写入失败后重试成功');
+  assertEq(readBalanceSeedRecords(env.storageRoot, '回滚').map((record) => [record.merchantId, record.billDate, String(record.endBalance)]).sort(),
+    [['M001', '2026-08-31', '100'], ['M001', '2026-09-01', '113'], ['M002', '2026-08-31', '200'], ['M002', '2026-09-01', '223'],
+      ['M002', '2026-09-02', '228']], 'Step20.种子写入失败后重试：余额按链计算');
+
+  // （5d）同一组逐笔写种子时，前一笔写成后种子被其他程序（如同步盘）另存替换：下一笔不再写入、不覆盖对方的文件，
+  //   其余输出照常还原，按还原不完整报告（种子交给人工）；会话不提交
+  const beforeSeedReplace = snapshot();
+  const seedBytesBeforeReplace = fs.readFileSync(seedFile);
+  const externalSeed = '{"external":"sync-client"}\n';
+  faults.seedRecordsStored = 0;
+  // 第一组 M001 一笔、第二组 M002 第一笔写完且写出记录已记下身份之后、第二笔开始之前替换（命中下一笔的写前核对）
+  let replaced = false;
+  faults.afterJournalWrite = (filePath) => {
+    if (replaced || filePath !== path.resolve(seedFile) || faults.seedRecordsStored < 2) return;
+    replaced = true;
+    fs.writeFileSync(`${seedFile}.sync`, externalSeed);
+    fs.renameSync(`${seedFile}.sync`, seedFile);
+  };
+  const replacedError = run(seedFaultSources());
+  faults.afterJournalWrite = null;
+  assertEq(replacedError && replacedError.code, 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE', 'Step20.逐笔写种子期间种子被替换：停止并报还原不完整');
+  assertEq([replaced, faults.seedRecordsStored], [true, 2], 'Step20.种子在两笔之间被替换后不再写下一笔（实际只写入 2 笔）');
+  assertEq(fs.readFileSync(seedFile, 'utf8'), externalSeed, 'Step20.不覆盖其他程序替换后的种子');
+  const { [path.relative(env.storageRoot, seedFile)]: _replacedSeed, ...restAfterReplace } = snapshot();
+  const { [path.relative(env.storageRoot, seedFile)]: _seedBefore, ...restBeforeReplace } = beforeSeedReplace;
+  assertEq(restAfterReplace, restBeforeReplace, 'Step20.种子被替换时其余输出照常还原');
+  assertEq(env.removedSessionPaths.length, 3, 'Step20.种子被替换时不替换旧会话条目（仍为 5b 重试成功后的 3 次）');
+  fs.writeFileSync(seedFile, seedBytesBeforeReplace); // 人工按恢复清单处理后的状态，供后续步骤使用
+
+  // （5e）逐笔写种子前重读种子失败（FILE_READ，本笔尚未写入）：与初次读取失败一样按「余额生成失败」告警提交，不整批回滚、
+  //   不清掉上一批的导出入口（spec D3，Codex 第六轮）
+  const sessionsBeforeReadFault = env.removedSessionPaths.length;
+  faults.failSeedReadAt = 2;
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '19', '']]);
+  writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', '29', '']]);
+  const readFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)]);
+  faults.failSeedReadAt = 0;
+  assertEq(readFaultError, null, 'Step20.重读种子失败：不整批回滚');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeReadFault + 1, 'Step20.重读种子失败：本批照常提交');
+  const readFaultWarnings = (env.imported[env.imported.length - 1].warnings || [])
+    .filter((warning) => warning.type === 'balance-generate-failed').map((warning) => warning.message);
+  assertEq(readFaultWarnings, ['本地余额种子文件损坏，请检查或删除后重试'], 'Step20.重读种子失败：按「余额生成失败」告警');
+  assertEq(readBalanceSeedRecords(env.storageRoot, '回滚').map((record) => [record.merchantId, record.billDate, String(record.endBalance)]).sort(),
+    [['M001', '2026-08-31', '100'], ['M001', '2026-09-01', '119'], ['M002', '2026-08-31', '200'], ['M002', '2026-09-01', '223'],
+      ['M002', '2026-09-02', '228']], 'Step20.重读种子失败：第一组种子照常更新，第二组种子未写入');
+
+  // （5f）第二组写出器读余额模板失败（原生 EIO，发生在写目标文件之前）：按模板不可读的「余额生成失败」告警提交，
+  //   不整批回滚（spec D3，Codex 第七轮）
+  const sessionsBeforeTemplateFault = env.removedSessionPaths.length;
+  faults.failTemplateReadAt = 2;
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '21', '']]);
+  writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', '31', '']]);
+  const templateFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)]);
+  faults.failTemplateReadAt = 0;
+  assertEq(templateFaultError, null, 'Step20.读余额模板失败：不整批回滚');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeTemplateFault + 1, 'Step20.读余额模板失败：本批照常提交');
+  assertEq((env.imported[env.imported.length - 1].warnings || []).filter((warning) => warning.type === 'balance-generate-failed')
+    .map((warning) => warning.message), ['余额账单模板不可读，请重新确认'], 'Step20.读余额模板失败：按「余额生成失败」告警');
+
+  // （5g）本批成功、批次临时备份重试后仍未能删除：照常提交，活动日志留痕只记目录位置（Codex 第八轮）
+  const sessionsBeforeCleanupFault = env.removedSessionPaths.length;
+  const logsBeforeCleanupFault = activityLog.length;
+  faults.cleanupFailedDirectory = path.join(dir, 'statement-rollback-step20');
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '22', '']]);
+  writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', '32', '']]);
+  const cleanupFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)]);
+  faults.cleanupFailedDirectory = null;
+  assertEq([cleanupFaultError, env.removedSessionPaths.length], [null, sessionsBeforeCleanupFault + 1], 'Step20.临时备份未能删除：本批照常提交');
+  assertEq(activityLog.slice(logsBeforeCleanupFault).filter((entry) => /临时备份未能删除/.test(entry.message))
+    .map((entry) => [entry.level, entry.details]), [['warning', [`目录：${path.join(dir, 'statement-rollback-step20')}`]]],
+  'Step20.临时备份未能删除：活动日志留痕只记目录位置');
+
+  // （5c）第二组的余额种子路径是文件夹：首次读取种子前拦下、整批回滚，不转成「余额生成失败」告警提交第一组的新种子与缺组的余额
+  const templateE = env.defineTemplate('目录种子-E', 'B');
+  const directorySeed = path.join(env.storageRoot, 'balance-seeds', '目录种子.json');
+  fs.mkdirSync(directorySeed);
+  const fileE = path.join(dir, 'step20-e.xlsx');
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '17', '']]);
+  writeSource(fileE, 'B', [['2026-09-01', 'M005', 'USD', '7', '']]);
+  const beforeDirectorySeed = snapshot();
+  const directoryError = run([env.entryFor(templateA, fileA), env.entryFor(templateE, fileE)]);
+  assertEq(directoryError && directoryError.code, 'STATEMENT_OUTPUT_TARGET_UNSAFE', 'Step20.种子路径是文件夹：整批拦下');
+  assertEq(snapshot(), beforeDirectorySeed, 'Step20.种子路径是文件夹：第一组的输出与新种子还原');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeCleanupFault + 1, 'Step20.种子路径是文件夹时不替换旧会话条目');
+  fs.rmSync(directorySeed, { recursive: true, force: true });
+
+  // （5c2）检查第二组的种子路径本身失败（目录没有遍历权限 EACCES，尚未写种子）：不当作已确认的不安全目标整批回滚，
+  //   按「余额生成失败」处理本组余额、保留明细（spec D3，Codex 第十一轮）
+  const sessionsBeforeCheckFault = env.removedSessionPaths.length;
+  faults.checkTargetError = (filePath) => (path.basename(filePath) === '目录种子.json'
+    ? Object.assign(new Error(`ENOTDIR: not a directory, lstat '${filePath}'`), { code: 'ENOTDIR', path: filePath })
+    : null);
+  writeSource(fileE, 'B', [['2026-09-01', 'M005', 'USD', '7', '']]);
+  const checkFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateE, fileE)]);
+  faults.checkTargetError = null;
+  assertEq(checkFaultError && { code: checkFaultError.code }, null, 'Step20.种子路径检查失败（EACCES）：不整批回滚');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeCheckFault + 1, 'Step20.种子路径检查失败：本批照常提交');
+  assertEq((env.imported[env.imported.length - 1].warnings || [])
+    .filter((warning) => warning.type === 'balance-generate-failed').map((warning) => warning.message),
+  ['余额账单生成失败，系统异常已写入日志文件'], 'Step20.种子路径检查失败：按「余额生成失败」告警');
+  assertEq(fs.existsSync(directorySeed), false, 'Step20.种子路径检查失败：本组不写种子');
+  // 系统错误的消息带种子文件路径（文件名可能是完整账号）：写进日志前只保留错误码（Codex 第十二轮）
+  const checkFaultLog = loggedErrors[loggedErrors.length - 1];
+  assertEq([checkFaultLog && checkFaultLog.code, /目录种子|balance-seeds/.test(String(checkFaultLog && checkFaultLog.stack))],
+    ['ENOTDIR', false], 'Step20.种子路径检查失败：日志只记错误码、不含种子文件路径');
+
+  // （6）同一账户跨组的余额链：C 组 09-01、D 组 09-02 同为 M009/USD，D 组的上期余额取 C 组本批写入的种子。
+  //   D 组余额写出失败后整批还原（种子只剩期初），重试后两天余额与种子按链计算
+  const templateC = env.defineTemplate('回滚链-C', 'A');
+  const templateD = env.defineTemplate('回滚链-D', 'B');
+  seed(env, '回滚链-C', 'M009', 'USD', '2026-08-31', '100');
+  const fileC = path.join(dir, 'step20-c.xlsx');
+  const fileD = path.join(dir, 'step20-d.xlsx');
+  writeSource(fileC, 'A', [['2026-09-01', 'M009', 'USD', '10', '']]);
+  writeSource(fileD, 'B', [['2026-09-02', 'M009', 'USD', '20', '']]);
+  const chainEntries = () => [env.entryFor(templateC, fileC), env.entryFor(templateD, fileD)];
+  const chainSeeds = () => readBalanceSeedRecords(env.storageRoot, '回滚链')
+    .map((record) => [record.merchantId, record.billDate, String(record.endBalance)]).sort();
+  const beforeChain = snapshot();
+  faults.failBalanceAt = 2;
+  const chainError = run(chainEntries(), templateC.id);
+  faults.failBalanceAt = 0;
+  assertEq(chainError && chainError.code, 'EBUSY', 'Step20.余额链：后组余额写出失败原样抛出');
+  assertEq(snapshot(), beforeChain, 'Step20.余额链：失败后输出与种子回到导入前');
+  assertEq(chainSeeds(), [['M009', '2026-08-31', '100']], 'Step20.余额链：种子只剩期初');
+  assertEq(run(chainEntries(), templateC.id), null, 'Step20.余额链：重试成功');
+  assertEq(chainSeeds(), [['M009', '2026-08-31', '100'], ['M009', '2026-09-01', '110'], ['M009', '2026-09-02', '130']],
+    'Step20.余额链：重试后 D 组按 C 组本批写入的 09-01 余额续算');
+  const balanceFiles = fs.readdirSync(path.join(env.storageRoot, 'exports'), { recursive: true })
+    .map(String).filter((name) => /回滚链-[CD].*BALANCE/.test(name)).sort();
+  assertEq(balanceFiles.map((name) => readBalanceRows(path.join(env.storageRoot, 'exports', name)).map((row) => [row[4], Number(row[5])])),
+    [[['2026-09-01', 110]], [['2026-09-02', 130]]], `Step20.余额链：两组余额文件的期末余额（${balanceFiles.join(',')}）`);
+
+  // （7）真实会话：上一批成功导入 fileA、fileB 后覆盖导入同名文件（replacePaths 即这两个文件），第二组明细写出失败：
+  //   会话条目、批次、当前批次与导出缓存都与失败前相同；重试成功后旧条目各替换一次，会话只剩本次的条目与批次
+  const session = createStatementImportSession({ templateId: '__FILENAME_MAPPING__', templateName: '按文件名映射模板' });
+  const overwrite = { session, replacePaths: [fileA, fileB] };
+  assertEq(run(writeSources('12', '22'), templateA.id, overwrite), null, 'Step20.真实会话：上一批导入成功');
+  const sessionState = () => JSON.stringify({
+    importCount: session.importCount,
+    currentBatchId: session.currentBatchId,
+    batches: session.batches.map((batch) => [batch.id, batch.entryIds]),
+    fileEntries: session.fileEntries.map((entry) => [entry.id, entry.filePath, entry.detailRows.length]),
+    exports: env.lastGeneratedExports
+  });
+  const previousBatch = sessionState();
+  const previousBatchId = session.currentBatchId;
+  assertEq([session.fileEntries.length, session.batches.length], [2, 1], 'Step20.真实会话：上一批两个条目、一个批次');
+  faults.failWriteAt = 2;
+  const sessionError = run(writeSources('14', '24'), templateA.id, overwrite);
+  faults.failWriteAt = 0;
+  assertEq(sessionError && sessionError.code, 'EBUSY', 'Step20.真实会话：覆盖导入写出失败');
+  assertEq(sessionState(), previousBatch, 'Step20.真实会话：失败后会话条目、批次、当前批次与导出缓存不变');
+  assertEq(run(writeSources('14', '24'), templateA.id, overwrite), null, 'Step20.真实会话：重试成功');
+  assertEq([session.importCount, session.fileEntries.length, session.batches.length], [2, 2, 1],
+    'Step20.真实会话：重试后旧条目各替换一次，只剩本次的两个条目与一个批次');
+  assertTrue(session.currentBatchId !== previousBatchId
+    && session.batches[0].id === session.currentBatchId
+    && session.fileEntries.map((entry) => entry.filePath).sort().join('|') === [fileA, fileB].sort().join('|'),
+  `Step20.真实会话：当前批次为本次导入（${session.currentBatchId}）`);
+}
+
+// ⑳b v3.2.22 B45：导入入口对写出期间失败的处理（真实 createErrorResult，界面拿到的结果只有 message 等正式字段）。
+//   系统异常（如文件被占用）且本批已完整还原：按未生效的导入返回（preservesSession），不清空上一批的导出缓存、
+//   不替换上一批可导出的报错文件，写日志失败也照常返回；还原不完整时消息里给出未还原数量与恢复清单位置；
+//   业务校验失败或未打标记的异常仍按失败的导入清空。
+async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
+  const env = createEnvironment(dir, 'step20b');
+  const { createStatementOutputJournal } = require('../../src/main-process/statement-output-rollback');
+  const target = path.join(dir, 'step20b-detail.xlsx');
+  const failedError = (error, { incomplete = false } = {}) => {
+    fs.writeFileSync(target, 'before');
+    const journal = createStatementOutputJournal({ stagingRoot: dir });
+    journal.write(target, () => fs.writeFileSync(target, 'after'));
+    if (incomplete) fs.appendFileSync(target, '-external'); // 写完后被其他程序改动：不自动还原
+    return journal.failBatch(error);
+  };
+  const previousReport = { fileName: '上一批的报错文件.txt' };
+  // realPersistence：报错文件、诊断日志与活动日志都用 main.js 的真实写出函数（logger 落盘），由用例回读落盘内容（Codex 第十四轮）
+  const createScope = (sideEffects, thrown, { logFails = false, reportFails = false, captured = null, realPersistence = false, extra = {} } = {}) => {
+    const record = (name) => () => { sideEffects.push(name); };
+    const scopeValues = {
+      ...env.mainDeps,
+      ...env.fns,
+      fileImportInProgress: false,
+      getEnumConfig: () => ({}),
+      getStatementChannelMigrationPendingMessage: () => null,
+      clearPendingManualBalancePrompt: record('clearPendingManualBalancePrompt'),
+      clearPendingBigAccountSelection: record('clearPendingBigAccountSelection'),
+      clearGeneratedExports: record('clearGeneratedExports'),
+      statementDuplicateReview: { clear: record('statementDuplicateReview.clear') },
+      executeFilenameMappingImportPlan: () => { throw thrown; },
+      ensureStorageRoot: () => env.storageRoot,
+      appendLog: () => {
+        if (logFails) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+        return 'logs/step20b.log';
+      },
+      appendActivityLogEntry: (entry) => {
+        if (logFails) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+        if (captured) captured.push(entry);
+      },
+      archiveOperationContext: { getStore: () => null },
+      createErrorReport: (payload) => {
+        if (captured) captured.push(payload);
+        const { message } = payload;
+        // 导出所在的数据目录已满：报错文件也写不出
+        if (reportFails) throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+        return { fileName: `本次-${message.length}.txt` };
+      },
+      lastErrorReport: previousReport,
+      ...extra
+    };
+    if (realPersistence) {
+      delete scopeValues.appendLog;
+      delete scopeValues.appendActivityLogEntry;
+      delete scopeValues.createErrorReport;
+      scopeValues.activityLogFilePath = path.join(env.storageRoot, 'app_activity_log.txt');
+    }
+    return createMainScope(scopeValues);
+  };
+  // 落盘内容：报错文件目录与日志目录下的全部文件（文件名与正文）
+  const persistedDirs = ['error-reports', 'logs'].map((name) => path.join(env.storageRoot, name));
+  const readPersisted = () => {
+    const files = [];
+    const walk = (current) => {
+      if (!fs.existsSync(current)) return;
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const full = path.join(current, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else files.push({ relative: path.relative(env.storageRoot, full), text: fs.readFileSync(full, 'utf8') });
+      }
+    };
+    persistedDirs.forEach(walk);
+    return files;
+  };
+  const resetPersisted = () => persistedDirs.forEach((dirPath) => fs.rmSync(dirPath, { recursive: true, force: true }));
+  const runExecute = async (thrown, options = {}) => {
+    const sideEffects = [];
+    const scope = createScope(sideEffects, thrown, options);
+    const result = await scope.handleFilenameMappingImport({ previewOnly: false, statementImportPlan: { kind: 'filename-mapping' } });
+    return { result, cleared: sideEffects.includes('clearGeneratedExports'), report: scope.lastErrorReport };
+  };
+  // 完成大账号选择后的执行入口：生成前后的同一处理（在会话准备处注入写出期间的失败）
+  //   multiTemplate：两份文件匹配到不同模板，在多模板分组生成处注入失败（与真实入口相同的分支）
+  const runSelectionExecute = async (thrown, { templateName = '按文件名映射', multiTemplate = false, ...options } = {}) => {
+    const sideEffects = [];
+    const scope = createScope(sideEffects, thrown, { ...options, extra: {
+      checkImportConfigGuard: () => null,
+      statementImportSessions: new Map(),
+      requirePendingBigAccountSelection: () => ({
+        templateId: 1, template: { name: templateName }, mappings: [], orderedTargetFields: [], fileEntries: []
+      }),
+      getOrCreateStatementImportSession: () => {
+        if (multiTemplate) return { key: 'step20b' };
+        throw thrown;
+      },
+      ...(multiTemplate ? {
+        applyBigAccountAssignmentsToFileEntries: (entries) => entries,
+        applyConfirmedDuplicateRowFilter: () => ({ entries: [{ matchedTemplateId: 1 }, { matchedTemplateId: 2 }] }),
+        isFilenameMappingMode: () => true,
+        resolvePendingReplacePaths: () => [],
+        generateMultiTemplateGroupFiles: () => { throw thrown; }
+      } : {})
+    } });
+    const handler = scope.nested('completeBigAccountSelectionHandler');
+    const result = await handler.execute(null, {
+      contextId: 'step20b', normalizedAssignments: []
+    }, { fileEvidence: { filePlan: { inputs: [] } } });
+    return { result, cleared: sideEffects.includes('clearGeneratedExports'), report: scope.lastErrorReport };
+  };
+  const busy = failedError(Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })).error;
+  assertEq(fs.readFileSync(target, 'utf8'), 'before', 'Step20b.前置：写出已还原');
+  for (const logFails of [false, true]) {
+    const restored = await runExecute(busy, { logFails });
+    assertEq([restored.result.status, restored.result.preservesSession, restored.result.errorCode, restored.result.errorReportReady,
+      restored.cleared, restored.report], ['error', true, 'FILE_IMPORT_RUNTIME', false, false, previousReport],
+    `Step20b.已完整还原的系统异常${logFails ? '（写日志失败）' : ''}：按未生效的导入返回，不清空上一批的导出缓存、不替换上一批的报错文件`);
+    assertTrue(/已还原为导入前的状态/.test(restored.result.message), `Step20b.提示已还原：${restored.result.message}`);
+  }
+  // 单模板（会话准备处）与多模板（多模板分组生成处，Codex 第十五轮）两条分支
+  for (const multiTemplate of [false, true]) {
+    const selectionRestored = await runSelectionExecute(busy, { multiTemplate });
+    assertEq([selectionRestored.result.status, selectionRestored.result.preservesSession, selectionRestored.result.errorCode,
+      selectionRestored.result.errorReportReady, selectionRestored.cleared, selectionRestored.report],
+    ['error', true, 'BIG_ACCOUNT_SELECTION_RUNTIME', false, false, previousReport],
+    `Step20b.完成大账号选择后${multiTemplate ? '多模板生成' : ''}执行期写出失败、已完整还原：同样按未生效的导入返回，保留上一批的导出缓存与报错文件`);
+  }
+  const plain = await runExecute(Object.assign(new Error('EBUSY'), { code: 'EBUSY' }));
+  assertEq([plain.result.preservesSession, plain.cleared], [undefined, true], 'Step20b.未经回滚的异常仍按失败的导入清空');
+  const business = await runExecute(failedError(new FileValidationError('FILE_READ', '合并失败', { detailLines: ['明细'] })).error);
+  assertEq([business.result.preservesSession, business.result.errorReportReady, business.cleared], [undefined, true, true],
+    'Step20b.写出阶段的业务校验失败仍按失败的导入处理，可导出报错文件');
+  const { error: incompleteError, outcome } = failedError(Object.assign(new Error('EBUSY'), { code: 'EBUSY' }), { incomplete: true });
+  const incomplete = await runExecute(incompleteError);
+  assertEq([incomplete.result.status, incomplete.result.preservesSession, incomplete.cleared], ['error', undefined, true],
+    'Step20b.还原不完整：按失败的导入处理');
+  assertTrue(incomplete.result.message.includes('有 1 处输出未能自动还原')
+    && incomplete.result.message.includes(`恢复清单：${outcome.manifestPath}`),
+  `Step20b.还原不完整时界面消息给出数量与恢复清单位置：${incomplete.result.message}`);
+  // 报错文件也写不出（数据目录已满，正是还原失败的常见原因）：仍返回恢复指引，不被写报错文件的异常盖掉
+  for (const [label, run] of [['导入入口', runExecute], ['完成大账号选择', runSelectionExecute]]) {
+    const unreported = await run(incompleteError, { reportFails: true });
+    assertEq([unreported.result.status, unreported.result.errorCode, unreported.result.errorReportReady, unreported.report],
+      ['error', 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE', false, previousReport],
+      `Step20b.${label}：还原不完整且报错文件写不出时仍返回业务错误，不替换上一批的报错文件`);
+    assertTrue(unreported.result.message.includes(`恢复清单：${outcome.manifestPath}`),
+      `Step20b.${label}：报错文件写不出时消息仍给出恢复清单位置：${unreported.result.message}`);
+  }
+  // 完成大账号选择后多模板生成失败（还原不完整、导出位置不安全且已完整还原）：首个匹配模板的真实名称（可能含完整账号）
+  //   不写入报错文件与活动日志（Codex 第七、八轮）
+  const unsafeError = failedError(new FileValidationError('STATEMENT_OUTPUT_TARGET_UNSAFE',
+    '导出位置有同名的快捷方式（符号链接）或文件夹，无法安全覆盖，请移走后重新导入', { detailLines: [`所在目录：${dir}`] })).error;
+  // 各组的业务校验错误在上下文中带该组模板的真实名称；未经回滚的系统异常走另一分支（Codex 第九轮）
+  const groupError = new FileValidationError('FILE_READ', '存在1条明细的 Credit Amount 与 Debit Amount 同时有值', {
+    detailLines: ['第2行，Credit Amount="1"，Debit Amount="2"'], context: { templateName: '中行-6222020200012345678' } });
+  // 回读真实写出的报错文件（文件名与正文）和日志：都不含完整账号，报错文件用固定名称
+  const assertPersistedMasked = (label) => {
+    const files = readPersisted();
+    const reports = files.filter((file) => file.relative.startsWith('error-reports') && file.relative.endsWith('.txt'));
+    const logs = files.filter((file) => file.relative.startsWith('logs'));
+    const leaked = files.filter((file) => file.relative.includes('6222020200012345678') || file.text.includes('6222020200012345678'));
+    assertTrue(reports.length === 1 && logs.length >= 1 && leaked.length === 0,
+      `Step20b.${label}：落盘的报错文件与日志不含真实模板名：${JSON.stringify(files.map((file) => [file.relative, file.text.slice(0, 160)]))}`);
+    // 命名契约单独核对：报错文件名用固定名称（正文的上下文本来就含该名称，Codex 第十五轮）
+    assertTrue(reports.every((file) => path.basename(file.relative).includes('按文件名映射模板')),
+      `Step20b.${label}：报错文件名用固定模板名：${reports.map((file) => path.basename(file.relative)).join('、')}`);
+  };
+  for (const [label, thrown, expected] of [['还原不完整', incompleteError, '未能自动还原'], ['导出位置不安全', unsafeError, '无法安全覆盖'],
+    ['组内业务校验失败', groupError, '同时有值'], ['系统异常', Object.assign(new Error('EIO'), { code: 'EIO' }), '文件转换错误']]) {
+    resetPersisted();
+    const named = await runSelectionExecute(thrown, { templateName: '中行-6222020200012345678', multiTemplate: true, realPersistence: true });
+    assertTrue(named.result.message.includes(expected), `Step20b.前置：完成大账号选择后${label}：${named.result.message}`);
+    assertPersistedMasked(`完成大账号选择后${label}`);
+  }
+  // 直接导入入口（按文件名映射）：组内业务校验错误上下文中的真实模板名同样被固定名称覆盖（Codex 第九轮）
+  resetPersisted();
+  const direct = await runExecute(groupError, { realPersistence: true });
+  assertTrue(direct.result.message.includes('同时有值'), `Step20b.前置：直接导入时组内业务校验失败：${direct.result.message}`);
+  assertPersistedMasked('直接导入时组内业务校验失败');
+  fs.rmSync(outcome.backupDirectory, { recursive: true, force: true });
+}
+
 // ⑱ PR #246 审查：目标渠道账户号有待处理冲突（候选 OLD1 / OLD2）、待加入模板维护该账户号为 NEW。只比较生效映射会放行加入，
 //    NEW 写入渠道而不在候选里，之后处理冲突被所选候选覆盖、账户血缘丢失。加入前一并核对待处理冲突。
 function verifyJoinChecksPendingConflicts(dir) {
@@ -1964,6 +2755,8 @@ async function run() {
     verifyMixedBalanceModes(dir);
     await verifyDirectImportRejectsInjectedConflict(dir);
     await verifyBigAccountCompletionRejectsInjectedConflict(dir);
+    await verifyResidualFixedOrderFilesIgnored(dir);
+    await verifyFilenameMappingHeaderOnlyBatch(dir);
     await verifyBigAccountSelectionDefersProvisionalConflict(dir);
     await verifyAutoBigAccountUsesInjectedRows(dir);
     verifyMixedGroups(dir);
@@ -1980,6 +2773,8 @@ async function run() {
     verifyLegacyBundleMultiLevelSkippedParent(dir);
     verifyMultiTemplateGenerationStaleState(dir);
     verifyOutputPathConcatenationConflict(dir);
+    verifyMultiTemplateGenerationRollback(dir);
+    await verifyRestoredImportFailureKeepsPreviousBatch(dir);
     verifyJoinChecksPendingConflicts(dir);
     verifyMigrationFailureBlocksStatementOperations(dir);
   } finally {

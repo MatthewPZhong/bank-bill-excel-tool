@@ -49,7 +49,7 @@ test('清单覆盖全部随包 Excel，且只纳管或明确未纳入一次；�
   const declared = [...new Set(TEMPLATE_RESOURCES.map((item) => item.path)), ...EXCLUDED_TEMPLATE_FILES.map((item) => item.path)].sort();
   assert.deepEqual(declared, packaged);
   assert.equal(new Set(TEMPLATE_RESOURCES.map((item) => item.id)).size, TEMPLATE_RESOURCES.length);
-  assert.equal(TEMPLATE_RESOURCES.length, 35);
+  assert.equal(TEMPLATE_RESOURCES.length, 36);
   // 银行对账单随包文件：重复入账匹配输出样式与导入识别结构（D18），各自独立版本。
   const shared = TEMPLATE_RESOURCES.filter((item) => TEMPLATE_RESOURCES.some((other) => other !== item && other.path === item.path));
   assert.deepEqual(shared.map((item) => item.id).sort(), ['bank-statement', 'bank-statement-input']);

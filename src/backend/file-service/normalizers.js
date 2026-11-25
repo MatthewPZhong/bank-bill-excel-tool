@@ -387,7 +387,17 @@ function formatIsoDateValue(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function resolveEnglishMonthIndex(value) {
+// v3.2.21：严格识别（跨 Sheet 回填的来源日期）只认完整月份名与约定缩写（三个字母，九月另认 Sept），不按前三个字母放行
+//   （Septober 这类写法识别不出）；默认仍按前三个字母，旧映射行为不变
+const ENGLISH_MONTH_FULL_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september',
+  'october', 'november', 'december'];
+const STRICT_ENGLISH_MONTH_INDEX = new Map([
+  ...ENGLISH_MONTH_FULL_NAMES.map((name, index) => [name, index + 1]),
+  ...ENGLISH_MONTH_INDEX,
+  ['sept', 9]
+]);
+
+function resolveEnglishMonthIndex(value, { strict = false } = {}) {
   const normalizedValue = normalizeCell(value)
     .toLowerCase()
     .replace(/\./g, '');
@@ -396,10 +406,11 @@ function resolveEnglishMonthIndex(value) {
     return null;
   }
 
+  if (strict) return STRICT_ENGLISH_MONTH_INDEX.get(normalizedValue) || null;
   return ENGLISH_MONTH_INDEX.get(normalizedValue.slice(0, 3)) || null;
 }
 
-function parseEnglishMonthDateCandidate(value) {
+function parseEnglishMonthDateCandidate(value, { strictMonth = false } = {}) {
   const normalizedValue = normalizeCell(value)
     .replace(/[，,]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -444,7 +455,7 @@ function parseEnglishMonthDateCandidate(value) {
     }
 
     const { year, day, monthName } = pattern.resolve(matchedParts);
-    const monthIndex = resolveEnglishMonthIndex(monthName);
+    const monthIndex = resolveEnglishMonthIndex(monthName, { strict: strictMonth });
 
     if (!monthIndex) {
       continue;
@@ -478,6 +489,22 @@ function stripDateTimeSuffix(rawValue) {
   return withoutTrailingTime || withoutDashHourMinute;
 }
 
+// v3.2.21：严格路径（跨 Sheet 回填的来源日期，looseFallback 为 false）只去掉完整、有效的时间后缀：时 0–23（带 AM/PM 时 1–12）、
+//   分 0–59、秒 0–59，可带小数秒、AM/PM 与时区（Z、±hh、±hh:mm、±hhmm，时 00–23、分 00–59）；时间前的日期部分不限以数字结尾
+//   （2026年09月25日 12:34:56、2026 25-Sep 12:34:56），由日期解析器校验。时间之后另有其他内容
+//   （9/25/2026 12:00:00 or 09/26/2026）或时间无效（2026-09-25 99:99）时不截取，按原文识别（日期写法整串匹配，识别不出即
+//   无法识别），不把任意尾部内容当成时间去掉。普通映射照旧用 stripDateTimeSuffix
+function stripStrictDateTimeSuffix(rawValue) {
+  const text = normalizeCell(rawValue);
+  const match = /^(.*?\S)(?:[Tt]|\s*[,，]\s*|\s+)(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:\s*([AaPp][Mm]))?(?:Z|[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?)?$/
+    .exec(text);
+  if (!match) return text;
+  const hour = Number(match[2]);
+  const hourValid = match[5] ? hour >= 1 && hour <= 12 : hour <= 23;
+  if (!hourValid || Number(match[3]) > 59 || Number(match[4] || 0) > 59) return text;
+  return match[1];
+}
+
 function buildNormalizedDateResult(date, displayFormat = 'yyyy-mm-dd', value = '') {
   return {
     value,
@@ -495,7 +522,9 @@ function resolveExcelSerial(serial, excelDateSystem) {
   return excelDateSystem === '1904' ? serial + EXCEL_1904_SERIAL_OFFSET : serial;
 }
 
-function normalizeDateExportValue(value, { dateParseOrder = 'auto', excelDateSystem = '1900' } = {}) {
+// v3.2.21：looseFallback 为 false 时不回退到 JavaScript Date 解析（其会把 02/30/2026 这类不存在的日期滚入下月），
+//   只采用上方明确的写法；默认 true 即原行为。跨 Sheet 回填解析来源日期时关闭。
+function normalizeDateExportValue(value, { dateParseOrder = 'auto', excelDateSystem = '1900', looseFallback = true } = {}) {
   if (value === null || value === undefined || value === '') {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
@@ -525,13 +554,14 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto', excelDateSys
     );
   }
 
-  const candidateValue = stripDateTimeSuffix(value);
+  const candidateValue = looseFallback ? stripDateTimeSuffix(value) : stripStrictDateTimeSuffix(value);
 
   if (!candidateValue) {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
 
-  const englishMonthDateResult = parseEnglishMonthDateCandidate(candidateValue);
+  // 不回退到 JavaScript Date 时（跨 Sheet 回填的来源日期）英文月份同样严格识别
+  const englishMonthDateResult = parseEnglishMonthDateCandidate(candidateValue, { strictMonth: !looseFallback });
 
   if (englishMonthDateResult) {
     return englishMonthDateResult;
@@ -662,7 +692,7 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto', excelDateSys
     /[年月日]/.test(candidateValue) ||
     /^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(candidateValue);
 
-  const fallback = isFallbackCandidate ? new Date(candidateValue) : new Date('invalid');
+  const fallback = isFallbackCandidate && looseFallback ? new Date(candidateValue) : new Date('invalid');
 
   if (!Number.isNaN(fallback.getTime())) {
     const date = new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate());

@@ -26,8 +26,6 @@ const archivePolicies = Object.freeze([
   createBaseTaskPolicy('account-mapping:distribute-migration', 'STATEMENT'),
   createBaseTaskPolicy('account-mapping:save', 'STATEMENT'),
   createBaseTaskPolicy('balance-adjustment:save', 'STATEMENT'),
-  createBaseTaskPolicy('big-account-mode:save', 'STATEMENT'),
-  createBaseTaskPolicy('big-account-order:save', 'STATEMENT'),
   createBaseTaskPolicy('big-account:import-bank-info', 'STATEMENT'),
   createBaseTaskPolicy('big-account:save-own-accounts', 'STATEMENT'),
   createBaseTaskPolicy('file:complete-big-account-selection', 'STATEMENT', {
@@ -98,8 +96,6 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('bank-statement:c3-candidate-count', 'read-only-query'),
   createExcludePolicy('bank-statement:refund-candidate-count', 'read-only-query'),
   createExcludePolicy('bank-statement:session-status', 'read-only-query'),
-  createExcludePolicy('big-account-mode:load', 'read-only-query'),
-  createExcludePolicy('big-account-order:load', 'read-only-query'),
   createExcludePolicy('big-account:get-with-own', 'read-only-query'),
   createExcludePolicy('channels:list', 'read-only-query'),
   createExcludePolicy('duplicate-inbound-match:session-status', 'read-only-query'),

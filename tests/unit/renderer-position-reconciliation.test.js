@@ -543,14 +543,20 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
       positionRenderer,
       /result && result\.status === 'not-cancellable'[\s\S]*正在提交，无法取消/
     );
-    assert.match(positionRenderer, /'preparing-apply': '正在准备写入索引'/);
     assert.match(positionRenderer, /stage === 'stopping' \|\| stage === 'force-terminating'/);
     assert.match(
       positionRenderer,
       /finally\s*\{[\s\S]*stopProgress\(\);[\s\S]*opened\.handle\.close\(\)/
     );
     assert.match(positionRenderer, /withImportProgress\(\s*'导入平盘银行对账单'/);
-    assert.match(positionRenderer, /withImportProgress\(\s*'写入平盘银行对账单'/);
+    assert.match(positionRenderer, /withImportProgress\(\s*'提交平盘银行对账单'/);
+    // 单遍导入：只有会替换已有渠道 + 月份时才弹确认。
+    assert.match(positionRenderer, /existing\.length === 0 \|\| await confirmAction\(/);
+    assert.match(positionRenderer, /importing: '正在读取并写入数据'/);
+    // 数据管理与链接原始表列出当前原始文件版本号（V<n>），已被替换的版本不显示。
+    assert.match(positionRenderer, /<th>原始版本<\/th>/);
+    assert.match(positionRenderer, /file\.status === 'active'/);
+    assert.match(positionRenderer, /formatRawVersions\(result\.rawFiles, row\.sourceType\)/);
     assert.match(positionRenderer, /withImportProgress\(\s*'导入链接原始表'/);
     assert.match(positionRenderer, /withImportProgress\(\s*'替换清结算银行账户表'/);
     assert.match(preload, /position-reconciliation:import:cancel/);

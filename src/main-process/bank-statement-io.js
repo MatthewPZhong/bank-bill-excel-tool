@@ -24,7 +24,8 @@ const { BANK_STATEMENT_FIELDS } = require('../constants/bank-statement-fields');
 const { GATEWAY_RECON_FIELDS } = require('../constants/gateway-recon-fields');
 const {
   writeBankStatementOutput,
-  writeErrorReport
+  writeErrorReport,
+  cleanupInterruptedErrorReportTemporaryFiles
 } = require('./exceljs-writer');
 
 const BANK_STATEMENT_SHEET_NAME = '渠道对账单';
@@ -316,7 +317,20 @@ async function writeErrorReportOutput({ warnings, exportRootDir, timestamp, bank
   });
 }
 
-async function writeErrorReportOutputToPath({ warnings, outputPath, bankRows }) {
+// v3.2.22：逐条补全对账ID（惰性迭代器），由 writer 按输出背压逐行取用，不预先复制整份告警。
+function* enrichWarningsWithReconId(warnings, reconIdByRowId) {
+  for (const warning of warnings) {
+    if (!warning || warning.rowId === undefined || warning.rowId === null) {
+      yield warning;
+      continue;
+    }
+    const reconciliationId = reconIdByRowId.get(warning.rowId);
+    yield reconciliationId === undefined ? warning : { ...warning, reconciliationId };
+  }
+}
+
+// writerOptions：透传给 writeErrorReport（仅供单测注入输出流）。
+async function writeErrorReportOutputToPath({ warnings, outputPath, bankRows, writerOptions }) {
   if (!Array.isArray(warnings) || warnings.length === 0) return null;
   let enrichedWarnings = warnings;
   if (Array.isArray(bankRows) && bankRows.length > 0) {
@@ -328,13 +342,9 @@ async function writeErrorReportOutputToPath({ warnings, outputPath, bankRows }) 
           || String(reconciliationId).trim() === '') continue;
       reconIdByRowId.set(row._rowId, reconciliationId);
     }
-    enrichedWarnings = warnings.map((warning) => {
-      if (!warning || warning.rowId === undefined || warning.rowId === null) return warning;
-      const reconciliationId = reconIdByRowId.get(warning.rowId);
-      return reconciliationId === undefined ? warning : { ...warning, reconciliationId };
-    });
+    enrichedWarnings = enrichWarningsWithReconId(warnings, reconIdByRowId);
   }
-  const result = await writeErrorReport(enrichedWarnings, outputPath);
+  const result = await writeErrorReport(enrichedWarnings, outputPath, writerOptions);
   return { ...result, fileName: path.basename(outputPath) };
 }
 
@@ -347,6 +357,7 @@ module.exports = {
   writeBankStatementMainOutput,
   writeErrorReportOutput,
   writeErrorReportOutputToPath,
+  cleanupInterruptedErrorReportTemporaryFiles,
   buildMainOutputFileName,
   buildTimestamp,
   buildTimestampMinute,

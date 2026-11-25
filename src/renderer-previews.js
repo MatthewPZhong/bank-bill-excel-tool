@@ -36,7 +36,6 @@
       createAmountSplitRulesDialog,
       createBillSplitRowsDialog,
       createBillSplitMappingsDialog,
-      createRememberOrderMismatchDialog,
       createDuplicateRowsReviewDialog,
       createAccountMappingMigrationDialog,
       closeModal,
@@ -213,9 +212,10 @@
           // v3.2.19：原始账单预处理
           '过滤账单',
           '重复账单过滤',
-          SIGNED_AMOUNT_MAPPING_FIELD,
-          AMOUNT_BASED_NAME_MAPPING_FIELD,
-          AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
+          // v3.2.21：原始账单预处理「跨 Sheet 回填」
+          '跨 Sheet 回填',
+          // v3.2.22：含「按字段区分发生额」，预览可见其下方的「特征值设置」【管理】
+          ...ADVANCED_MAPPING_FIELDS
         ],
         mappings: [
           { templateField: 'BillDate', mappedField: '交易日期', customValue: '', isMultiBigAccount: false },
@@ -247,7 +247,7 @@
             isMultiBigAccount: true
           }
         ],
-        preprocessFields: ['过滤账单', '重复账单过滤'],
+        preprocessFields: ['过滤账单', '重复账单过滤', '跨 Sheet 回填'],
         advancedMappingFields: ADVANCED_MAPPING_FIELDS.slice()
       };
     }
@@ -569,20 +569,6 @@
       }));
     }
 
-    // 8. 大账号顺序不匹配提示对话框（v1.5.0）
-    function applyRememberOrderMismatchDialogPreviewState() {
-      setCurrentModule(MODULES.statementGenerator.id);
-      openModal(() => createRememberOrderMismatchDialog({
-        message: '已记住的大账号顺序与当前导入文件不匹配（A.xlsx：账户号 6222...01 vs 已记 9558...08），请选择处理方式。',
-        bigAccountResult: {
-          accounts: [
-            { merchantId: '6222000000000001', currency: 'USD' },
-            { merchantId: '9558800000000008', currency: 'HKD' }
-          ]
-        }
-      }));
-    }
-
     // 8b. 重复账单提醒（v3.2.19 原始账单预处理「重复账单过滤」）
     function applyDuplicateRowsReviewDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
@@ -702,7 +688,6 @@
       ];
       openModal(() => createBigAccountSelectionDialog({
         rows,
-        rowsWithEmptyBlocks: rows,
         expandedBigAccountOptions: [
           { merchantId: '6222000000000001', currency: 'USD' },
           { merchantId: '6222000000000001', currency: 'HKD' },
@@ -713,7 +698,6 @@
         ],
         templateId: 'preview-template-4',
         templateName: 'HSBC-SG',
-        canRemember: true,
         onDone: () => {},
         onCancel: closeModal
       }));
@@ -736,7 +720,6 @@
       }
       openModal(() => createBigAccountSelectionDialog({
         rows,
-        rowsWithEmptyBlocks: rows,
         expandedBigAccountOptions: [
           { merchantId: '6222000000000001', currency: 'USD' },
           { merchantId: '6222000000000001', currency: 'HKD' },
@@ -749,7 +732,6 @@
         ],
         templateId: 'preview-template-4',
         templateName: 'HSBC-SG',
-        canRemember: true,
         onDone: () => {},
         onCancel: closeModal
       }));
@@ -862,7 +844,7 @@
 
     // v3.0.12 功能2（批A）：账户映射管理弹窗 preview（「链接表管理」左下角入口打开的全局对照表弹窗）。
     //   由同一 modalHost 挂载；列表读取在 onMount 开始，关闭后的读取不会改动新窗口。
-    //   打开后异步拉列表（preview 临时库为空 → 渲染空表 + 末行「新增」+ 三列表头「中台调拨单账户号/清结算系统银行账号/执行操作」）。
+    //   打开后异步拉列表（preview 临时库为空 → 渲染空表 + 末行「新增」+ 三列表头「链接表账户号/清结算系统银行账号/执行操作」）。
     function applyFundTransferAccountMappingPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       return openModal(() => createFundTransferAccountMappingDialog());
@@ -1526,7 +1508,6 @@
       applyAmountSplitRulesDialogPreviewState,
       applyBillSplitRowsDialogPreviewState,
       applyBillSplitMappingsDialogPreviewState,
-      applyRememberOrderMismatchDialogPreviewState,
       applyDuplicateRowsReviewDialogPreviewState,
       applyAccountMappingMigrationDialogPreviewState,
       // 2026-04-24 补：历史遗漏 preview

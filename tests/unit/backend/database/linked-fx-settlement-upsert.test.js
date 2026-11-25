@@ -18,6 +18,7 @@
 //   UT-FX-UPSERT-5  meta 全表重算：跨 2 批不同 transaction_date → rowCount/日期范围 = 全表跨两批
 //   UT-FX-UPSERT-6  number 类型交易编号正确 String 化为键（926181062 number → 入库 transaction_no='926181062'）
 //   UT-FX-UPSERT-7  带尾零小数交易编号归一后与纯数字同键覆盖（'926181062.0' 与 926181062 视为同键）
+//   UT-FX-UPSERT-8  upsert SQL 不含重复列名（v3.2.22 B17）
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -164,5 +165,21 @@ test.describe('linked-table-repository — 外汇交割表幂等 upsert（v3.0.5
     assert.equal(tableRowCount(), 1, '🔴 尾零小数归一后与 number 同键 → 仅 1 行（覆盖非追加）');
     assert.equal(r2.overwriteCount, 1, '命中同归一键 → overwriteCount=1');
     assert.equal(rawOf('926181062').v, 'second', '覆盖为最新值');
+    assert.deepEqual(allTxnNos(), ['926181062'], '交易编号列为归一后的幂等键，不是原始的 926181062.0');
+  });
+
+  // v3.2.22 B17：fx 的幂等键列与展示键列同为 transaction_no，upsert SQL 只写一次该列（不依赖 node:sqlite 容忍重复列名）
+  test('UT-FX-UPSERT-8：fx upsert SQL 不含重复列名，交易编号列只写一次归一后的幂等键', () => {
+    const prepared = [];
+    const spyDb = { prepare(sql) { prepared.push(sql); return db.prepare(sql); }, exec: (sql) => db.exec(sql) };
+    repo.upsertLinkedFx(spyDb, [fxRow('926181062.0', '2026-05-13')]);
+    const insert = prepared.find((sql) => /INSERT INTO linked_fx_settlement/.test(sql));
+    assert.ok(insert, '执行了 fx upsert');
+    const columns = insert.match(/INSERT INTO linked_fx_settlement \(([^)]*)\)/)[1].split(',').map((item) => item.trim());
+    assert.equal(new Set(columns).size, columns.length, `列名不重复：${columns.join(', ')}`);
+    assert.equal(columns.filter((name) => name === 'transaction_no').length, 1);
+    const placeholders = insert.match(/VALUES \(([^)]*)\)/)[1].split(',').length;
+    assert.equal(placeholders, columns.length, '占位符与列数一致');
+    assert.deepEqual(allTxnNos(), ['926181062']);
   });
 });

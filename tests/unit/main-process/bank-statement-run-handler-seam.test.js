@@ -114,9 +114,10 @@ describe('需求6 修复2（🔴 资金红线）：gateway 账单按 Channel 过
 
   test('handler 一次读取 exactRows/c3Rows 双池并分别注入编排器', () => {
     assert.ok(
-      mainSrc.includes('const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(bankChannels);'),
+      mainSrc.includes('const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(\n        bankChannels,'),
       '网关数据必须经双池 facade 单次读取'
     );
+    assert.equal(mainSrc.split('database.readGatewayBillRowPoolsByChannels(').length - 1, 1, '整轮只读一次网关表');
     assert.ok(mainSrc.includes('const workingGwRows = gatewayRowPools.exactRows;'), '其它轮次必须使用 exactRows');
     assert.ok(mainSrc.includes('const workingC3GwRows = gatewayRowPools.c3Rows;'), 'C3 必须使用 c3Rows');
     assert.ok(mainSrc.includes('c3GwRows: workingC3GwRows,'), 'handler 必须显式注入 C3 专用候选池');
@@ -147,8 +148,12 @@ describe('v3.1.1（🔴 资金红线）：disabled owner 日期策略与运行/�
     );
     assert.ok(mainSrc.includes('fundTransferDatePolicy,'), 'resolved policy 必须注入 runReconciliation');
     assert.ok(
-      mainSrc.includes('initialWarnings: fundTransferPolicyResolution.warnings,'),
-      'resolver 非致命告警必须注入最终错误报告链路'
+      mainSrc.includes('initialWarnings: [...fundTransferPolicyResolution.warnings, ...(fundTransferDerivationWarnings || [])],'),
+      'resolver 非致命告警与调拨对账单派生告警（v3.2.22）必须注入最终错误报告链路，配置告警在前'
+    );
+    assert.ok(
+      mainSrc.includes('runWarnings: fundTransferDerivationWarnings\n      } = prepareRunFundTransferReconDerivation('),
+      'v3.2.22：派生告警取自准备函数的返回值'
     );
   });
 
@@ -161,6 +166,43 @@ describe('v3.1.1（🔴 资金红线）：disabled owner 日期策略与运行/�
       mainSrc.includes('fundTransferAuditContext: { reconRows: workingFundTransferAuditReconRows },'),
       '主流程必须把独立只读审计 context 注入编排器'
     );
+  });
+
+  test('v3.2.22：run 入口经 prepareRunFundTransferReconDerivation 读映射与重派生，抛错后不读派生表、不运行对账', () => {
+    // 故障注入行为见 linked-derive-rebuild.test.js「prepareRunFundTransferReconDerivation」；这里只钉住接线。
+    assert.ok(mainSrc.includes('const r5s2GatewaySourceEnabled = !!r5s2Scenario && !reconSourceMidEnabled;'));
+    assert.equal(mainSrc.split('database.getFundTransferAccountMappingMap()').length - 1, 0, 'main.js 不再自行读取映射');
+    const prepAt = mainSrc.indexOf('prepareRunFundTransferReconDerivation(\n        { database, buildFundTransferReconRows, appendActivityLogEntry },\n        { reconSourceMidEnabled, dbsChargeScenarioEnabled, r5s2GatewaySourceEnabled, paymentOfflineEnabled }\n      );');
+    const reconReadAt = mainSrc.indexOf('database.readFundTransferReconRows()', prepAt);
+    const reconcileAt = mainSrc.indexOf('const result = await runReconciliation({', prepAt);
+    assert.ok(prepAt > 0, '四个消费方开关全部传入');
+    assert.ok(reconReadAt > prepAt && reconcileAt > prepAt, '派生表读取与对账都在准备函数之后（准备函数抛错即中止）');
+    assert.ok(
+      mainSrc.slice(reconcileAt, mainSrc.indexOf('});', reconcileAt)).includes('fundTransferAccountMappingMap,'),
+      '准备函数返回的同一份 Map 注入 runReconciliation'
+    );
+  });
+
+  test('v3.2.22：网关来源才在读池的同一次扫描收集池外诊断候选，只注入 R5s2 告警入参，不并入网关可写池', () => {
+    const mappingReadAt = mainSrc.indexOf('accountMappingMap: fundTransferAccountMappingMap,\n        runWarnings: fundTransferDerivationWarnings\n      } = prepareRunFundTransferReconDerivation(');
+    const prefilterAt = mainSrc.indexOf('const r5ChannelMissingDiagnosticPrefilter = r5s2GatewaySourceEnabled\n        ? buildR5ChannelMissingDiagnosticPrefilter(fundTransferAccountMappingMap)');
+    const poolReadAt = mainSrc.indexOf('const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(');
+    const diagAt = mainSrc.indexOf('const r5ChannelMissingDiagnosticSource = r5ChannelMissingDiagnosticPrefilter');
+    const reconcileAt = mainSrc.indexOf('const result = await runReconciliation({', diagAt);
+    assert.ok(mappingReadAt > 0 && prefilterAt > mappingReadAt, '读池在读映射之后（读映射失败即中止，不读网关表），粗筛用同一份 Map');
+    assert.ok(poolReadAt > prefilterAt && diagAt > poolReadAt && reconcileAt > diagAt);
+    assert.ok(mainSrc.slice(poolReadAt, mainSrc.indexOf(');', poolReadAt)).includes('{ outOfPoolDiagnostic: r5ChannelMissingDiagnosticPrefilter }'));
+    assert.ok(!mainSrc.includes('readGatewayBillOutOfPoolRows'), 'R5 运行时不再另读网关表');
+    const diagBlock = mainSrc.slice(diagAt, mainSrc.indexOf(': null;', diagAt));
+    assert.ok(diagBlock.includes('createR5ChannelMissingDiagnosticSource({'));
+    assert.ok(diagBlock.includes('accountMappingMap: fundTransferAccountMappingMap,'));
+    assert.ok(diagBlock.includes('prefilter: r5ChannelMissingDiagnosticPrefilter,'));
+    assert.ok(diagBlock.includes('readRowsByIds: (ids, onRow) => database.readGatewayBillRowsByIds(ids, onRow)'),
+      'R5 运行时只按 id 回读暂存候选，不再扫网关表');
+    assert.ok(!mainSrc.includes('outOfPoolRows'), '主进程不保留池外网关记录数组');
+    const callBlock = mainSrc.slice(reconcileAt, mainSrc.indexOf('});', reconcileAt));
+    assert.ok(callBlock.includes('fundTransferChannelMissingDiagnosticSource: r5ChannelMissingDiagnosticSource,'));
+    assert.ok(callBlock.includes('gwRows: workingGwRows,') && callBlock.includes('c3GwRows: workingC3GwRows,'), '可写池仍只来自按渠道读池');
   });
 
   test('运行与导出均把 raw+effective policy signature 纳入防陈旧快照', () => {

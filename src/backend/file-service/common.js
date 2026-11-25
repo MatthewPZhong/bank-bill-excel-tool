@@ -22,6 +22,8 @@ class FileValidationError extends Error {
     this.name = 'FileValidationError';
     this.code = code;
     this.detailLines = Array.isArray(options.detailLines) ? options.detailLines.slice() : [];
+    // v3.2.21：写入活动日志的明细（不给时同 detailLines）；报错文件保留核对所需原值，日志可只记行号与原因
+    if (Array.isArray(options.logDetailLines)) this.logDetailLines = options.logDetailLines.slice();
     this.context = options.context && typeof options.context === 'object' ? { ...options.context } : {};
   }
 }
@@ -86,6 +88,54 @@ function buildExpectedHeaderCandidates(expectedHeaders) {
     : [positionalHeaders, compactHeaders];
 }
 
+// 能原样写入 XLSX 工作表的文本：未配对 UTF-16 代理项写出后变成「�」；U+FFFE、U+FFFF 是 XML 1.0 禁止的字符，写出后工作表无法解析。
+//   其他控制字符写出时按 _xHHHH_ 转义，字面的 _xHHHH_ 由写出边界转义（writers.js，B113），都可原样读回。
+function isWorksheetWritableText(value) {
+  return typeof value === 'string' && value.isWellFormed() && !/[\uFFFE\uFFFF]/.test(value);
+}
+
+// v3.2.22 B113：行数据中无法原样写入工作表的文本。行号定位交易所在的源行；值可能取自源文件，也可能来自大账号回填、
+//   手动选择或固定值配置，提示不限定为修正源文件。rows 首行为表头（列名），rowMetas[i] 对应 rows[i + 1]（取源行号）；
+//   include(row) 为 false 的行不看（如收付金额均为空或 0、不导出的行）。只保留前 limit 处位置说明，另计总数（大批出错时不随错误数占用内存）
+const UNWRITABLE_TEXT_DETAIL_LIMIT = 20;
+function noteUnwritableRowText(found, row, fieldNames, meta) {
+  row.forEach((value, columnIndex) => {
+    if (typeof value !== 'string' || isWorksheetWritableText(value)) return;
+    found.total += 1;
+    if (found.labels.length >= UNWRITABLE_TEXT_DETAIL_LIMIT) return;
+    const rowLabel = meta && meta.sourceRowNumber !== undefined ? `第 ${meta.sourceRowNumber} 行` : '';
+    found.labels.push(`${rowLabel}写进「${fieldNames[columnIndex]}」列的值`);
+  });
+  return found;
+}
+
+function collectUnwritableRowText(rows, { rowMetas = [], include = null, found = { total: 0, labels: [] } } = {}) {
+  const fieldNames = Array.isArray(rows[0]) ? rows[0] : [];
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (!Array.isArray(row) || (include && !include(row))) continue;
+    noteUnwritableRowText(found, row, fieldNames, rowMetas[index - 1]);
+  }
+  return found;
+}
+
+// 无法写入的字符的拒绝只需行列位置与数量：标记 positionsOnly，调用方不要把整批记录（如完整账号）放进报错文件
+function markPositionsOnly(error) {
+  Object.defineProperty(error, 'positionsOnly', { value: true, enumerable: false });
+  return error;
+}
+
+function assertNoUnwritableRowText(found) {
+  if (!found.total) return;
+  const detailLines = found.labels.slice();
+  if (found.total > detailLines.length) detailLines.push(`另有 ${found.total - detailLines.length} 处，共 ${found.total} 处`);
+  throw markPositionsOnly(new FileValidationError(
+    'FILE_READ',
+    `源文件${found.labels[0]}含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）${found.total > 1 ? `等 ${found.total} 处` : ''}，请按值的来源修正源文件或模板的大账号、固定值配置后重新生成`,
+    { detailLines }
+  ));
+}
+
 module.exports = {
   FEATURE_FILTER_FIELD_TOKEN_PREFIX,
   FileValidationError,
@@ -97,6 +147,12 @@ module.exports = {
   buildExpectedHeaderCandidates,
   isRowMeaningful,
   isUnverifiedLongNumber,
+  isWorksheetWritableText,
+  UNWRITABLE_TEXT_DETAIL_LIMIT,
+  assertNoUnwritableRowText,
+  collectUnwritableRowText,
+  markPositionsOnly,
+  noteUnwritableRowText,
   normalizeCell,
   trimTrailingEmptyCells
 };

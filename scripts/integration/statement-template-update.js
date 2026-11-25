@@ -54,6 +54,9 @@ const {
   normalizeRowFilterRules,
   validateRowFilterRules,
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule,
   validateFeeAmountFormula,
   validateBillSplitRowFilterRules,
   writeWorkbookRows
@@ -126,7 +129,7 @@ const CONSTANTS = loadMainConstants([
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
   'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'DUPLICATE_ROW_FILTER_MAPPING_FIELD',
-  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
+  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'CROSS_SHEET_BACKFILL_MAPPING_FIELD', 'CROSS_SHEET_BACKFILL_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
   'SIGNED_AMOUNT_MAPPING_FIELD',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE'
@@ -151,7 +154,7 @@ function pickColumns(rows, names) {
 
 function createMain(database, spies) {
   return loadMainFunctions([
-    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'validateFeatureFiltersPayload',
     'collectFeatureFilterRefs',
     'buildExportTargetFields',
@@ -169,7 +172,7 @@ function createMain(database, spies) {
     'getTemplateMappingConfig',
     'buildMappedFieldLookup',
     'normalizeLookupMappingValue',
-    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'buildCrossSheetBackfillRule', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'resolveStatementFeatureFilters',
     'buildBillSplitMergeConfig',
     'buildAmountSplitByFieldConfig',
@@ -183,6 +186,7 @@ function createMain(database, spies) {
     'findConflictingTemplateByHeaders',
     'buildTemplateFieldReferenceInput',
     'collectStaleTemplateFieldReferences',
+    'extractStatementTemplateHeaders',
     'prepareTemplateHeaderUpdate',
     'applyTemplateHeaderUpdate',
     'hasAmbiguousLogicValueFeatureCandidate',
@@ -206,6 +210,9 @@ function createMain(database, spies) {
     normalizeRowFilterRules,
     validateRowFilterRules,
     PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+    hasCrossSheetBackfillSettings,
+    normalizeCrossSheetBackfillRule,
+    validateCrossSheetBackfillRule,
     validateFeeAmountFormula,
     validateBillSplitRowFilterRules,
     FileValidationError,
@@ -620,7 +627,7 @@ async function run() {
       '⑪ 模板库同步失败时仍报告已更新，并列出失效映射');
     assertTrue(/模板库文件同步失败/.test(signedApplied.message), '⑪ 成功提示单独说明模板库同步失败');
     assertEq(database.getTemplate(signedTemplate.id).headers, signedNewHeaders, '⑪ 表头已写入主库');
-    assertTrue(spies.activity.some((entry) => entry.level === 'warn' && entry.message === '更新模板表头后同步模板库文件失败'), '⑪ 活动日志记录同步失败');
+    assertTrue(spies.activity.some((entry) => entry.level === 'warning' && entry.message === '更新模板表头后同步模板库文件失败'), '⑪ 活动日志记录同步失败');
     const signedSourceNew = path.join(dir, 'signed-new-source.xlsx');
     writeWorkbook(signedSourceNew, signedNewHeaders, [['2026-11-12', '1', '2', 'ACC4', 'USD']]);
     assertThrows(() => generate(main, database, signedTemplate.id, signedSourceNew),

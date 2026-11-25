@@ -405,14 +405,20 @@ function buildLinkedUpsertContext(
       source_contract_version = excluded.source_contract_version,
       source_write_nonce = excluded.source_write_nonce`
     : '';
+  // v3.2.22 B17：幂等键列与展示键列相同（fx：都是 transaction_no）时只写一次，取归一后的幂等键；
+  //   不再拼出重复列名、依赖 node:sqlite 未文档化的「重复列取第 1 个值」。
+  const sameKeyColumn = idKeyColumn === def.keyColumn;
+  const keyColumns = sameKeyColumn ? idKeyColumn : `${idKeyColumn}, ${def.keyColumn}`;
+  const keyPlaceholders = sameKeyColumn ? '?' : '?, ?';
+  const keyUpdate = sameKeyColumn ? '' : `${def.keyColumn} = excluded.${def.keyColumn},
+      `;
   const upsertSql = `
     INSERT INTO ${def.table} (
-      ${idKeyColumn}, ${def.keyColumn}, ${def.dateColumn}, raw_json, imported_at${sourceColumns}
+      ${keyColumns}, ${def.dateColumn}, raw_json, imported_at${sourceColumns}
     )
-    VALUES (?, ?, ?, ?, ?${sourceValues})
+    VALUES (${keyPlaceholders}, ?, ?, ?${sourceValues})
     ON CONFLICT(${idKeyColumn}) DO UPDATE SET
-      ${def.keyColumn} = excluded.${def.keyColumn},
-      ${def.dateColumn} = excluded.${def.dateColumn},
+      ${keyUpdate}${def.dateColumn} = excluded.${def.dateColumn},
       raw_json = excluded.raw_json,
       imported_at = excluded.imported_at${sourceUpdates}
   `;
@@ -431,7 +437,9 @@ function buildLinkedUpsertContext(
     const dateIso = normalizeDateForRange(obj[def.dateHeader]); // 日期列 → YYYY-MM-DD / null
     const rawJson = JSON.stringify(obj);
     const existed = existsStmt.get(idKey) !== undefined; // upsert 前先判（区分 INSERT/UPDATE）
-    const params = [idKey, keyValue, dateIso, rawJson, importedAt];
+    const params = sameKeyColumn
+      ? [idKey, dateIso, rawJson, importedAt]
+      : [idKey, keyValue, dateIso, rawJson, importedAt];
     if (sourceIdentity) {
       params.push(
         sourceIdentity.datasetId,
@@ -1159,62 +1167,183 @@ function readGatewayBillRowsByChannels(db, channels) {
   return out;
 }
 
+// 网关池渠道集合：与 readGatewayBillRowsByChannels 同口径（String().trim()，去重）。
+function normalizeGatewayChannelSet(channels) {
+  return Array.from(new Set((channels || []).map((c) => (c == null ? '' : String(c).trim()))));
+}
+
+// exactRows 的渠道条件（大小写敏感；含空值时只认缺字段 / NULL / 真正空串）。readGatewayBillRowPoolsByChannels 的
+//   exactRows 与池外诊断候选共用，保证「池内」与「池外」严格互补。
+// v3.2.22：非空渠道以单个 JSON 数组参数绑定（`IN (SELECT value FROM json_each(?))`，与逐个占位符同一比较口径），
+//   条件在同一条 SQL 中出现多次时参数个数不随渠道数增长，不会超过 SQLite 变量上限。
+function buildGatewayExactChannelCondition(set) {
+  const nonBlank = set.filter((c) => c !== '');
+  const conds = [];
+  const params = [];
+  if (nonBlank.length) {
+    conds.push(`json_extract(raw_json, '$.Channel') IN (SELECT value FROM json_each(?))`);
+    params.push(JSON.stringify(nonBlank));
+  }
+  if (set.includes('')) {
+    conds.push(`json_extract(raw_json, '$.Channel') IS NULL`);
+    conds.push(`json_extract(raw_json, '$.Channel') = ''`);
+  }
+  return { sql: conds.join(' OR '), params };
+}
+
+// JavaScript String.prototype.trim 认可的全部空白字符（均在 BMP 内），供 SQLite TRIM(X, Y) 与引擎 normalizeCellValue 同口径预筛。
+const JS_TRIM_WHITESPACE = (() => {
+  let chars = '';
+  for (let code = 0; code <= 0xffff; code += 1) {
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    const ch = String.fromCharCode(code);
+    if (ch.trim() === '') chars += ch;
+  }
+  return chars;
+})();
+
+// v3.2.22：读池时一并收集的池外诊断候选（R5s2 账户映射缺渠道告警专用）。无效或为空时返回 null（不收集）。
+function normalizeOutOfPoolDiagnostic(diagnostic) {
+  if (!diagnostic || typeof diagnostic !== 'object' || typeof diagnostic.collect !== 'function') return null;
+  const uniqueTexts = (values) => Array.from(new Set((Array.isArray(values) ? values : [])
+    .filter((value) => value !== null && value !== undefined)
+    .map((value) => String(value))));
+  const tradeTypes = uniqueTexts(diagnostic.tradeTypes).map((t) => t.trim()).filter((t) => t !== '');
+  const accounts = uniqueTexts(diagnostic.accounts);
+  if (tradeTypes.length === 0 || accounts.length === 0) return null;
+  return { tradeTypes, accounts, collect: diagnostic.collect };
+}
+
 // v3.0.23：一次查询生成银行对账运行所需的两个网关候选池。
 //   exactRows：完整保留 readGatewayBillRowsByChannels 的大小写敏感语义，供 R1/R3.5/R4/R5 使用。
 //   c3Rows：仅供 C3 候选预筛；两侧 Channel trim 后按 SQLite NOCASE 做英文大小写不敏感精确匹配。
 // 相同行只 JSON.parse 一次，两个数组共享对象引用，避免百万行表重复查询、解析或深拷。
-function readGatewayBillRowPoolsByChannels(db, channels) {
+// v3.2.22：options.outOfPoolDiagnostic = { tradeTypes, accounts, collect } 时，同一次扫描另把 exactRows 的补集中
+//   TradeType（JS trim 同口径）属白名单、merchantid 可能等于 accounts 之一的行逐行交 collect(parsed, id)（R5s2 账户映射
+//   缺渠道告警专用，只读、不并入任何可写池）；仓储不累积这些行，由调用方自行紧凑暂存，返回值仍只有两个池。
+//   SQL 端账号预筛是 JS 判断的超集：merchantid 为文本时按 JS trim 比对；非文本值，或整行含 JSON 转义（\u，SQLite
+//   对含 NUL 的文本比较不可靠）时一律交 collect 判断。只有 JSON.parse 失败的行跳过；collect 抛错向上传，不当坏行吞掉。
+function readGatewayBillRowPoolsByChannels(db, channels, options = {}) {
+  const diagnostic = normalizeOutOfPoolDiagnostic(options && options.outOfPoolDiagnostic);
+  const emptyPools = () => ({ exactRows: [], c3Rows: [] });
   const def = getDef('gateway-bill');
-  if (!def.supported) return { exactRows: [], c3Rows: [] };
+  if (!def.supported) return emptyPools();
 
-  const set = Array.from(new Set((channels || []).map((c) => (c == null ? '' : String(c).trim()))));
-  if (set.length === 0) return { exactRows: [], c3Rows: [] };
+  const set = normalizeGatewayChannelSet(channels);
+  if (set.length === 0) return emptyPools();
 
   const hasBlank = set.includes('');
   const nonBlank = set.filter((c) => c !== '');
-  const exactConds = [];
-  const exactParams = [];
+  // exactRows 保留旧口径：只认缺字段/NULL 和真正空串；不把网关空白字符串扩进其它轮次。
+  const exact = buildGatewayExactChannelCondition(set);
   const c3Conds = [];
   const c3Params = [];
 
   if (nonBlank.length) {
-    const placeholders = nonBlank.map(() => '?').join(',');
-    exactConds.push(`json_extract(raw_json, '$.Channel') IN (${placeholders})`);
-    exactParams.push(...nonBlank);
-    c3Conds.push(`TRIM(json_extract(raw_json, '$.Channel')) COLLATE NOCASE IN (${placeholders})`);
-    c3Params.push(...nonBlank);
+    // 与 exactRows 同为单个 JSON 数组参数；左侧显式 COLLATE NOCASE 决定 IN 子查询的比较规则（与逐个占位符一致）。
+    c3Conds.push(`TRIM(json_extract(raw_json, '$.Channel')) COLLATE NOCASE IN (SELECT value FROM json_each(?))`);
+    c3Params.push(JSON.stringify(nonBlank));
   }
   if (hasBlank) {
-    // exactRows 保留旧口径：只认缺字段/NULL 和真正空串；不把网关空白字符串扩进其它轮次。
-    exactConds.push(`json_extract(raw_json, '$.Channel') IS NULL`);
-    exactConds.push(`json_extract(raw_json, '$.Channel') = ''`);
     // C3 两侧 trim：网关空白字符串也属于空 Channel 候选。
     c3Conds.push(`json_extract(raw_json, '$.Channel') IS NULL`);
     c3Conds.push(`TRIM(json_extract(raw_json, '$.Channel')) = ''`);
   }
+  const c3Sql = c3Conds.join(' OR ');
 
-  const rows = db.prepare(`
+  let sql;
+  let params;
+  if (!diagnostic) {
+    sql = `
     SELECT raw_json,
-           CASE WHEN (${exactConds.join(' OR ')}) THEN 1 ELSE 0 END AS exact_match
+           CASE WHEN (${exact.sql}) THEN 1 ELSE 0 END AS exact_match,
+           1 AS c3_match,
+           0 AS diagnostic_match
       FROM ${def.table}
      WHERE json_valid(raw_json)
-       AND (${c3Conds.join(' OR ')})
+       AND (${c3Sql})
      ORDER BY id ASC
-  `).all(...exactParams, ...c3Params);
+  `;
+    params = [...exact.params, ...c3Params];
+  } else {
+    const diagnosticSql = `NOT COALESCE((${exact.sql}), 0)
+       AND TRIM(CAST(json_extract(raw_json, '$.TradeType') AS TEXT), ?) IN (${diagnostic.tradeTypes.map(() => '?').join(',')})
+       AND (COALESCE(json_type(raw_json, '$.merchantid'), 'null') NOT IN ('text', 'null')
+            OR instr(raw_json, ?) > 0
+            OR TRIM(json_extract(raw_json, '$.merchantid'), ?) IN (SELECT value FROM json_each(?)))`;
+    const diagnosticParams = [
+      ...exact.params,
+      JS_TRIM_WHITESPACE,
+      ...diagnostic.tradeTypes,
+      '\\u',
+      JS_TRIM_WHITESPACE,
+      JSON.stringify(diagnostic.accounts)
+    ];
+    sql = `
+    SELECT id,
+           raw_json,
+           CASE WHEN (${exact.sql}) THEN 1 ELSE 0 END AS exact_match,
+           CASE WHEN (${c3Sql}) THEN 1 ELSE 0 END AS c3_match,
+           CASE WHEN (${diagnosticSql}) THEN 1 ELSE 0 END AS diagnostic_match
+      FROM ${def.table}
+     WHERE json_valid(raw_json)
+       AND ((${c3Sql}) OR (${diagnosticSql}))
+     ORDER BY id ASC
+  `;
+    params = [...exact.params, ...c3Params, ...diagnosticParams, ...c3Params, ...diagnosticParams];
+  }
 
   const exactRows = [];
   const c3Rows = [];
-  for (const row of rows) {
+  for (const row of db.prepare(sql).iterate(...params)) {
+    let parsed;
     try {
-      const parsed = JSON.parse(row.raw_json);
-      if (!parsed || typeof parsed !== 'object') continue;
+      parsed = JSON.parse(row.raw_json);
+    } catch (_e) {
+      continue; /* 损坏行跳过，不抛错（与现有网关读取容错一致） */
+    }
+    if (!parsed || typeof parsed !== 'object') continue;
+    if (row.c3_match === 1) {
       c3Rows.push(parsed);
       if (row.exact_match === 1) exactRows.push(parsed);
-    } catch (_e) {
-      /* 损坏行跳过，不抛错（与现有网关读取容错一致） */
     }
+    if (row.diagnostic_match === 1) diagnostic.collect(parsed, row.id);
   }
   return { exactRows, c3Rows };
+}
+
+// v3.2.22：按 id 回读网关行（R5s2 缺渠道诊断：读池时只暂存候选 id 与键摘要，R5 运行时回读摘要对得上的行再精确裁决）。
+//   ids 须为安全整数（否则抛 TypeError）；按 id 升序、每块至多 GATEWAY_BILL_ID_CHUNK 个经 json_each 传参回读，逐行回调
+//   onRow(parsed, id)，仓储不累积。不存在的 id 无回调；JSON.parse 失败的行跳过（与读池一致）；onRow 抛错向上传。
+const GATEWAY_BILL_ID_CHUNK = 500;
+function readGatewayBillRowsByIds(db, ids, onRow) {
+  if (typeof onRow !== 'function') throw new TypeError('readGatewayBillRowsByIds 需要 onRow 回调');
+  const list = Array.from(ids || []);
+  for (const id of list) {
+    if (!Number.isSafeInteger(id)) throw new TypeError(`网关行 id 无效：${String(id)}`);
+  }
+  const def = getDef('gateway-bill');
+  if (!def.supported || list.length === 0) return;
+  const sortedIds = Float64Array.from(list).sort();
+  const stmt = db.prepare(`
+    SELECT id, raw_json
+      FROM ${def.table}
+     WHERE id IN (SELECT value FROM json_each(?))
+     ORDER BY id ASC
+  `);
+  for (let start = 0; start < sortedIds.length; start += GATEWAY_BILL_ID_CHUNK) {
+    const chunk = Array.from(sortedIds.subarray(start, start + GATEWAY_BILL_ID_CHUNK));
+    for (const row of stmt.iterate(JSON.stringify(chunk))) {
+      let parsed;
+      try {
+        parsed = JSON.parse(row.raw_json);
+      } catch (_e) {
+        continue; /* 损坏行跳过，与读池一致 */
+      }
+      if (!parsed || typeof parsed !== 'object') continue;
+      onRow(parsed, row.id);
+    }
+  }
 }
 
 // v3.0.0 块 B / PR-3：轻量探测某链接表是否有任意数据行（EXISTS，命中首行即停，不物化整表）。
@@ -1831,6 +1960,7 @@ module.exports = {
   readGatewayBillRowsByChannels,
   // v3.0.23：同一次 SQL 生成旧精确池和 C3 trim+NOCASE 池，同行共享对象引用。
   readGatewayBillRowPoolsByChannels,
+  readGatewayBillRowsByIds,
   hasLinkedTableRows,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表专用仓储（6 列 INSERT / 整批幂等重写）
   replaceAdmBankDeposit,

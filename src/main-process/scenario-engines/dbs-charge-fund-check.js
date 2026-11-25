@@ -70,6 +70,8 @@
 //     防跨渠道误伤；用户决策偏离原文字面）或 'all'（忠于原文全量银行单，经 config 切回）。
 
 const {
+  createEscapeSameValueWarning,
+  isEscapeAmbiguousSameValue,
   makeModificationCollector,
   makeWarningCollector,
   normalizeCellValue,
@@ -360,6 +362,15 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
     if (newReconId !== '' && oldReconId !== newReconId) {
       chosen[BANK_RECON_ID_FIELD] = newReconId; // 🔴 原地改写银行行 ReconciliationId
       modCollector.record(chosen[BANK_ROW_ID_FIELD], BANK_RECON_ID_FIELD, oldReconId, newReconId);
+    } else if (isEscapeAmbiguousSameValue(oldReconId, newReconId)) {
+      // v3.2.22（🔴 资金红线·可观测）：调拨对账单 ReconID 含 `_xHHHH_` 写法、与银行当前值文字相同，无法确认是否同一个值。
+      warningCollector.push(createEscapeSameValueWarning({
+        rowId: chosen[BANK_ROW_ID_FIELD],
+        engine: 'dbs-charge-fund-check-step1',
+        column: BANK_RECON_ID_FIELD,
+        value: newReconId,
+        source: 'DBS-Charge：调拨对账单 ReconID'
+      }));
     }
 
     // 🔴 命中行 FundType 标为该调拨行 fund_type（FundTransfer-in 或 -out，按调拨方向；经常量取，绝不手敲）。

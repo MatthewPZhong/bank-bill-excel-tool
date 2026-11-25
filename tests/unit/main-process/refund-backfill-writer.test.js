@@ -444,3 +444,22 @@ test('⑩ 空 backfill + 空 unmatched → 两 sheet 仍输出表头（sheet2 �
   const s2Headers = UNMATCHED_HEADERS.map((_, i) => s2.getRow(1).getCell(i + 1).value);
   assert.deepStrictEqual(s2Headers, UNMATCHED_HEADERS.slice(), '空 unmatched → sheet2 仍输出 13 列表头');
 });
+
+// ========================================================================
+// v3.2.22（🔴 资金红线）：与主输出同口径按已解码文本编码
+// ========================================================================
+test('⑩ 按已解码文本编码：两个 sheet 的字面 `_xHHHH_`、含 NUL 的账号读回原值', async () => {
+  const XLSX = require('xlsx');
+  const savePath = path.join(tmpDir, 'decoded.xlsx');
+  const backfill = { ...makeBackfillRow(1), ReconciliationId: 'RID_x0041_', MerchantId: 'A\u0000B', '流水号': 'RF_x0041_' };
+  const unmatched = { ...makeUnmatchedBankRow(2, RESULT_ERROR, 'x'), ReconciliationId: 'RID_x0042_' };
+  await writeRefundBackfillOutput([backfill], [unmatched], savePath);
+
+  const book = XLSX.readFile(savePath);
+  const sheet1 = XLSX.utils.sheet_to_json(book.Sheets[BACKFILL_SHEET_NAME], { header: 1, raw: true });
+  assert.strictEqual(sheet1[1][REFUND_TEMPLATE_HEADERS.indexOf('ReconciliationId')], 'RID_x0041_', '🔴 不读回成 RIDA');
+  assert.strictEqual(sheet1[1][REFUND_TEMPLATE_HEADERS.indexOf('MerchantId')], 'A\u0000B');
+  assert.strictEqual(sheet1[1][REFUND_TEMPLATE_HEADERS.indexOf('流水号')], 'RF_x0041_');
+  const sheet2 = XLSX.utils.sheet_to_json(book.Sheets[UNMATCHED_SHEET_NAME], { header: 1, raw: true });
+  assert.strictEqual(sheet2[1][UNMATCHED_HEADERS.indexOf('ReconciliationId')], 'RID_x0042_');
+});

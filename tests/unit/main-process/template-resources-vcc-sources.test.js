@@ -10,6 +10,7 @@ const test = require('node:test');
 const XLSX = require('xlsx');
 
 const { createTemplateResourceService } = require('../../../src/main-process/template-resources/service');
+const { runTemplateInspection } = require('../../../src/main-process/template-resources/inspection-runner');
 const { resolveVccSourceStructures } = require('../../../src/main-process/vcc-financial-op-source-structures');
 const {
   PENDING_V1_HEADERS, REQUIRED_HEADERS, SOURCE_TYPES: T, SYSTEM_OP_HEADERS, getSourceDefinition
@@ -102,6 +103,67 @@ test('必用列缺少、与旧 48 列 Pending 模板相同、表头含布尔值�
   // 系统财务OP 的几种读法（预检、显示值、审阅原值）都读作 true，与模板一致，不拦。
   const systemBoolean = await prepare(env.service, 'vcc-system-op', env.write('系统-布尔表头.xlsx', [...SYSTEM_OP_HEADERS, true]));
   assert.equal(check(systemBoolean, '表头读取'), undefined);
+});
+
+// v3.2.22 B60：VCC 导入交接不接受含控制字符的表头，模板预检按同一规则拒绝，不再出现「启用后导入必然失败」
+test('表头含换行、制表符等控制字符时预检不通过，不能启用', async (t) => {
+  const env = setup(t);
+  for (const [name, header] of [['LF', '备注\n说明'], ['CRLF', '备注\r\n说明'], ['Tab', '备注\t说明'], ['DEL', '备注\u007f说明']]) {
+    const prepared = await prepare(env.service, 'vcc-recharge-refund', env.write(`充值-${name}.xlsx`, [...RECHARGE, header]));
+    assert.equal(prepared.verdict, 'fail', name);
+    assert.equal(check(prepared, '表头').status, 'fail', name);
+    assert.equal(check(prepared, '表头').detail, `第 ${RECHARGE.length + 1} 列表头含换行、制表符等控制字符，请改为单行文本`, name);
+    assert.equal((await env.service.commitImport({ importToken: prepared.importToken, enable: true })).status, 'failed', name);
+  }
+  assert.equal(await resolveVccSourceStructures(env.service), null, '未启用任何用户结构');
+});
+
+// v3.2.22 B60：v3.2.22 之前已启用的含控制字符表头版本：升级后的兼容复核不判为不可用（不阻断其他来源的识别，
+//   该来源导入时仍按交接规则失败，与升级前相同）；恢复默认后不能再启用它。
+//   用不传 importingNewVersion 的检查模拟 v3.2.21 导入，再用同一存储新建服务模拟升级。
+test('升级前已启用的含换行表头版本不阻断其他来源，恢复默认后不能再启用', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'template-vcc-legacy-control-'));
+  const store = createTemplateResourceStore();
+  const userData = path.join(root, 'userData');
+  t.after(() => {
+    try { store.close(); } catch (_error) { /* 已关闭 */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const legacyRunner = (payload) => runTemplateInspection({ ...payload, context: { ...payload.context, importingNewVersion: false } });
+  const legacy = createTemplateResourceService({ appRoot: ROOT, appVersion: '3.2.21', userDataRoot: userData, store, runInspection: legacyRunner });
+  const headers = [...RECHARGE, '备注\n说明'];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([headers]), 'Sheet1');
+  const filePath = path.join(root, '充值-旧版换行表头.xlsx');
+  XLSX.writeFile(workbook, filePath);
+  const prepared = await prepare(legacy, 'vcc-recharge-refund', filePath);
+  assert.notEqual(prepared.verdict, 'fail', '模拟升级前：预检不检查控制字符');
+  assert.equal((await legacy.commitImport({ importToken: prepared.importToken, enable: true })).status, 'success');
+
+  const upgraded = createTemplateResourceService({ appRoot: ROOT, appVersion: '9.9.9', userDataRoot: userData, store });
+  assert.deepEqual(await resolveVccSourceStructures(upgraded), { [T.RECHARGE]: { headers, versionLabel: 'V2' } },
+    '兼容复核不因控制字符判为不可用，其他来源照常按内置结构识别');
+  assert.equal((await upgraded.setCurrentVersion({ resourceId: 'vcc-recharge-refund', versionId: 'v1' })).status, 'success');
+  const reenabled = await upgraded.setCurrentVersion({ resourceId: 'vcc-recharge-refund', versionId: 'v2' });
+  assert.deepEqual(reenabled, { status: 'failed', message: 'V2 不能启用：表头含换行、制表符等控制字符，请改为单行文本' });
+  assert.equal(await resolveVccSourceStructures(upgraded), null, '恢复默认后仍为内置结构');
+  // 重新选择同一文件：提示内容相同，但不引导去启用这个会被拒绝的版本
+  const again = await prepare(upgraded, 'vcc-recharge-refund', filePath);
+  assert.deepEqual(again.checks.filter((check) => check.group === 'file' && check.status === 'fail').map((check) => check.detail), [
+    `第 ${headers.length} 列表头含换行、制表符等控制字符，请改为单行文本`,
+    '与 V2 内容相同；该版本表头含换行、制表符等控制字符，请改为单行文本后重新导入'
+  ]);
+
+  // 早期保存的版本只有 comparableValues（没有逐表 headers）时，运行期按 comparableValues 取表头，启用检查同一口径
+  const row = store.db.prepare("SELECT structure_json AS json FROM template_resource_versions WHERE resource_id = 'vcc-recharge-refund' AND version_id = 'v2'").get();
+  const structure = JSON.parse(row.json);
+  assert.deepEqual(structure.comparableValues, headers, '前置：快照的 comparableValues 即表头');
+  delete structure.sheets;
+  store.db.prepare("UPDATE template_resource_versions SET structure_json = ? WHERE resource_id = 'vcc-recharge-refund' AND version_id = 'v2'")
+    .run(JSON.stringify(structure));
+  const comparableOnly = createTemplateResourceService({ appRoot: ROOT, appVersion: '9.9.9', userDataRoot: userData, store });
+  assert.deepEqual(await comparableOnly.setCurrentVersion({ resourceId: 'vcc-recharge-refund', versionId: 'v2' }),
+    { status: 'failed', message: 'V2 不能启用：表头含换行、制表符等控制字符，请改为单行文本' }, '只有 comparableValues 的快照同样拒绝');
 });
 
 // v3.2.15 B42：恢复默认同样核对同组冲突。按审查发现的顺序操作：充值清退启用末尾加列的版本 →

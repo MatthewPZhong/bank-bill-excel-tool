@@ -9,11 +9,24 @@ const assert = require('node:assert/strict');
 const { isMemoryLimitError } = require('../../../../src/backend/file-service/readers');
 
 test.describe('isMemoryLimitError（大文件全量读触顶内存类错误判定）', () => {
-  test('RangeError → true（V8 ArrayBuffer / string / array 上限均抛 RangeError）', () => {
+  test('容量类 RangeError → true（V8 ArrayBuffer / string / array 上限）', () => {
     assert.equal(isMemoryLimitError(new RangeError('Array buffer allocation failed')), true);
     assert.equal(isMemoryLimitError(new RangeError('Invalid string length')), true);
     assert.equal(isMemoryLimitError(new RangeError('Invalid array length')), true);
-    assert.equal(isMemoryLimitError(new RangeError('任意 range 错误')), true, 'RangeError 子类一律视为容量类');
+  });
+
+  // v3.2.22 B19：小型损坏文件解析时抛出的非容量类 RangeError 不再误报「文件过大」
+  test('非容量类 RangeError → false', () => {
+    assert.equal(isMemoryLimitError(new RangeError('任意 range 错误')), false);
+    assert.equal(isMemoryLimitError(new RangeError('Offset is outside the bounds of the DataView')), false);
+    assert.equal(isMemoryLimitError(new RangeError('Maximum call stack size exceeded')), false);
+    assert.equal(isMemoryLimitError(new RangeError('Invalid typed array length: -1')), false);
+  });
+
+  test('Node 容量类错误码 → true（文件超过 2 GiB、字符串 / Buffer 超出上限）', () => {
+    for (const code of ['ERR_FS_FILE_TOO_LARGE', 'ERR_STRING_TOO_LONG', 'ERR_BUFFER_TOO_LARGE']) {
+      assert.equal(isMemoryLimitError(Object.assign(new RangeError('size limit'), { code })), true, code);
+    }
   });
 
   test('message 命中 OOM 关键字 → true（即便不是 RangeError 实例）', () => {

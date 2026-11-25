@@ -25,6 +25,13 @@ function cloneRowsWithMetadata(rows = []) {
     clonedRows.headerBreaks = rows.headerBreaks.slice();
   }
 
+  // v3.2.22：原表数据行数（file-service buildMappedRows，不可枚举）
+  if (Number.isInteger(rows.sourceDataRowCount)) {
+    Object.defineProperty(clonedRows, 'sourceDataRowCount', {
+      value: rows.sourceDataRowCount, enumerable: false, writable: true, configurable: true
+    });
+  }
+
   if (rows.amountSplitMatchStats && typeof rows.amountSplitMatchStats === 'object') {
     clonedRows.amountSplitMatchStats = { ...rows.amountSplitMatchStats };
   }
@@ -37,6 +44,20 @@ function cloneRowsWithMetadata(rows = []) {
   // v3.2.19：原始账单预处理统计（过滤后没有账单行时提示）
   if (rows.preprocessRowFilterStats && typeof rows.preprocessRowFilterStats === 'object') {
     clonedRows.preprocessRowFilterStats = { ...rows.preprocessRowFilterStats };
+  }
+
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」统计与补丁（导出明细时写出回填后的原始账单）
+  if (rows.crossSheetBackfillStats && typeof rows.crossSheetBackfillStats === 'object') {
+    clonedRows.crossSheetBackfillStats = { ...rows.crossSheetBackfillStats };
+  }
+  if (Array.isArray(rows.crossSheetBackfillPatches)) {
+    clonedRows.crossSheetBackfillPatches = rows.crossSheetBackfillPatches.map((patch) => ({
+      ...patch,
+      cells: Array.isArray(patch && patch.cells) ? patch.cells.map((cell) => ({ ...cell })) : []
+    }));
+  }
+  if (rows.crossSheetBackfillSource && typeof rows.crossSheetBackfillSource === 'object') {
+    clonedRows.crossSheetBackfillSource = { ...rows.crossSheetBackfillSource };
   }
 
   // v3.2.19：重复账单过滤删除的源行号（确认去重后）

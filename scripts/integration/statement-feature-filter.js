@@ -12,6 +12,7 @@
 //   ⑥ 拆分/合并「不复用」映射：拆分映射所选特征值在展开行生效；拆分映射引用缺失时保存主映射被拒；
 //      主映射残留该值但不生效时不要求选特征值、不记未命中
 //   ⑦ BillDate 取该值时，所选特征值源列里的“合计”标签仍按合计行跳过，合计金额不作为交易导出（资金红线回归）
+//   ⑧ v3.2.22 新增分隔符 - _ $：保存 → 读回保留键名 → 生成按所选分隔符取值 → 回读导出明细
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-feature-filter.js
@@ -46,6 +47,9 @@ const {
   normalizeRowFilterRules,
   validateRowFilterRules,
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule,
   validateFeeAmountFormula,
   validateBillSplitRowFilterRules,
   normalizeFeatureFilterList,
@@ -125,8 +129,8 @@ const CONSTANTS = loadMainConstants([
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
   'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'DUPLICATE_ROW_FILTER_MAPPING_FIELD',
-  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
-  'SUPPORTED_BUNDLE_VERSION', 'LOGIC_VALUE_FEATURE_BUNDLE_VERSION', 'FEE_FIELD_MAPPING_BUNDLE_VERSION', 'LOGIC_VALUE_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
+  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'CROSS_SHEET_BACKFILL_MAPPING_FIELD', 'CROSS_SHEET_BACKFILL_ENABLED_OPTION', 'PREPROCESS_FIELDS',
+  'SUPPORTED_BUNDLE_VERSION', 'LOGIC_VALUE_FEATURE_BUNDLE_VERSION', 'FEE_FIELD_MAPPING_BUNDLE_VERSION', 'CROSS_SHEET_BACKFILL_BUNDLE_VERSION', 'LOGIC_VALUE_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
 ]);
 const FEATURE = CONSTANTS.FEATURE_FILTER_MAPPING_FIELD;
 
@@ -164,7 +168,7 @@ function closeDatabase(database) {
 
 function createMain(database, constantOverrides = {}) {
   return loadMainFunctions([
-    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'validateFeatureFiltersPayload',
     'collectFeatureFilterRefs',
     'buildExportTargetFields',
@@ -179,7 +183,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeExportMappingRows',
     'buildMappedFieldLookup',
     'normalizeLookupMappingValue',
-    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'buildCrossSheetBackfillRule', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'resolveStatementFeatureFilters',
     'buildBillSplitMergeConfig',
     'buildAmountSplitByFieldConfig',
@@ -191,7 +195,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeBundleBillSplitMeta',
     'readTemplateBundleFile',
     'upgradeLegacyBundleFeatureFilterRefs',
-    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     // v3.2.16 同轮合入的「原始账单仅有币种无账户号」：校验、生成配置与模板包版本会引用
     'validateCurrencyBigAccountConfiguration',
     'buildCurrencyBigAccountMappingConfig',
@@ -213,6 +217,9 @@ function createMain(database, constantOverrides = {}) {
     normalizeRowFilterRules,
     validateRowFilterRules,
     PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+    hasCrossSheetBackfillSettings,
+    normalizeCrossSheetBackfillRule,
+    validateCrossSheetBackfillRule,
     validateFeeAmountFormula,
     validateBillSplitRowFilterRules,
     FileValidationError,
@@ -668,6 +675,61 @@ function verifySummaryRowWithFeatureBillDate(dir, { database, main }) {
   );
 }
 
+// ⑧ v3.2.22 新增分隔符：保存 → 读回 → 生成 → 回读导出
+function verifyNewSeparators(dir, { database, main }) {
+  const template = database.upsertTemplate({ name: 'BANKF-分隔符', sourceFileName: 'f.xlsx', headers: HEADERS });
+  saveFeatureFilters(main, database, template.id, [
+    { name: '流水号', sourceField: '附言', separator: 'dollar', length: '10', letterPrefixCount: '2', digitsOnly: true, sample: 'FT24123456' },
+    { name: '订单号', sourceField: '附言', separator: 'hyphen', length: '6', digitsOnly: true, sample: '123456' },
+    { name: '批次号', sourceField: '附言', separator: 'underscore', letterPrefixCount: '1', length: '4' }
+  ]);
+  assertEq(database.getTemplate(template.id).featureFilters.map((item) => [item.id, item.name, item.separator]),
+    [['1', '流水号', 'dollar'], ['2', '订单号', 'hyphen'], ['3', '批次号', 'underscore']], '⑧ 新分隔符保存后读回保留键名');
+  const validated = main.validateTemplateConfiguration({
+    template,
+    mappings: mappingsFor({ Remark: { feature: '1' }, Reference: { feature: '2' } }),
+    enumValues: ENUM_VALUES,
+    featureFilters: database.getTemplate(template.id).featureFilters
+  });
+  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, {});
+  const sourcePath = path.join(dir, 'source-f.xlsx');
+  writeSource(sourcePath, [
+    ['2026-11-01', 'PAY$FT24123456$X-123456-Y', 'USD', '100', '', 'ACC1'],
+    ['2026-11-02', 'FT24999999-654321', 'USD', '', '30', 'ACC1']
+  ]);
+  const detailRows = generate(main, database, template.id, sourcePath);
+  assertEq(pickColumns(detailRows, ['Remark', 'Reference']), [['FT24123456', '123456'], ['', '654321']],
+    '⑧ 按 $ / - 拆段取值；未出现 $ 时整格不满足条件留空');
+  const outputPath = path.join(dir, 'detail-f.xlsx');
+  writeWorkbookRows({ rows: buildDetailExportRows(detailRows), outputFilePath: outputPath });
+  const exported = readSheet(outputPath);
+  assertEq(
+    exported.rows.map((row) => [row[exported.header.indexOf('Remark')], row[exported.header.indexOf('Reference')]]),
+    [['FT24123456', '123456'], ['', '654321']],
+    '⑧ 回读导出明细'
+  );
+  // 下划线：Remark 改选「批次号」（id 3）后按 _ 拆段取值并导出
+  const validatedUnderscore = main.validateTemplateConfiguration({
+    template,
+    mappings: mappingsFor({ Remark: { feature: '3' }, Reference: { feature: '2' } }),
+    enumValues: ENUM_VALUES,
+    featureFilters: database.getTemplate(template.id).featureFilters
+  });
+  database.saveMappings(template.id, validatedUnderscore.mappings, [], [], undefined, null, {});
+  const underscorePath = path.join(dir, 'source-f-underscore.xlsx');
+  writeSource(underscorePath, [['2026-11-03', 'XX_A123_YY-246810', 'USD', '50', '', 'ACC1']]);
+  const underscoreRows = generate(main, database, template.id, underscorePath);
+  assertEq(pickColumns(underscoreRows, ['Remark', 'Reference']), [['A123', '246810']], '⑧ 按 _ 拆段取值');
+  const underscoreOutput = path.join(dir, 'detail-f-underscore.xlsx');
+  writeWorkbookRows({ rows: buildDetailExportRows(underscoreRows), outputFilePath: underscoreOutput });
+  const underscoreExported = readSheet(underscoreOutput);
+  assertEq(
+    underscoreExported.rows.map((row) => [row[underscoreExported.header.indexOf('Remark')], row[underscoreExported.header.indexOf('Reference')]]),
+    [['A123', '246810']],
+    '⑧ 回读导出明细（_）'
+  );
+}
+
 async function run() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-feature-filter-'));
   try {
@@ -678,6 +740,7 @@ async function run() {
     verifyBundleRoundTrip(dir, context);
     verifyBillSplitNotReuse(dir, context);
     verifySummaryRowWithFeatureBillDate(dir, context);
+    verifyNewSeparators(dir, context);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }

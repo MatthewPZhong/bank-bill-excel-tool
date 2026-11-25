@@ -1,5 +1,24 @@
 # 版本功能变更清单
 
+## v3.2.22（2026-11-24）
+
+本轮包含 9 个模块分支：`fix/backlog-low-risk-batch`、`feat/feature-value-settings`、`feat/fund-recon-gateway-account-mapping`、`fix/statement-xlsx-io-boundary`（只纳入已提交部分 `4bfe28a0`，该分支工作区的未提交改动不在本版）、`feat/position-single-pass-import`、`fix/toolbox-publication-freshness`、`fix/statement-multi-template-rollback`、`feat/cross-sheet-backfill`（v3.2.21 顺延，B129）、`feat/balance-eod-file-import`，另同步 `origin/main`（v3.2.21 发布记录）。各分支自行登记的 backlog 编号合入时按顺序改编为 B134–B163，见 `changes/v3.2.22/release.md`。
+
+- **导入余额文件改用银行原始日终余额信息**（[spec](../changes/v3.2.22/feat/balance-eod-file-import/spec.md) D1–D10）：`balance-seed-import.js` 必需列改为账单日期、银行名、开户地、币种、银行账户号、期末余额，可选余额来源、余额获取方式；按账号 + 币种 + 银行名 + 开户地（`splitTemplateName(prompt.templateName)`，去首尾空格、不区分大小写）匹配，同日按分去重后有多个余额时 `source: 'choice'`，交给「选择余额」弹窗。`file:import-balance-seed-file` 接受 `seedMismatch` 核对提示（核对账号在前，再加本分组缺种子的账号）。只接受 xlsx，读取前按原始字节核对结构白名单（`checkXlsxStructureWhitelist`，属性名口径对齐 SheetJS 0.18.5 `parsexmltag`，B163）；身份列带生效的数字格式或条件格式时整个文件不导入；文本日期只认四位年份在前与有效 YYYYMMDD。随包 `assets/银行原始日终余额信息.xlsx`（只有表头）登记为输入原表结构参考。
+- **去掉账号顺序固定**（同上 D5）：删除 `big-account-mode:load/save`、`big-account-order:load/save` IPC 与 Preload 接口、记住顺序持久化与自动套用、「记住顺序不匹配」弹窗、`big-account-mode-store.js` / `big-account-order-store.js`；选择结果按不固定口径校验与执行。原表只有表头的文件按读取器的 `rowsBelowHeader`（表头以下非空行数，含 Excel 错误值行与声明范围以外的行）判断，不占分配位置；整批只有表头时 `createNoTransactionDataResult` 报「导入文件中没有账号存在交易数据」，预检阶段带 `preservesSession`。模板包导出不再写 `bigAccountMode` / `bigAccountOrderConfig`，导入时忽略。残留文件与休眠 worker 契约见 B158、B159。
+- **跨 Sheet 回填**（[spec](../changes/v3.2.21/feat/cross-sheet-backfill/spec.md) D1–D13）：原始账单预处理新增规则（来源 sheet、待回填行条件、按金额 / 按原值配对、回填字段），一对一配对、只填空单元格，币种自动补本 sheet 唯一的币种；导出明细时另写 `<原文件名>_回填.xlsx`。主映射按工作簿日期系统换算日期序号（D12，B52 的网银部分）；工作簿结构无法确认读取的是哪张表时整份拒绝。模板包 v10（`CROSS_SHEET_BACKFILL_BUNDLE_VERSION`）。
+- **特征值设置入口**（[spec](../changes/v3.2.22/feat/feature-value-settings/spec.md) D1–D6）：「个性化映射设置 → 按字段区分发生额」下方新增「特征值设置」【管理】，映射行与拆分 / 合并映射弹窗去掉行内【特征值管理】；特征值管理默认选中最早的特征值；分隔符新增 `-`、`_`、`$`；「启用」列去竖线。
+- **网关对账单共用账户映射**（[spec](../changes/v3.2.22/feat/fund-recon-gateway-account-mapping/spec.md) R1–R6、D1–D22）：R5s2 网关来源在映射非空时按 `map.get(key) ?? key` 换账号，映射命中行只与同渠道银行行配对（D7），争用告警 `r5-mapped-account-contention`（D8），含 `_xHHHH_` 写法的账号不参与映射（D16）；生产 run 在调拨对账单重派生前只读一次映射；错误报告有界流式写出；界面文案改为「链接表账户号」与【返回】。
+- **XLSX 读写边界**（[spec](../changes/v3.2.22/fix/statement-xlsx-io-boundary/spec.md) D1–D6，关闭 B133、B113、B132）：工作簿 / 关系 / 工作表 XML 含带标签的注释、CDATA 或标签内非常规空白时不还原长数字（`hasUnverifiableXmlMarkup`）；写出边界把字面 `_xHHHH_` 的下划线写成 `_x005F_`，U+FFFE / U+FFFF / 未配对代理项写出前整份拒绝并列出位置；链接表流式读取按 SheetJS 口径还原文本转义，无法确认原值的转义与空字符整批拒绝；大账号键改为结构化键。
+- **平盘单遍导入**（[spec](../changes/v3.2.22/feat/position-single-pass-import/spec.md) / techdoc）：银行对账单与链接原始表导入改为一次解析写入，原始账单登记版本号，对账单只存交互字段；导出只含审计列、交互字段与原始账单版本号、行号；侧库直接换新结构、不迁移（D4）。
+- **工具箱发布前核对**（[spec](../changes/v3.2.22/fix/toolbox-publication-freshness/spec.md) D1–D5，关闭 B57、B58）：合表、单值 / 多文件拆分在确认前冻结目标与源文件，确认后 `assertFilePlanFresh`；发布包装层逐项核对计划输出并交出父目录身份。
+- **多模板写出回滚**（[spec](../changes/v3.2.22/fix/statement-multi-template-rollback/spec.md) D1–D8，关闭 B45）：`statement-output-rollback.js` 记录每个写出路径的原状态，任一组或合并失败时逆序还原明细、余额、汇总与种子，旧会话条目在全部成功后才替换；已完整还原的系统异常按未生效导入返回（`preservesSession`）。
+- **backlog 低风险小修**（[spec](../changes/v3.2.22/fix/backlog-low-risk-batch/spec.md)，关闭 B114、B19、B17、B5、B60）。
+
+合入处理：多个分支同改的 `readers.js` 工作表定位同时保留 B133 的不可核对标记拒绝、跨 Sheet 回填的遮盖解析与表名解码、余额分支按读取库口径核对实际读取的条目；`main.js` 去掉账号顺序固定的自动套用整段（含其中 v3.2.22 B113 的报错判定），没有交易数据统一经 `createNoTransactionDataResult`，带跨 Sheet 回填逐行原因时仍按原方式报错。链接表流式导入合入后按 `fix/statement-xlsx-io-boundary` D4b 还原 `_xHHHH_`，资金对账导出（主输出、命中场景独立报表、Payment 核对页、错误报告、中台加款单剔除与退款回填文件）随之一律按已解码文本编码，写盘前按读回长度校验单格上限（网关账户映射 spec D22），v3.2.22 之前按转义原文落库的旧记录见 B134。
+
+已知限制与顺延：B134–B163（各分支登记；其中 B152 已验收关闭），平盘单遍导入的 Windows 实机验收发布后进行（B147）；网关账户映射、导入余额文件与多模板写出回滚的人工验收已完成（B164–B166 关闭）；目标为 v3.2.22 的既有未做 / 待核验项顺延到 v3.2.23（暂定）。
+
 ## v3.2.21（2026-11-23）
 
 本轮包含 5 个模块分支：`feat/mapping-logic-feature-layout`、`fix/statement-long-number-precision`、`feat/template-date-format`、`feat/channel-mixed-balance-mode`、`feat/bill-split-fee-field-mapping`，另同步 `origin/main`（v3.2.20 发布记录）。`feat/cross-sheet-backfill`「跨 Sheet 回填」顺延（B129）。需求与决策见 `changes/v3.2.21/` 下各 spec，发布记录见 `changes/v3.2.21/release.md`。

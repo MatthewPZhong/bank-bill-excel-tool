@@ -12,7 +12,34 @@ const POSITION_SIDE_DB_BOOTSTRAP_SETTING = 'position_reconciliation_side_db_boot
 const POSITION_RULESET_VERSION = 1;
 
 const AUDIT_HEADERS = Object.freeze(['命中明细', '命中类型', '匹配命中详情']);
-const POSITION_BANK_HEADERS = Object.freeze([...AUDIT_HEADERS, ...BANK_STATEMENT_FIELDS]);
+
+// 平盘只保存、只导出「数据交互用」的银行对账单字段（v3.2.22）：匹配引擎的对账标识 / 账户 / 币种 / 日期 /
+// 资金性质、金额校验的借贷金额与手续费、逻辑账户的两个卡号、差异汇总的地区。其余列只留在存档的原始文件里，
+// 经「原始版本号 + 原始行号」追溯。顺序沿用银行对账单 46 列中的先后。改动这里要同步读取这些字段的
+// matching-engine / decimal / logical-accounts，以及 bank-row-storage 的列映射。
+const POSITION_BANK_INTERACTION_FIELD_SET = new Set([
+  'BizId', 'BillDate', 'Channel', '地区', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount',
+  'ReconciliationId', 'ChannelOrderNo', 'CustomerRef', 'Payee CardNo', 'Drawee CardNo', 'Extra Fee',
+  'FundType'
+]);
+const POSITION_BANK_INTERACTION_FIELDS = Object.freeze(
+  BANK_STATEMENT_FIELDS.filter((field) => POSITION_BANK_INTERACTION_FIELD_SET.has(field))
+);
+const RAW_VERSION_HEADER = '原始版本号';
+const RAW_ROW_NUMBER_HEADER = '原始行号';
+// 银行行在内存中的完整字段：交互字段 + 原始账单版本号 / 行号。
+const POSITION_BANK_ROW_FIELDS = Object.freeze([
+  ...POSITION_BANK_INTERACTION_FIELDS,
+  RAW_VERSION_HEADER,
+  RAW_ROW_NUMBER_HEADER
+]);
+// 结果导出 / 回导、银行数据导出的列：审计列 + 银行行字段。
+const POSITION_BANK_HEADERS = Object.freeze([...AUDIT_HEADERS, ...POSITION_BANK_ROW_FIELDS]);
+// 侧库结构版本。低于当前值的库在启动时丢弃重建（不迁移）。
+// 2：v3.2.22 开发期间的首版单遍导入结构（未随正式版本发布）。
+// 3：来源记录标识改按带类型的字段表示计算（日期单元格与同内容文本不再同标识）；
+//    与 2 的标识算法不能在同一个库里混用，否则同一条含日期的记录重导时查不到旧记录而重复入库。
+const POSITION_SCHEMA_VERSION = 3;
 const BANK_SHEET_NAME = '渠道对账单';
 
 const SOURCE_TYPES = Object.freeze({
@@ -178,7 +205,8 @@ const LINK_HEADERS = Object.freeze({
     'ReconID', 'MerchantId', 'Currency', '业务单号', '账单日期', '交易类型', '渠道名称',
     '原始币种', '原始金额', '银行扣款币种'
   ]),
-  [SOURCE_TYPES.BANK_ACCOUNT]: SOURCE_DEFINITIONS[SOURCE_TYPES.BANK_ACCOUNT].headers
+  // 账户表的链接行即保存下来的原始行：只含程序读取的必用列。
+  [SOURCE_TYPES.BANK_ACCOUNT]: SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.BANK_ACCOUNT]
 });
 
 const BANK_STATUSES = Object.freeze({
@@ -228,7 +256,12 @@ module.exports = {
   POSITION_SIDE_DB_BOOTSTRAP_SETTING,
   POSITION_RULESET_VERSION,
   AUDIT_HEADERS,
+  POSITION_BANK_INTERACTION_FIELDS,
+  POSITION_BANK_ROW_FIELDS,
   POSITION_BANK_HEADERS,
+  POSITION_SCHEMA_VERSION,
+  RAW_VERSION_HEADER,
+  RAW_ROW_NUMBER_HEADER,
   BANK_SHEET_NAME,
   SOURCE_TYPES,
   SOURCE_FILTER_CODES,

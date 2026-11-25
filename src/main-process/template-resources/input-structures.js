@@ -92,9 +92,20 @@ async function reconIdFixRuntimeHeaders(filePath) {
 
 // 银行账单处理链接表：与导入相同的两种读法——单表 .xlsx 走流式头部读取，其余走 SheetJS 全量读取。
 //   两种读法对布尔等表头读出的文本不同，任一与快照不一致都会在预检中被拒。返回第 headerRow 个有内容的行。
+// 物理单表的 .xlsx：链接表导入时走流式读取（与识别器 streamingEligible 同口径）；元数据读不出时识别器回退非流式读取
+async function isStreamingImportXlsx(filePath) {
+  const { readXlsxSheetMetaLite } = require('../../backend/file-service/readers');
+  try {
+    const meta = await readXlsxSheetMetaLite(filePath);
+    return meta.worksheetEntryCount === 1 && meta.sheetNames.length === 1;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function linkedRuntimeHeaders(headerRow) {
   return async (filePath) => {
-    const { readRowsWithMetadata, readMeaningfulRowsHead } = require('../../backend/file-service/readers');
+    const { readRowsWithMetadata, readMeaningfulRowsHead, UNVERIFIABLE_CELL_TEXT } = require('../../backend/file-service/readers');
     const { normalizeCell } = require('../../backend/file-service/common');
     const pick = (rows) => {
       const row = Array.isArray(rows) && Array.isArray(rows[headerRow - 1]) ? rows[headerRow - 1].map((cell) => normalizeCell(cell)) : [];
@@ -104,14 +115,20 @@ function linkedRuntimeHeaders(headerRow) {
     const sheetJs = pick(readRowsWithMetadata(filePath, []).rows);
     let streamed = sheetJs;
     try {
-      streamed = pick((await readMeaningfulRowsHead(filePath, headerRow + 20)).rows);
-    } catch (_error) { /* 非单表 xlsx：导入时不走流式读取 */ }
+      streamed = pick((await readMeaningfulRowsHead(filePath, headerRow + 20, { decodeTextEscapes: true })).rows);
+    } catch (error) {
+      // 非单表 xlsx：导入时不走流式读取。单表 .xlsx 导入时走流式读取，读取失败（如唯一的工作表不在 sheet1.xml）时导入同样
+      //   失败，预检不通过（Codex 第十八轮 P2）
+      if (await isStreamingImportXlsx(filePath)) throw error;
+    }
     if (JSON.stringify(streamed) === JSON.stringify(sheetJs)) return [sheetJs];
     // 两种读法结果不同：导入文件格式不同时读出的列名不同，不一致的列标出两种结果（必与快照不同，预检不通过）。
     const width = Math.max(sheetJs.length, streamed.length);
+    //   流式读取无法确认原值的格显示为去掉标记字符的提示文字
+    const shown = (cell) => (cell === UNVERIFIABLE_CELL_TEXT ? cell.slice(1) : cell);
     return [Array.from({ length: width }, (_, index) => (sheetJs[index] === streamed[index]
       ? sheetJs[index]
-      : `${sheetJs[index] ?? ''} / ${streamed[index] ?? ''}`))];
+      : `${sheetJs[index] ?? ''} / ${shown(streamed[index]) ?? ''}`))];
   };
 }
 
@@ -172,8 +189,21 @@ function vccRuntimeHeaders(sourceType) {
   };
 }
 
-// 银行对账单（导入识别结构）：readBankStatement（银行账单处理、前置资金对账、重复入账匹配）与平盘银行导入（流式）两种读法
-//   读出「渠道对账单」表头行；结果不同时不一致的列标出两种结果，预检必不通过。
+// 同一结构供入金链接表导入：单表 .xlsx 导入时走流式读取（还原 OOXML 文本转义，无法确认原值的格不认作表头，见
+//   linked-table-stream-source），读出首个有内容的行（去首尾空格）；多工作表等导入时不走流式的文件返回 null（Codex 第十七轮 P2）
+async function bankDepositStreamHeaderRow(filePath) {
+  const { readMeaningfulRowsHead } = require('../../backend/file-service/readers');
+  const { normalizeCell } = require('../../backend/file-service/common');
+  if (!(await isStreamingImportXlsx(filePath))) return null;
+  // 导入时按单表走流式读取：读取失败（如唯一的工作表不在 sheet1.xml）时导入同样失败，原样抛出、预检不通过（Codex 第十八轮 P2）
+  const { rows } = await readMeaningfulRowsHead(filePath, 21, { decodeTextEscapes: true });
+  const row = (rows[0] || []).map((cell) => normalizeCell(cell));
+  while (row.length && row[row.length - 1] === '') row.pop();
+  return row;
+}
+
+// 银行对账单（导入识别结构）：readBankStatement（银行账单处理、前置资金对账、重复入账匹配）、平盘银行导入（流式）与入金链接表
+//   导入（单表 .xlsx 流式）三种读法读出「渠道对账单」表头行；结果不同时不一致的列标出各自结果，预检必不通过。
 async function bankStatementRuntimeHeaders(filePath) {
   const { readBankStatementHeaderRow } = require('../bank-statement-io');
   const {
@@ -189,10 +219,18 @@ async function bankStatementRuntimeHeaders(filePath) {
   } finally {
     await workbook.close();
   }
-  if (JSON.stringify(streamed) === JSON.stringify(sheetJs)) return [sheetJs];
-  const width = Math.max(sheetJs.length, streamed.length);
-  return [Array.from({ length: width }, (_, index) => ((sheetJs[index] ?? '') === (streamed[index] ?? '')
-    ? sheetJs[index] ?? '' : `${sheetJs[index] ?? ''} / ${streamed[index] ?? ''}`))];
+  const deposit = await bankDepositStreamHeaderRow(filePath);
+  const { normalizeCell } = require('../../backend/file-service/common');
+  const { UNVERIFIABLE_CELL_TEXT } = require('../../backend/file-service/readers');
+  const width = Math.max(sheetJs.length, streamed.length, deposit ? deposit.length : 0);
+  const consistent = (index) => (sheetJs[index] ?? '') === (streamed[index] ?? '')
+    && (!deposit || normalizeCell(sheetJs[index] ?? '') === (deposit[index] ?? ''));
+  if (Array.from({ length: width }, (_, index) => index).every(consistent)) return [sheetJs];
+  //   流式读取无法确认原值的格显示为去掉标记字符的提示文字
+  const shown = (cell) => (cell === UNVERIFIABLE_CELL_TEXT ? cell.slice(1) : cell);
+  return [Array.from({ length: width }, (_, index) => (consistent(index) ? sheetJs[index] ?? '' : [...new Set([
+    sheetJs[index] ?? '', streamed[index] ?? '', ...(deposit ? [shown(deposit[index] ?? '')] : [])
+  ])].join(' / ')))];
 }
 
 // 流水对账单：与 VCC OP 发生额计算相同的读法（JSZip 流式解析首行）。

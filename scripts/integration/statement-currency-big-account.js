@@ -49,6 +49,9 @@ const {
   normalizeRowFilterRules,
   validateRowFilterRules,
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
@@ -229,6 +232,7 @@ function createEnvironment(dir, label) {
 
   const mainDeps = {
     ...MAIN_CONSTANTS,
+    hasDetailExportRow: require('../../src/backend/file-service').hasDetailExportRow,
     // v3.2.18：生成配置的失效映射拦截
     templateHeaderUpdateTools: createTemplateHeaderUpdateTools(MAIN_CONSTANTS),
     database,
@@ -243,6 +247,9 @@ function createEnvironment(dir, label) {
     normalizeRowFilterRules,
     validateRowFilterRules,
     PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+    hasCrossSheetBackfillSettings,
+    normalizeCrossSheetBackfillRule,
+    validateCrossSheetBackfillRule,
     sanitizeFileName,
     splitTemplateName,
     FileValidationError,
@@ -285,13 +292,14 @@ function createEnvironment(dir, label) {
     describeBalanceMode: channelIdentity.describeBalanceMode,
     resolveAccountBalanceModes: require('../../src/main-process/statement-generation-business').resolveAccountBalanceModes,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    createStatementOutputJournal: require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,
     buildDateRangeLabel,
     getToday: () => TODAY,
     buildOutputFilePath: fns.buildOutputFilePath,
-    mergeGeneratedXlsxFiles: loadMainFunctions(['mergeGeneratedXlsxFiles'], { require, fs, path, applyWatermark: () => {} }).mergeGeneratedXlsxFiles,
+    mergeGeneratedXlsxFiles: loadMainFunctions(['mergeGeneratedXlsxFiles'], { require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite }).mergeGeneratedXlsxFiles,
     buildStatementFileEntry: (entry) => entry,
     buildStatementFileEntryId: () => 'entry',
     appendStatementSessionImport: () => 'batch',
@@ -318,7 +326,7 @@ function createEnvironment(dir, label) {
     'normalizeMappedFields',
     'getMappingFieldValues',
     'getPrimaryMappedField',
-    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'buildCrossSheetBackfillRule', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'buildCurrencyBigAccountMappingConfig',
     'buildMappedRowsForFile',
     'getEntryTemplateConfig',
@@ -337,8 +345,11 @@ function createEnvironment(dir, label) {
     'buildChannelBalanceModeMismatchError',
     'maskAccountLikeTextForLog',
     'generateMultiTemplateGroupFiles',
+    'statementOutputErrorForLog',
     'assertStatementBatchWritable',
     'assertStatementEntriesWritable',
+    'assertNoCollectedUnwritableText',
+    'isAllTransactionsSkippedByBackfill',
     'planVirtualTemplateBalanceRegeneration',
     'assertVirtualTemplateBalanceOutputPaths',
     'regenerateVirtualTemplateBalanceFromSession',
@@ -347,7 +358,7 @@ function createEnvironment(dir, label) {
     'buildStatementOutputNameConflictError',
     'findGenerationGroupOutputPathConflicts',
     'buildStatementOutputPathConflictError',
-    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'validateCurrencyBigAccountConfiguration',
     'collectFeatureFilterRefs',
     'resolveStatementFeatureFilters',
@@ -360,7 +371,7 @@ function createEnvironment(dir, label) {
     'resolveCurrentMappings',
     'readTemplateBundleFile',
     'normalizeBundleBillSplitMeta',
-    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'isCurrencyOnlyMerchantMapping'
   ], mainDeps));
 

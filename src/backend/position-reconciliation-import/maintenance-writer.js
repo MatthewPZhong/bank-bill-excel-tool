@@ -5,7 +5,6 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
-  LINK_HEADERS,
   SOURCE_DEFINITIONS,
   SOURCE_REQUIRED_FIELDS,
   SOURCE_TYPES
@@ -18,8 +17,8 @@ const {
   deriveLinkedRowsForRecord
 } = require('../../main-process/position-reconciliation/derivation');
 const {
-  assertPositionLargeImportSchema
-} = require('../../main-process/position-reconciliation/large-import-schema');
+  markSupersededBankRawFiles
+} = require('../../main-process/position-reconciliation/bank-row-storage');
 const {
   runPositionSideDbMutation
 } = require('../../main-process/position-reconciliation/side-db-mutation');
@@ -27,8 +26,12 @@ const {
   refreshPositionSourceSummary
 } = require('../../main-process/position-reconciliation/source-summary-cache');
 const {
-  parseJson,
-  serializeJson
+  insertLinkRowStatement,
+  markSupersededSourceRawFiles,
+  writeLinkRows
+} = require('../../main-process/position-reconciliation/source-row-storage');
+const {
+  parseJson
 } = require('../../main-process/position-reconciliation/store');
 const {
   POSITION_IMPORT_COMMANDS,
@@ -37,6 +40,11 @@ const {
 const {
   assertPositionImportDiskSpace
 } = require('./disk-space-gate');
+const {
+  assertPositionSchemaCurrent,
+  bumpRevision,
+  configureImportDatabase
+} = require('./import-common');
 
 const MAINTENANCE_COMMANDS = new Set([
   POSITION_IMPORT_COMMANDS.DELETE_BANK,
@@ -75,16 +83,6 @@ function normalizeBatchSize(value) {
   return Number.isSafeInteger(numeric) && numeric > 0 && numeric <= 100000
     ? numeric
     : POSITION_IMPORT_MAINTENANCE_BATCH_SIZE;
-}
-
-function bumpRevision(db, kind, key) {
-  db.prepare(`
-    INSERT INTO position_revisions(kind, scope_key, revision, updated_at)
-    VALUES (?, ?, 1, CURRENT_TIMESTAMP)
-    ON CONFLICT(kind, scope_key) DO UPDATE SET
-      revision = position_revisions.revision + 1,
-      updated_at = CURRENT_TIMESTAMP
-  `).run(kind, key);
 }
 
 function emitProgress(onProgress, value) {
@@ -228,6 +226,8 @@ async function deleteSourceRowsStreamed({
         WHERE source_type = ?${monthClause}
           AND resolved_at IS NULL
       `).run(...args);
+      // 行已全部删除的原始文件版本标为「已被替换」；原件仍在存档中心。
+      markSupersededSourceRawFiles(db, selection.sourceType);
       bumpRevision(db, 'source', selection.sourceType);
       bumpRevision(db, 'linked', selection.sourceType);
       refreshPositionSourceSummary(db, selection.sourceType, {
@@ -328,6 +328,8 @@ async function deleteBankScopesStreamed({
         stage: 'deleting-bank',
         expectedRows
       });
+      // 行已全部删除的原始文件版本标为「已被替换」；原件仍在存档中心。
+      markSupersededBankRawFiles(db);
       if (deletedCount !== expectedRows) {
         throw maintenanceError(
           'position-side-data-invalid',
@@ -393,16 +395,6 @@ function assertSourcePayload(payload, sourceType, businessKey) {
   return payload;
 }
 
-function linkedInsertStatement(db) {
-  return db.prepare(`
-    INSERT INTO position_link_rows(
-      source_type, business_key, source_record_key, source_row_id,
-      source_row_number, ordinal, leg_index, recon_id, merchant_id,
-      currency, amount, fund_type, status, event_date, visible, linked_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-}
-
 async function rebuildFundTransferLinksStreamed({
   db,
   expectedCheckpoint,
@@ -449,12 +441,12 @@ async function rebuildFundTransferLinksStreamed({
       const sourceRows = db.prepare(`
         SELECT id, business_key AS businessKey, event_date AS eventDate,
                month_key AS monthKey, source_row_number AS sourceRowNumber,
-               row_hash AS sourceRecordKey, raw_json AS rawJson
+               row_hash AS sourceRecordKey, fields_json AS fieldsJson
         FROM position_source_rows
         WHERE source_type = ?
         ORDER BY id
       `).iterate(SOURCE_TYPES.FUND_TRANSFER);
-      const insertLink = linkedInsertStatement(db);
+      const insertLink = insertLinkRowStatement(db);
       let scannedRows = 0;
       let linkedRowCount = 0;
       let visibleLinkedRowCount = 0;
@@ -470,59 +462,30 @@ async function rebuildFundTransferLinksStreamed({
         const sourceRowNumber = Number(source.sourceRowNumber);
         const row = assertSourcePayload(
           parseJson(
-            source.rawJson,
+            source.fieldsJson,
             `链接原始行 ${SOURCE_TYPES.FUND_TRANSFER}/${source.businessKey}`
           ),
           SOURCE_TYPES.FUND_TRANSFER,
           source.businessKey
         );
-        const derived = deriveLinkedRowsForRecord(
+        const record = {
+          sourceType: SOURCE_TYPES.FUND_TRANSFER,
+          businessKey: text(source.businessKey),
+          sourceRecordKey,
+          sourceRowId: Number(source.id),
+          sourceRowNumber,
+          eventDate: text(source.eventDate),
+          monthKey: text(source.monthKey),
+          row
+        };
+        const written = writeLinkRows(
+          insertLink,
           SOURCE_TYPES.FUND_TRANSFER,
-          {
-            sourceType: SOURCE_TYPES.FUND_TRANSFER,
-            businessKey: text(source.businessKey),
-            sourceRecordKey,
-            sourceRowId: Number(source.id),
-            sourceRowNumber,
-            eventDate: text(source.eventDate),
-            monthKey: text(source.monthKey),
-            row
-          },
-          mappings
+          record,
+          deriveLinkedRowsForRecord(SOURCE_TYPES.FUND_TRANSFER, record, mappings)
         );
-        for (const item of derived) {
-          const linked = item.row;
-          const missing = LINK_HEADERS[SOURCE_TYPES.FUND_TRANSFER].filter(
-            (header) => !Object.prototype.hasOwnProperty.call(linked, header)
-          );
-          if (missing.length > 0) {
-            throw maintenanceError(
-              'position-side-data-invalid',
-              `中台调拨派生行 ${text(source.businessKey)} 缺少必填字段`,
-              missing
-            );
-          }
-          insertLink.run(
-            SOURCE_TYPES.FUND_TRANSFER,
-            text(source.businessKey),
-            sourceRecordKey,
-            Number(source.id),
-            sourceRowNumber,
-            Number(source.id),
-            item.legIndex,
-            text(linked.ReconID),
-            text(linked.MerchantId),
-            text(linked.Currency),
-            text(linked.Amount),
-            text(linked.FundType),
-            text(linked['调拨状态']),
-            text(linked['交易时间']),
-            item.visible === false ? 0 : 1,
-            serializeJson(linked)
-          );
-          linkedRowCount += 1;
-          if (item.visible !== false) visibleLinkedRowCount += 1;
-        }
+        linkedRowCount += written.visible + written.hidden;
+        visibleLinkedRowCount += written.visible;
         scannedRows += 1;
         if (scannedRows % normalizedBatchSize === 0) {
           emitProgress(onProgress, {
@@ -566,16 +529,6 @@ async function rebuildFundTransferLinksStreamed({
   return { ...mutation.result, nextCheckpoint: mutation.nextCheckpoint };
 }
 
-function configureDatabase(db) {
-  db.exec('PRAGMA foreign_keys=ON;');
-  db.exec('PRAGMA synchronous=NORMAL;');
-  db.exec('PRAGMA busy_timeout=30000;');
-  db.exec('PRAGMA cache_size=-2048;');
-  db.exec('PRAGMA mmap_size=0;');
-  db.exec('PRAGMA temp_store=FILE;');
-  db.exec('PRAGMA journal_mode=WAL;');
-}
-
 async function runPositionMaintenanceJob(input = {}) {
   const command = String(input.command || '');
   if (!MAINTENANCE_COMMANDS.has(command)) {
@@ -590,8 +543,8 @@ async function runPositionMaintenanceJob(input = {}) {
   }
   const db = new DatabaseSync(sideDbPath);
   try {
-    configureDatabase(db);
-    assertPositionLargeImportSchema(db);
+    configureImportDatabase(db);
+    assertPositionSchemaCurrent(db);
     const common = {
       db,
       expectedCheckpoint: input.expectedCheckpoint,

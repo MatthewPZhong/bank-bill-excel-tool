@@ -222,8 +222,8 @@ test('输出模板预检直接使用各模块写出校验，并拦截会改变�
       [['文件格式', 'pass'], ['Sheet 结构', 'pass'], ['表头', 'pass'], ['多余表头', 'warn'], ['与当前版本', 'info']], /不会写入导出：附加/],
     ['bank-statement', 'assets/银行对账单.xlsx', (workbook) => { workbook.worksheets[0].name = '对账单'; },
       [['文件格式', 'pass'], ['Sheet 结构', 'fail']], /缺少 sheet「渠道对账单」/],
-    ['position-bank', 'assets/平盘银行对账单.xlsx', (workbook) => { workbook.getWorksheet('渠道对账单').getCell(1, 50).value = '备注'; },
-      [['文件格式', 'pass'], ['Sheet 结构', 'pass'], ['表头', 'fail']], /存在多余表头：备注；要求固定 49 列/],
+    ['position-bank', 'assets/平盘银行对账单.xlsx', (workbook) => { workbook.getWorksheet('渠道对账单').getCell(1, 21).value = '备注'; },
+      [['文件格式', 'pass'], ['Sheet 结构', 'pass'], ['表头', 'fail']], /存在多余表头：备注；要求固定 20 列/],
     ['position-bank', 'assets/平盘银行对账单.xlsx', (workbook) => { workbook.addWorksheet('说明'); },
       [['文件格式', 'pass'], ['Sheet 结构', 'fail'], ['表头', 'pass']], /多出 说明，会被一并写入结果/],
     ['vcc-pending-calc', 'assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx', (workbook) => { workbook.worksheets[0].getRow(1).height = 500; },
@@ -364,7 +364,7 @@ test('范围覆盖整张表的小文件：预检与结构描述只按实际单�
   assert.equal(positionPrepared.checks.find((check) => check.label === '数据区').detail, '第 2 行起有 1 行内容，导出时清空，不会写入结果');
   await env.service.commitImport({ importToken: positionPrepared.importToken, enable: false });
   const saved = (await env.service.get('position-bank')).resource.versions.find((version) => version.id === 'v2');
-  assert.equal(saved.sheets[0].headers.length, 49);
+  assert.equal(saved.sheets[0].headers.length, 20);
   assert.equal(saved.sheets[0].dataRows, 1);
 });
 
@@ -553,7 +553,7 @@ test('打印区域须为写明首尾单元格的区域；含图表工作表等�
     assert.equal(prepared.verdict, 'fail', formula);
     assert.match(prepared.checks.find((check) => check.label === '打印区域').detail, /不是明确的单元格区域，导出时无法按结果行数调整/, formula);
   }
-  assert.equal((await prepare(env.service, 'position-bank', await printArea("'渠道对账单'!$A$1:$AW$3", 'explicit.xlsx'))).verdict, 'pass');
+  assert.equal((await prepare(env.service, 'position-bank', await printArea("'渠道对账单'!$A$1:$T$3", 'explicit.xlsx'))).verdict, 'pass');
 
   const chartsheet = await patchXlsx('assets/平盘银行对账单.xlsx', path.join(env.files, 'chartsheet.xlsx'), {
     'xl/workbook.xml': (xml) => xml.replace('<sheets>', '<sheets><sheet name="图表1" sheetId="9" r:id="rId99"/>'),

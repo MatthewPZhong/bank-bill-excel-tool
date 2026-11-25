@@ -56,10 +56,12 @@
     // 以 __ 开头的普通列名、其他字段上与标记同名的真实列名照常按源字段处理。
     const INTERNAL_MAPPING_VALUE_PREFIX = '__FIXED__:';
     const MERCHANT_ID_CURRENCY_ONLY_MARKER = '__CURRENCY_ONLY_BIG_ACCOUNT__';
-    function ensureStaleFieldOption(select, value, targetField) {
+    // literal：值一定是源列名（如特征值的筛选字段），不按内部存储值跳过（v3.2.22）
+    function ensureStaleFieldOption(select, value, targetField, { literal = false } = {}) {
       const normalized = String(value ?? '').trim();
-      if (!select || !normalized || normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
-      if (targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
+      if (!select || !normalized) return false;
+      if (!literal && normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
+      if (!literal && targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
       if (Array.from(select.options).some((option) => option.value === normalized)) return false;
       const option = document.createElement('option');
       option.value = normalized;
@@ -201,7 +203,9 @@
     //
     // 参数：
     //   onAssembleReady(summary) —— 装配成功后由调用方（handleExportBalance 分流）接收 summary 更新 state
-    function createMonthlyBalanceExportDialog({ onAssembleReady } = {}) {
+    //   onAssembleFailed(result) —— 装配未成功（出错、无数据或本地校验未通过 status='invalid'）时调用，调用方据此更新状态框：
+    //     出错时报错文件可导出，其余情况清掉上一次尝试的报错状态（Codex 第十、十三轮）
+    function createMonthlyBalanceExportDialog({ onAssembleReady, onAssembleFailed } = {}) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card monthly-balance-export-card';
@@ -294,24 +298,12 @@
         const hasTemplate = draft.templateValue !== '' && draft.templateValue !== null && draft.templateValue !== undefined;
         const hasTime = Number.isInteger(draft.year) && Number.isInteger(draft.month);
 
-        // E1 / E2 / E3：本地校验，弹 createAlertDialog 后重开本弹窗保留已填值
-        if (!hasTemplate && !hasTime) {
-
-          pushAlert(overlay, () => createAlertDialog('请选择模板和时间', {
-            onConfirm: null
-          }));
-          return;
-        }
-        if (!hasTemplate) {
-
-          pushAlert(overlay, () => createAlertDialog('请选择模板', {
-            onConfirm: null
-          }));
-          return;
-        }
-        if (!hasTime) {
-
-          pushAlert(overlay, () => createAlertDialog('请选择时间', {
+        // E1 / E2 / E3：本地校验，弹 createAlertDialog 后重开本弹窗保留已填值。未通过时同样同步状态框、关闭上一次尝试的
+        //   报错导出：同一弹窗内装配失败后改成未选月份再点完成，关窗后状态框不留上一次的报错（v3.2.22 B113，Codex 第十三轮）
+        const localProblem = !hasTemplate && !hasTime ? '请选择模板和时间' : (!hasTemplate ? '请选择模板' : (!hasTime ? '请选择时间' : ''));
+        if (localProblem) {
+          if (typeof onAssembleFailed === 'function') onAssembleFailed({ status: 'invalid', message: localProblem, errorReportReady: false });
+          pushAlert(overlay, () => createAlertDialog(localProblem, {
             onConfirm: null
           }));
           return;
@@ -332,6 +324,10 @@
         try {
           result = await api.monthlyBalance.assemble(payload);
         } catch (error) {
+          // 请求本身失败（IPC 被拒绝等）同样同步状态框、关闭上一次尝试的报错导出（主进程已清除待导出引用，Codex 第十一轮）
+          if (typeof onAssembleFailed === 'function') {
+            onAssembleFailed({ status: 'error', message: `装配月度余额账单失败：${error?.message || error}`, errorReportReady: false });
+          }
           if (!disposed && modalBridge.host.getHandle(overlay)?.isOpen()) {
             pushAlert(overlay, () => createAlertDialog(`装配月度余额账单失败：${error?.message || error}`, {
               onConfirm: null
@@ -352,15 +348,19 @@
           return;
         }
         if (result && result.status === 'empty') {
-
+          if (typeof onAssembleFailed === 'function') onAssembleFailed(result);
           pushAlert(overlay, () => createAlertDialog(result.message || '该模板 / 月份范围内无余额数据', {
             onConfirm: null
           }));
           return;
         }
-        // status === 'error' 或其它失败
-
-        pushAlert(overlay, () => createAlertDialog(result?.message || '装配月度余额账单失败', {
+        // status === 'error' 或其它失败；业务校验错误（如记录含无法写入 Excel 的字符）一并列出逐处位置（v3.2.22 B113）。
+        //   状态框同步失败结果：主进程已生成报错文件时，关掉弹窗后点击状态框可导出（Codex 第六轮）
+        if (typeof onAssembleFailed === 'function') onAssembleFailed(result || {});
+        const lines = [result?.message || '装配月度余额账单失败']
+          .concat(Array.isArray(result?.detailLines) ? result.detailLines : []);
+        const text = lines.map((line) => String(line).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])).join('<br/>');
+        pushAlert(overlay, () => createAlertDialog(text, {
           onConfirm: null
         }));
       });
@@ -789,9 +789,10 @@
       return `${part(account?.merchantId)}@@${part(account?.currency)}`;
     }
 
-    // 只有缺种子的普通补录 prompt 可导入余额文件、可被确认后连续保存（断档、核对、确认类都不行）。
-    function isPlainManualBalancePrompt(prompt) {
-      return Boolean(prompt) && !prompt.reason && !prompt.seedMismatch;
+    // 缺种子的普通补录与「核对上一账单日余额」（v3.2.22 D1）prompt 可导入余额文件、可被确认后连续保存
+    //   （断档、余额不一致、人工补录替换确认都不行）。
+    function isImportableManualBalancePrompt(prompt) {
+      return Boolean(prompt) && !prompt.reason;
     }
 
     // 预填余额用普通小数：String 会把 1e-7 这类小额写成指数，主进程补录校验不接受指数写法。保留 12 位小数（余额链路口径）。
@@ -815,6 +816,140 @@
 
     function manualBalanceGroupName(prompt) {
       return String(prompt?.templateName ?? '').trim();
+    }
+
+    // v3.2.22：导入余额文件时同一账号同一账单日有多个不同的期末余额（D4）——逐账号列出该日全部行供单选，
+    //   附「余额来源」「余额获取方式」供参考；这三列紧跟「选择」，窗口放大时不必横向滚动就能比较。onConfirm(selections) 收到 Map（账号键 → 所选行）；取消或关闭即放弃本次导入。
+    let balanceFileChoiceSeq = 0;
+    function createBalanceFileChoiceDialog({ accounts, fileName, onConfirm }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card balance-file-choice-card';
+      const choiceAccounts = (Array.isArray(accounts) ? accounts : [])
+        .filter((account) => account?.source === 'choice' && Array.isArray(account.choices) && account.choices.length);
+      const radioPrefix = `balance-file-choice-${balanceFileChoiceSeq += 1}`;
+      const cell = (value) => escapeHtml(String(value ?? '') || '-');
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">选择余额</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-gap-body balance-file-choice-body">
+          <p class="balance-gap-intro">${escapeHtml(fileName || '余额文件')} 中以下 ${choiceAccounts.length} 个账号在同一账单日有多个不同的期末余额，请为每个账号选择一条作为上一账单日余额：</p>
+          ${choiceAccounts.map((account, groupIndex) => `
+          <section class="balance-file-choice-group" data-group-index="${groupIndex}">
+            <div class="balance-file-choice-title">银行账号 ${escapeHtml(String(account.merchantId || ''))}（${escapeHtml(String(account.currency || '(空)'))}）· 当前账单日期 ${escapeHtml(String(account.targetBillDate || ''))}</div>
+            <div class="table-wrapper balance-file-choice-table-wrap">
+              <table class="data-table balance-file-choice-table">
+                <thead>
+                  <tr>
+                    <th>选择</th>
+                    <th>期末余额</th>
+                    <th>余额来源</th>
+                    <th>余额获取方式</th>
+                    <th>账单日期</th>
+                    <th>银行名</th>
+                    <th>开户地</th>
+                    <th>币种</th>
+                    <th>银行账户号</th>
+                    <th>行号</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${account.choices.map((choice, choiceIndex) => `
+                  <tr class="balance-file-choice-row" data-choice-index="${choiceIndex}">
+                    <td><input class="balance-file-choice-radio" type="radio" name="${radioPrefix}-${groupIndex}" value="${choiceIndex}" aria-label="选择文件第 ${escapeHtml(String(choice.rowNumber ?? ''))} 行" /></td>
+                    <td class="balance-file-choice-amount">${cell(formatImportedBalanceInput(choice.endBalance))}</td>
+                    <td class="balance-file-choice-text">${cell(choice.balanceSource)}</td>
+                    <td class="balance-file-choice-text">${cell(choice.balanceMethod)}</td>
+                    <td>${cell(choice.billDate)}</td>
+                    <td class="balance-file-choice-text">${cell(choice.bankName)}</td>
+                    <td class="balance-file-choice-text">${cell(choice.location)}</td>
+                    <td>${cell(choice.currency)}</td>
+                    <td class="manual-balance-context-account">${cell(choice.merchantId)}</td>
+                    <td>${cell(choice.rowNumber)}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </section>`).join('')}
+        </div>
+        <div class="dialog-actions right balance-file-choice-actions">
+          <p class="balance-gap-warning balance-file-choice-message" data-role="choice-message" role="alert" hidden></p>
+          <button class="secondary-btn small" type="button" data-action="choice-cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="choice-confirm">确认</button>
+        </div>
+      `;
+      const message = dialog.querySelector('[data-role="choice-message"]');
+      const cancel = () => closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+      dialog.querySelector('.icon-close').addEventListener('click', cancel);
+      dialog.querySelector('[data-action="choice-cancel"]').addEventListener('click', cancel);
+      // 已提示过未选账号时，选择变化后同步重算剩余数；都选好后隐藏提示。
+      const refreshMissingMessage = () => {
+        if (message.hidden) return;
+        const missing = [...dialog.querySelectorAll('.balance-file-choice-group')]
+          .filter((group) => !group.querySelector('.balance-file-choice-radio:checked')).length;
+        if (missing) message.textContent = `还有 ${missing} 个账号未选择余额（已标红）`;
+        else message.hidden = true;
+      };
+      // 点整行即选中该行（单选）；键盘切换单选同样清除该组红框。
+      dialog.querySelectorAll('.balance-file-choice-row').forEach((row) => {
+        const radio = row.querySelector('.balance-file-choice-radio');
+        const markChosen = () => {
+          row.closest('.balance-file-choice-group')?.classList.remove('is-invalid');
+          refreshMissingMessage();
+        };
+        row.addEventListener('click', (event) => {
+          if (event.target !== radio) radio.checked = true;
+          markChosen();
+        });
+        radio.addEventListener('change', markChosen);
+      });
+      dialog.querySelector('[data-action="choice-confirm"]').addEventListener('click', () => {
+        const selections = new Map();
+        let missing = 0;
+        dialog.querySelectorAll('.balance-file-choice-group').forEach((group) => {
+          const account = choiceAccounts[Number(group.dataset.groupIndex)];
+          const checked = group.querySelector('.balance-file-choice-radio:checked');
+          group.classList.toggle('is-invalid', !checked);
+          if (!checked) {
+            missing += 1;
+            return;
+          }
+          selections.set(manualBalanceAccountKey(account), account.choices[Number(checked.value)]);
+        });
+        if (missing) {
+          // 提示在常驻的按钮栏里；正文滚到第一个未选的账号并聚焦，账号多或窗口放大时也看得到漏选的是哪个
+          message.textContent = `还有 ${missing} 个账号未选择余额（已标红）`;
+          message.hidden = false;
+          const firstInvalid = dialog.querySelector('.balance-file-choice-group.is-invalid');
+          if (firstInvalid && typeof firstInvalid.scrollIntoView === 'function') firstInvalid.scrollIntoView({ block: 'start' });
+          firstInvalid?.querySelector('.balance-file-choice-radio')?.focus({ preventScroll: true });
+          return;
+        }
+        onConfirm(selections);
+        closeModal(overlay, { status: 'submitted', value: selections.size });
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // 把选择余额弹窗的结果填回导入结果：所选行的日期与余额作为预填值，来源标为「已选择」并写明所选行。
+    function applyBalanceFileChoices(importResult, selections) {
+      const accounts = (Array.isArray(importResult?.accounts) ? importResult.accounts : []).map((account) => {
+        if (account?.source !== 'choice') return account;
+        const choice = selections.get(manualBalanceAccountKey(account));
+        if (!choice) return account;
+        const total = Array.isArray(account.choices) ? account.choices.length : 0;
+        return {
+          ...account,
+          billDate: String(choice.billDate || ''),
+          endBalance: choice.endBalance,
+          source: 'chosen',
+          reason: `已从同日 ${total} 条中选择第 ${choice.rowNumber} 行${choice.balanceSource ? `（余额来源：${choice.balanceSource}）` : ''}`
+        };
+      });
+      return { ...importResult, accounts };
     }
 
     function createManualBalanceSeedDialog(prompt, draft = {}, queueState = null) {
@@ -854,9 +989,10 @@
       const manualTitle = isGapPrompt
         ? '补录断档前一日余额'
         : (seedMismatch ? '核对上一账单日余额' : '补录上一账单日余额');
-      // v3.2.17：普通缺种子补录可从余额文件批量提取待补录账号的余额，转到「余额确认」视图。
-      const canImportBalanceFile = isPlainManualBalancePrompt(prompt)
-        && Array.isArray(prompt.pendingAccounts) && prompt.pendingAccounts.length > 0
+      // v3.2.17：普通缺种子补录可从余额文件批量提取待补录账号的余额，转到「余额确认」视图；
+      //   v3.2.22：核对上一账单日余额也可导入（清单为当前核对账号与本组缺种子账号）。
+      const canImportBalanceFile = isImportableManualBalancePrompt(prompt)
+        && (Boolean(seedMismatch) || (Array.isArray(prompt.pendingAccounts) && prompt.pendingAccounts.length > 0))
         && typeof api.files?.importBalanceSeedFile === 'function';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -1138,28 +1274,38 @@
       function renderConfirmRows(importResult) {
         const accounts = Array.isArray(importResult.accounts) ? importResult.accounts : [];
         const matchedCount = accounts.filter((account) => account.source === 'file').length;
-        const manualCount = accounts.length - matchedCount;
+        const chosenCount = accounts.filter((account) => account.source === 'chosen').length;
+        const manualCount = accounts.length - matchedCount - chosenCount;
         importedFileName = String(importResult.fileName || '');
-        confirmSummary.textContent = `已从 ${importedFileName || '余额文件'} 提取 ${matchedCount} 个账号的余额`
+        confirmSummary.textContent = `已从 ${importedFileName || '余额文件'} 提取 ${matchedCount + chosenCount} 个账号的余额`
+          + (chosenCount ? `（其中 ${chosenCount} 个从同日多个余额中选择）` : '')
           + (manualCount ? `，${manualCount} 个需手工录入` : '')
-          + (importResult.skippedRowCount ? `；文件中 ${importResult.skippedRowCount} 行因银行账号、账单日期或期末余额无效被跳过` : '');
+          + (importResult.skippedRowCount ? `；文件中 ${importResult.skippedRowCount} 行因银行账户号、账单日期或期末余额无效被跳过` : '');
         confirmTbody.innerHTML = accounts.map((account) => {
-          const fromFile = account.source === 'file';
+          const chosen = account.source === 'chosen';
+          const fromFile = account.source === 'file' || chosen;
+          const sourceText = chosen ? '已选择' : (fromFile ? '来自文件' : '需手工录入');
           const accountText = String(account.merchantId || '');
           const currencyText = String(account.currency || '');
+          // 核对上一账单日余额的账号：早于已有余额日期的余额不会用于本次核对（主进程同样拒绝）
+          const minDate = String(account.minBillDate || '');
           return `
             <tr class="manual-balance-confirm-row${fromFile ? '' : ' is-manual'}"
               data-merchant-id="${escapeHtml(accountText)}"
               data-currency="${escapeHtml(currencyText)}"
-              data-target-bill-date="${escapeHtml(String(account.targetBillDate || ''))}">
+              data-target-bill-date="${escapeHtml(String(account.targetBillDate || ''))}"
+              data-min-bill-date="${escapeHtml(minDate)}">
               <td class="manual-balance-context-account">${escapeHtml(accountText)}</td>
               <td>${escapeHtml(currencyText || '(空)')}</td>
               <td>${escapeHtml(String(account.targetBillDate || ''))}</td>
-              <td><input class="mapping-text-input manual-balance-confirm-date" type="date" aria-label="上一账单日日期" value="${escapeHtml(String(account.billDate || ''))}" /></td>
+              <td>
+                <input class="mapping-text-input manual-balance-confirm-date" type="date" aria-label="上一账单日日期" value="${escapeHtml(String(account.billDate || ''))}"${minDate ? ` min="${escapeHtml(minDate)}"` : ''} />
+                ${minDate ? `<div class="manual-balance-source-reason manual-balance-confirm-date-hint">不早于已有余额日期 ${escapeHtml(minDate)}</div>` : ''}
+              </td>
               <td><input class="mapping-text-input manual-balance-confirm-amount" type="text" spellcheck="false" aria-label="上一账单日余额" value="${escapeHtml(formatImportedBalanceInput(account.endBalance))}" /></td>
               <td>
-                <span class="manual-balance-source-tag ${fromFile ? 'is-file' : 'is-manual'}">${fromFile ? '来自文件' : '需手工录入'}</span>
-                ${!fromFile && account.reason ? `<div class="manual-balance-source-reason">${escapeHtml(String(account.reason))}</div>` : ''}
+                <span class="manual-balance-source-tag ${chosen ? 'is-chosen' : (fromFile ? 'is-file' : 'is-manual')}">${sourceText}</span>
+                ${(chosen || !fromFile) && account.reason ? `<div class="manual-balance-source-reason">${escapeHtml(String(account.reason))}</div>` : ''}
               </td>
             </tr>`;
         }).join('');
@@ -1193,9 +1339,11 @@
           const billDate = row.querySelector('.manual-balance-confirm-date').value.trim();
           const endBalance = row.querySelector('.manual-balance-confirm-amount').value.trim();
           const targetDate = row.dataset.targetBillDate || '';
+          const minDate = row.dataset.minBillDate || '';
           let problem = '';
           if (!billDate || !endBalance) problem = '请填写上一账单日日期与余额';
           else if (targetDate && billDate >= targetDate) problem = '上一账单日日期必须早于当前账单日期';
+          else if (minDate && billDate < minDate) problem = `上一账单日日期不能早于已有余额的日期 ${minDate}`;
           row.classList.toggle('is-invalid', Boolean(problem));
           row.title = problem;
           if (problem) {
@@ -1212,7 +1360,7 @@
       //   下一个仍是清单内的普通缺种子账号就继续，否则停下交给原有处理（断档、不一致、覆盖确认、报错或完成）。
       // 本弹窗分组内、清单里、尚未保存成功的普通缺种子账号才自动保存。
       function canAutoSave(nextPrompt, entries) {
-        if (!isPlainManualBalancePrompt(nextPrompt)) return false;
+        if (!isImportableManualBalancePrompt(nextPrompt)) return false;
         if (manualBalanceGroupName(nextPrompt) !== importGroupName) return false;
         const key = manualBalanceAccountKey(nextPrompt);
         return entries.has(key) && !savedAccountKeys.has(key);
@@ -1285,6 +1433,22 @@
             : '';
           pushAlert(overlay, () => createAlertDialog(`导入余额文件失败：${escapeHtml(result.message || '未知错误')}${detail}`, {
             onConfirm: null
+          }));
+          return;
+        }
+        const handle = modalBridge.host.getHandle(overlay);
+        if (!handle?.isOpen()) return;
+        // v3.2.22：同日多个不同余额先弹「选择余额」，选定后再进入余额确认；取消即放弃本次导入，留在原视图。
+        const needsChoice = (Array.isArray(result.accounts) ? result.accounts : []).some((account) => account?.source === 'choice');
+        if (needsChoice) {
+          pushModal(overlay, () => createBalanceFileChoiceDialog({
+            accounts: result.accounts,
+            fileName: result.fileName,
+            onConfirm: (selections) => {
+              if (!modalBridge.host.getHandle(overlay)?.isOpen()) return;
+              renderConfirmRows(applyBalanceFileChoices(result, selections));
+              showView('confirm');
+            }
           }));
           return;
         }
@@ -1446,7 +1610,11 @@
       { value: 'slash', label: '/' },
       { value: 'comma', label: ',' },
       { value: 'dot', label: '.' },
-      { value: 'backslash', label: '\\' }
+      { value: 'backslash', label: '\\' },
+      // v3.2.22：新增 - _ $
+      { value: 'hyphen', label: '-' },
+      { value: 'underscore', label: '_' },
+      { value: 'dollar', label: '$' }
     ];
     const FEATURE_FILTER_MAX_LENGTH = 200;
     const FEATURE_FILTER_NAME_MAX_LENGTH = 30;
@@ -1472,7 +1640,9 @@
     function splitFeatureFilterText(text, separator) {
       const value = String(text ?? '').trim();
       if (!value) return [];
-      const splitter = { space: /\s+/u, slash: '/', comma: ',', dot: '.', backslash: '\\' }[separator];
+      const splitter = {
+        space: /\s+/u, slash: '/', comma: ',', dot: '.', backslash: '\\', hyphen: '-', underscore: '_', dollar: '$'
+      }[separator];
       if (!splitter) return [value];
       return value.split(splitter).map((part) => part.trim()).filter((part) => part !== '');
     }
@@ -1639,7 +1809,10 @@
 
     // v3.2.18「特征值管理」（原「筛选特征值」）：新增、选中修改、删除特征值；【保存】与确认删除立即写入模板（spec D7）。
     //   getUsage()：各弹窗草稿中选用各特征值的字段；onChange(list)：保存或删除成功后回传最新列表；onClose()：弹窗关闭。
-    function createFeatureFilterManagerDialog({ templateId, headers = [], featureFilters = [], getUsage, onChange, onClose }) {
+    function createFeatureFilterManagerDialog({
+      templateId, headers = [], featureFilters = [], getUsage, onChange, onClose,
+      resultUncertain: initialResultUncertain = false, onResultUncertain
+    }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card feature-filter-card';
@@ -1712,14 +1885,37 @@
           : '整段都是数字';
       }
 
+      // v3.2.22：设置区控件的当前值（原样，不做规范化）；回显已有特征值后记为快照，用来判断用户是否改动
+      let formSnapshot = null;
+      // v3.2.22：任一次保存或删除失败后，库中结果不确定（如已写库、同步模板库文件失败），之后的【保存】一律提交，
+      //   不再按快照跳过（切换特征值再选回会重建快照，不能靠作废快照）。失败后关闭再从同一主弹窗重开时由主弹窗带入；
+      //   保存或删除成功后列表以后端回包为准，恢复按快照判断。
+      let resultUncertain = Boolean(initialResultUncertain);
+      function markResultUncertain() {
+        resultUncertain = true;
+        if (typeof onResultUncertain === 'function') onResultUncertain();
+      }
+      function readDraft() {
+        return {
+          name: nameInput.value,
+          sourceField: sourceSelect.value,
+          separator: separatorSelect.value,
+          length: lengthInput.value,
+          letterPrefixCount: prefixInput.value,
+          digitsOnly: digitsInput.checked,
+          sample: sampleInput.value
+        };
+      }
+
       function showForm(item) {
         nameInput.value = item ? String(item.name || '') : '';
-        // 模板【更新】后筛选字段可能已不在表头：显示为「X（已删除）」并标红，保存前须重新选择
+        // 模板【更新】后筛选字段可能已不在表头：显示为「X（已删除）」并标红，改动后保存前须重新选择
+        //   筛选字段一定是源列名，以 __FIXED__: 开头的列名同样标出
         sourceSelect.querySelectorAll('option[data-stale="true"]').forEach((option) => option.remove());
         sourceSelect.classList.remove('is-stale');
         const sourceField = item ? String(item.sourceField || '').trim() : '';
         sourceSelect.value = sourceField;
-        if (sourceField && sourceSelect.value !== sourceField) ensureStaleFieldOption(sourceSelect, sourceField, '');
+        if (sourceField && sourceSelect.value !== sourceField) ensureStaleFieldOption(sourceSelect, sourceField, '', { literal: true });
         separatorSelect.value = item ? String(item.separator || '') : 'space';
         lengthInput.value = item && item.length ? String(item.length) : '';
         prefixInput.value = item && item.letterPrefixCount ? String(item.letterPrefixCount) : '';
@@ -1727,10 +1923,12 @@
         sampleInput.value = item ? String(item.sample || '') : '';
         syncDigitsLabel();
         body.hidden = false;
+        formSnapshot = item ? readDraft() : null;
       }
 
       function hideForm() {
         editingId = null;
+        formSnapshot = null;
         body.hidden = true;
       }
 
@@ -1738,7 +1936,26 @@
         renderFeatureFilterOptions(pickSelect, currentList, selectedId);
       }
 
-      renderPick('');
+      // v3.2.22：特征值下拉默认空白；已有特征值时默认选中最早新增的一个并回显（列表即新增顺序：新增追加在末尾，保存保序）
+      function applyDefaultSelection() {
+        const first = currentList[0] || null;
+        renderPick(first ? first.id : '');
+        if (!first) {
+          hideForm();
+          return;
+        }
+        editingId = String(first.id);
+        showForm(first);
+      }
+
+      // v3.2.22：正在修改的已有特征值，设置区与回显时的快照一致（如打开后默认选中即点【保存】）视为未改动。
+      //   按控件值比较：单行输入框会去掉模板包带入的换行、无法回显的值显示为空，与库中原文比较会误判为改动。
+      function isDraftUnchanged(draft) {
+        if (!formSnapshot) return false;
+        return Object.keys(formSnapshot).every((key) => formSnapshot[key] === draft[key]);
+      }
+
+      applyDefaultSelection();
       syncDigitsLabel();
 
       pickSelect.addEventListener('change', () => {
@@ -1803,14 +2020,15 @@
               } finally { confirmScope.finish(handle); }
               if (!confirmScope.isCurrent(handle)) return;
               if (result?.status !== 'success') {
+                markResultUncertain();
                 alertOn(confirmation, result?.message || '删除特征值失败');
                 return;
               }
               const closed = closeModal(handle, { status: 'submitted' });
               if (closed.status !== 'closed') return;
               currentList = cloneFeatureFilters(result.featureFilters);
-              renderPick('');
-              hideForm();
+              resultUncertain = false;
+              applyDefaultSelection();
               if (typeof onChange === 'function') onChange(cloneFeatureFilters(currentList));
             }
           });
@@ -1827,27 +2045,32 @@
       dialog.querySelector('.icon-close').addEventListener('click', () => closeManager('cancelled'));
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => closeManager('cancelled'));
       dialog.querySelector('[data-action="save"]').addEventListener('click', async () => {
-        if (editingId === null) {
+        // 空选（设置区隐藏）或已有特征值未改动：结果确定时直接关闭、不写库
+        const draft = editingId === null ? null : readDraft();
+        const unchanged = editingId === null || (Boolean(editingId) && isDraftUnchanged(draft));
+        if (unchanged && !resultUncertain) {
           closeManager('submitted');
           return;
         }
-        const others = currentList.filter((item) => String(item.id) !== editingId);
-        const { errors, rule } = validateFeatureFilterDraft({
-          name: nameInput.value,
-          sourceField: sourceSelect.value,
-          separator: separatorSelect.value,
-          length: lengthInput.value,
-          letterPrefixCount: prefixInput.value,
-          digitsOnly: digitsInput.checked,
-          sample: sampleInput.value
-        }, headers, others);
-        if (errors.length) {
-          pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
-          return;
+        let nextList;
+        if (unchanged) {
+          // 结果不确定时按界面所示的列表原样提交：由后端对照库中现值校验，不按前端表头拦下已删除的筛选字段，
+          //   也不经单行输入框改写名称、样例中的换行
+          nextList = cloneFeatureFilters(currentList);
+        } else {
+          // 名称未编辑时沿用库中原名（单行输入框回显时会去掉其中的换行）；快照在失败后保留，重试时同样沿用
+          const original = editingId ? findFeatureFilterById(currentList, editingId) : null;
+          if (original && formSnapshot && draft.name === formSnapshot.name) draft.name = String(original.name ?? '');
+          const others = currentList.filter((item) => String(item.id) !== editingId);
+          const { errors, rule } = validateFeatureFilterDraft(draft, headers, others);
+          if (errors.length) {
+            pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
+            return;
+          }
+          nextList = editingId
+            ? currentList.map((item) => (String(item.id) === editingId ? { ...rule, id: editingId } : item))
+            : currentList.concat([{ ...rule }]);
         }
-        const nextList = editingId
-          ? currentList.map((item) => (String(item.id) === editingId ? { ...rule, id: editingId } : item))
-          : currentList.concat([{ ...rule }]);
         const handle = writeScope.begin();
         if (!handle) return;
         let result;
@@ -1858,6 +2081,8 @@
         } finally { writeScope.finish(handle); }
         if (!writeScope.isCurrent(handle)) return;
         if (result?.status !== 'success') {
+          // 失败时库中结果不确定（如已写库、同步模板库文件失败）：之后的【保存】一律提交
+          markResultUncertain();
           alertOn(overlay, result?.message || '保存特征值失败');
           return;
         }
@@ -2480,7 +2705,6 @@
       }
 
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-      const rowsWithEmptyBlocks = Array.isArray(payload?.rowsWithEmptyBlocks) ? payload.rowsWithEmptyBlocks : rows;
       const expandedOptions = Array.isArray(payload?.expandedBigAccountOptions) ? payload.expandedBigAccountOptions : [];
       const templateId = payload?.templateId;
 
@@ -2488,8 +2712,8 @@
       const dialog = document.createElement('div');
       dialog.className = 'modal-card big-account-selection-card big-account-selection-split';
 
-      let currentMode = 'unfixed';
-      let currentFileRows = rows;
+      // v3.2.22：去掉「账号顺序固定」，每次都按不含无交易空段的账号块手动选择
+      const currentFileRows = rows;
       let checkedOrder = [];
       let searchMatchIndex = -1;
       let searchMatches = [];
@@ -2499,11 +2723,6 @@
         <div class="dialog-header">
           <div class="dialog-title">网银账单解析大账号确认</div>
           <div class="big-account-selection-toolbar">
-            <span class="big-account-mode-label">多账号账单导入解析模式</span>
-            <select class="mapping-select big-account-mode-select">
-              <option value="unfixed">账号顺序不固定</option>
-              <option value="fixed">账号顺序固定</option>
-            </select>
             <button class="icon-close" type="button">×</button>
           </div>
         </div>
@@ -2529,22 +2748,14 @@
           <button class="secondary-btn small ba-multi-toggle-btn is-hidden" type="button">编辑</button>
           <span class="big-account-search-label">定位大账号</span>
           <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
-          <label class="big-account-remember-label is-disabled">
-            <input class="new-account-checkbox big-account-remember-checkbox" type="checkbox" />
-            <span>记住顺序</span>
-          </label>
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
 
-      const modeSelect = dialog.querySelector('.big-account-mode-select');
-      const scrollContainer = dialog.querySelector('.ba-scroll-container');
       const fileListContainer = dialog.querySelector('.big-account-file-list');
       const orderListContainer = dialog.querySelector('.big-account-order-list');
       const searchInput = dialog.querySelector('.big-account-search-input');
       const extractOrderBtn = dialog.querySelector('[data-action="extract-order"]');
-      const rememberLabel = dialog.querySelector('.big-account-remember-label');
-      const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
       const doneBtn = dialog.querySelector('[data-action="done"]');
       // v1.5.2 需求 2：多对一工具条 DOM 引用
       const multiModeCheckbox = dialog.querySelector('.ba-multi-mode-checkbox');
@@ -2628,18 +2839,16 @@
       let multiGroups = [];
       let pendingGroup = null;
 
-      let isRememberMode = false;
-
-      // 左右面板同步滚动（仅在非记住顺序模式下生效）
+      // 左右面板同步滚动
       let mainSyncingScroll = false;
       fileListContainer.addEventListener('scroll', () => {
-        if (isRememberMode || mainSyncingScroll) return;
+        if (mainSyncingScroll) return;
         mainSyncingScroll = true;
         orderListContainer.scrollTop = fileListContainer.scrollTop;
         mainSyncingScroll = false;
       });
       orderListContainer.addEventListener('scroll', () => {
-        if (isRememberMode || mainSyncingScroll) return;
+        if (mainSyncingScroll) return;
         mainSyncingScroll = true;
         fileListContainer.scrollTop = orderListContainer.scrollTop;
         mainSyncingScroll = false;
@@ -2807,7 +3016,7 @@
           textSpan.textContent = label;
 
           checkbox.addEventListener('change', () => {
-            const key = `${option.merchantId}@@${option.currency}`;
+            const key = bigAccountKey(option.merchantId, option.currency);
             // v1.5.2 需求 2：编辑态下走多对一状态机，非编辑态走原 1:1 逻辑
             if (multiMode && multiEditing) {
               onRightAccountChecked({ merchantId: option.merchantId, currency: option.currency }, checkbox.checked);
@@ -2840,7 +3049,7 @@
           return;
         }
         orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
-          const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
+          const key = bigAccountKey(item.dataset.merchantId, item.dataset.currency);
           const orderIdx = checkedOrder.findIndex((o) => o.key === key);
           const indexSpan = item.querySelector('.big-account-order-index');
           if (!indexSpan) return;
@@ -2890,8 +3099,9 @@
       function sameAccount(a, b) {
         return a && b && a.merchantId === b.merchantId && a.currency === b.currency;
       }
-      function accountKey(acc) {
-        return `${acc.merchantId}@@${acc.currency}`;
+      // B132：大账号 + 币种的勾选 / 预填 / 顺序键用结构化键，账号或币种本身含 @@ 时不同账户不同键
+      function bigAccountKey(merchantId, currency) {
+        return JSON.stringify([String(merchantId ?? ''), String(currency ?? '')]);
       }
       // 判断某 rowIndex 是否已被 pendingGroup 或任何已闭合组覆盖（仅供 renderFileList 初始化勾选态使用）
       function isRowIndexCovered(rowIndex) {
@@ -3067,162 +3277,14 @@
         multiToggleBtn.textContent = multiEditing ? '完成' : '编辑';
       }
 
-      function syncModeUI() {
-        currentFileRows = currentMode === 'fixed' ? rowsWithEmptyBlocks : rows;
-        if (currentMode !== 'fixed') {
-          rememberCheckbox.checked = false;
-          rememberCheckbox.disabled = true;
-          rememberLabel.classList.add('is-disabled');
-        } else {
-          rememberCheckbox.disabled = false;
-          rememberLabel.classList.remove('is-disabled');
-        }
-        // v1.5.2 需求 2：mode 切换导致 currentFileRows / rowIndex 空间变化 → 清空多对一状态避免对不上
-        multiGroups = [];
-        pendingGroup = null;
-        checkedOrder = [];
-        searchInput.value = '';
-        searchMatchIndex = -1;
-        searchMatches = [];
-        lastSearchQuery = '';
+      function initializeState() {
+        if (selectionClosed) return;
         renderFileList();
         renderOrderList();
-
-        if (currentMode === 'fixed' && savedOrder && Array.isArray(savedOrder.assignments) && savedOrder.assignments.length) {
-          rememberCheckbox.checked = true;
-          applyPrefilledOrder(savedOrder.assignments);
-          switchToRememberMode();
-        } else {
-          switchToNormalMode();
-        }
-      }
-
-      function switchToRememberMode() {
-        isRememberMode = true;
-        scrollContainer.style.overflowY = 'auto';
-        fileListContainer.parentElement.style.overflowY = 'visible';
-        orderListContainer.parentElement.style.overflowY = 'visible';
-        scrollContainer.classList.add('ba-single-scroll-active');
-        renderOrderListAsText();
-      }
-
-      function switchToNormalMode() {
-        isRememberMode = false;
-        scrollContainer.style.overflowY = '';
-        fileListContainer.parentElement.style.overflowY = '';
-        orderListContainer.parentElement.style.overflowY = '';
-        scrollContainer.classList.remove('ba-single-scroll-active');
-        renderOrderListAsCheckbox();
-      }
-
-      function renderOrderListAsText() {
-        orderListContainer.innerHTML = '';
-        orderListContainer.classList.add('text-readonly');
-        if (!checkedOrder.length) {
-          orderListContainer.innerHTML = '<div class="big-account-order-empty">暂无已选大账号</div>';
-          return;
-        }
-        checkedOrder.forEach((item, index) => {
-          const div = document.createElement('div');
-          div.className = 'big-account-order-item big-account-order-text-item ba-order-row';
-          const indexSpan = document.createElement('span');
-          indexSpan.className = 'concat-picker-index big-account-order-index ba-order-badge';
-          indexSpan.textContent = `${index + 1}.`;
-          const textSpan = document.createElement('span');
-          textSpan.className = 'big-account-order-text ba-order-content';
-          textSpan.textContent = `${item.merchantId} ${item.currency}`;
-          div.append(indexSpan, textSpan);
-          orderListContainer.appendChild(div);
-        });
-      }
-
-      function renderOrderListAsCheckbox() {
-        orderListContainer.classList.remove('text-readonly');
-        renderOrderList();
-        // Restore checked state
-        checkedOrder.forEach((co) => {
-          const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
-            (el) => el.dataset.merchantId === co.merchantId && el.dataset.currency === co.currency
-          );
-          if (item) {
-            item.querySelector('.big-account-order-checkbox').checked = true;
-          }
-        });
         syncOrderIndices();
         syncCheckboxDisabled();
-      }
-
-      let savedOrder = null;
-
-      function applyPrefilledOrder(assignments) {
-        checkedOrder = [];
-        assignments.forEach((a) => {
-          const key = `${a.merchantId}@@${a.currency}`;
-          const exists = expandedOptions.some((o) => o.merchantId === a.merchantId && o.currency === a.currency);
-          if (exists && checkedOrder.length < currentFileRows.length) {
-            checkedOrder.push({ merchantId: a.merchantId, currency: a.currency, key });
-            const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
-              (el) => el.dataset.merchantId === a.merchantId && el.dataset.currency === a.currency
-            );
-            if (item) {
-              item.querySelector('.big-account-order-checkbox').checked = true;
-            }
-          }
-        });
-        syncOrderIndices();
-        syncCheckboxDisabled();
-      }
-
-      function setInteractive(enabled) {
-        const interactiveElements = [modeSelect, searchInput, doneBtn];
-        interactiveElements.forEach((el) => { el.disabled = !enabled; });
-        orderListContainer.style.pointerEvents = enabled ? '' : 'none';
-        orderListContainer.style.opacity = enabled ? '' : '0.5';
-      }
-
-      async function initializeState() {
-        setInteractive(false);
-        try {
-          const modeResult = await api.bigAccount.loadMode(templateId);
-          if (selectionClosed) return;
-          currentMode = modeResult.mode || 'unfixed';
-
-          // forceMode 优先：记住的顺序与本次文件对不上（文件个数、账号或账号块顺序不符、无法唯一对应）时后端强制指定模式
-          const savedOrderRejected = payload?.forceMode === 'unfixed' || payload?.forceMode === 'fixed';
-          if (savedOrderRejected) {
-            currentMode = payload.forceMode;
-          }
-
-          modeSelect.value = currentMode;
-
-          const orderResult = await api.bigAccount.loadOrder(templateId);
-          if (selectionClosed) return;
-          // 后端已判定记住的分配不能按位置套用到本次文件：之后手动切回固定模式也不预填，避免账号 / 币种填到别的文件或块上。
-          savedOrder = savedOrderRejected ? null : orderResult.order;
-        } catch (_error) {}
-        if (selectionClosed) return;
-        syncModeUI();
-        // v1.5.2 需求 2：初始同步多对一工具条状态 + 互斥
         syncMultiToolbar();
-        syncMultiModeMutualDisabled();
-        setInteractive(true);
       }
-
-      modeSelect.addEventListener('change', async () => {
-        currentMode = modeSelect.value;
-        await api.bigAccount.saveMode({ templateId, mode: currentMode });
-        syncModeUI();
-        syncMultiModeMutualDisabled();
-      });
-
-      rememberCheckbox.addEventListener('change', () => {
-        if (rememberCheckbox.checked) {
-          switchToRememberMode();
-        } else {
-          switchToNormalMode();
-        }
-        syncMultiModeMutualDisabled();
-      });
 
       // ===== v1.5.2 需求 2：多对一工具条事件 =====
       // "单个账号匹多个文件" 勾选框：开/关切换
@@ -3252,7 +3314,6 @@
         syncOrderIndices();
         syncCheckboxDisabled();
         syncMultiToolbar();
-        syncMultiModeMutualDisabled();
       });
 
       // toggle 按钮：编辑↔完成 切换
@@ -3275,36 +3336,6 @@
         }
         syncMultiToolbar();
       });
-
-      // "单个账号匹多个文件" 与 "记住顺序" 互斥
-      function syncMultiModeMutualDisabled() {
-        // 记住顺序勾上 → 多对一模式勾选框 disabled 并取消；立即重渲染左侧避免遗留勾选框
-        if (rememberCheckbox.checked) {
-          multiModeCheckbox.disabled = true;
-          if (multiModeCheckbox.checked) {
-            multiModeCheckbox.checked = false;
-            multiMode = false;
-            multiEditing = false;
-            multiGroups = [];
-            pendingGroup = null;
-            renderFileList();
-          }
-          syncMultiToolbar();
-          return;
-        }
-        // 多对一模式勾上 → 记住顺序 disabled
-        if (multiModeCheckbox.checked) {
-          rememberCheckbox.disabled = true;
-          rememberLabel.classList.add('is-disabled');
-        } else {
-          // 仅在 fixed 模式才允许启用记住顺序；unfixed 下 syncModeUI 已强制 disable
-          if (currentMode === 'fixed') {
-            rememberCheckbox.disabled = false;
-            rememberLabel.classList.remove('is-disabled');
-          }
-        }
-        multiModeCheckbox.disabled = false;
-      }
 
       searchInput.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
@@ -3356,7 +3387,6 @@
           : currentFileRows;
         const result = await api.files.extractBigAccountOrder({
           contextId: payload.contextId,
-          mode: currentMode,
           rowIndexes: extractableRows.map((row, index) => (
             Number.isInteger(row.index) ? row.index : index
           ))
@@ -3385,7 +3415,7 @@
           orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => { cb.checked = false; });
 
           extractedAccounts.forEach((account) => {
-            const key = `${account.merchantId}@@${account.currency}`;
+            const key = bigAccountKey(account.merchantId, account.currency);
             const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
               (el) => el.dataset.merchantId === account.merchantId && el.dataset.currency === account.currency
             );
@@ -3402,7 +3432,7 @@
           const checkedItems = [];
           const uncheckedItems = [];
           allItems.forEach((item) => {
-            const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
+            const key = bigAccountKey(item.dataset.merchantId, item.dataset.currency);
             const orderIdx = checkedOrder.findIndex((o) => o.key === key);
             if (orderIdx >= 0) {
               checkedItems.push({ item, order: orderIdx });
@@ -3644,9 +3674,7 @@
         try {
           result = await api.files.completeBigAccountSelection({
             contextId: payload.contextId,
-            assignments: finalAssignments,
-            mode: currentMode,
-            ...(currentMode === 'fixed' ? { rememberOrder: rememberCheckbox.checked } : {})
+            assignments: finalAssignments
           });
         } catch (error) {
           // IPC 本身抛错：按能否释放本次选择区分未开始与无法确认（见 resolveContinuationIpcRejection）
@@ -4935,9 +4963,11 @@
       const PREPROCESS_ROW_FILTER_FIELD = '过滤账单';
       // v3.2.19：「重复账单过滤」只有勾选框，没有按钮
       const DUPLICATE_ROW_FILTER_FIELD = '重复账单过滤';
+      // v3.2.21：「跨 Sheet 回填」勾选后显示【规则设置】
+      const CROSS_SHEET_BACKFILL_FIELD = '跨 Sheet 回填';
       const preprocessFields = Array.isArray(payload.preprocessFields) && payload.preprocessFields.length
         ? payload.preprocessFields
-        : [PREPROCESS_ROW_FILTER_FIELD, DUPLICATE_ROW_FILTER_FIELD];
+        : [PREPROCESS_ROW_FILTER_FIELD, DUPLICATE_ROW_FILTER_FIELD, CROSS_SHEET_BACKFILL_FIELD];
       const BILL_SPLIT_MERGE_FIELD = '是否拆分/合并明细账单';
       const REUSE_MODULE_FIELD = '复用模块字段的映射关系';
       const BILL_SPLIT_ROW_FILTER_FIELD = '根据字段值过滤账单';
@@ -4987,8 +5017,12 @@
       let currentBillSplitRowFilterRules = cloneRowFilterRules(payload.billSplitMeta && payload.billSplitMeta.rowFilterRules);
       // v3.2.19：原始账单预处理「过滤账单」的过滤规则（【规则设置】带回的草稿，点【保存】时随映射保存）
       let currentPreprocessRowFilterRules = cloneRowFilterRules(payload.template && payload.template.preprocessRowFilterRules);
+      // v3.2.21：原始账单预处理「跨 Sheet 回填」规则（【规则设置】带回的草稿，点【保存】时随映射保存；未设置为 null）
+      let currentCrossSheetBackfillRule = cloneCrossSheetBackfillRule(payload.template && payload.template.crossSheetBackfillRule);
       // v3.2.18：模板的特征值列表（【特征值管理】保存/删除即时落库后回写）；各行在「选择特征值」中选用。
       let currentFeatureFilters = cloneFeatureFilters(payload.template && payload.template.featureFilters);
+      // v3.2.22：特征值管理保存或删除失败后库中结果不确定；关闭后从本弹窗重开【管理】时带入，成功后清除
+      let featureFilterResultUncertain = false;
       // v3.2.21：模板日期格式草稿（「个性化映射设置 → 日期格式」，点【保存】时随映射提交）；不在三档内按 auto
       let currentDateFormat = TEMPLATE_DATE_FORMAT_OPTIONS.some((option) => option.value === payload.dateFormat)
         ? payload.dateFormat
@@ -5135,6 +5169,7 @@
 
         if (fieldName === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD) {
           renderAmountSplitToggleRow(fieldName);
+          renderFeatureFilterSettingRow();
           return;
         }
 
@@ -5167,7 +5202,8 @@
             || (!supportsMultiSelect && savedMapping.mappedField === LOGIC_VALUE_MAPPING_FIELD)
           )))
           .join('');
-        // v3.2.19：「选择特征值」+ 下拉框 +【特征值管理】成组，与映射字段下拉框同行；空间不足时整组换行
+        // v3.2.19：「选择特征值」+ 下拉框成组，与映射字段下拉框同行；空间不足时整组换行
+        //   v3.2.22：行内不再有【特征值管理】，改在「个性化映射设置 → 特征值设置」点【管理】
         // v3.2.19：「逻辑取值」时下拉框右侧显示【设置】与当前候补顺序
         row.innerHTML = `
           <td>${escapeHtml(fieldName)}</td>
@@ -5178,7 +5214,6 @@
                 <span class="mapping-feature-value-group" hidden>
                   <span class="mapping-feature-value-label" hidden>选择特征值</span>
                   <select class="mapping-select mapping-feature-value-select" hidden></select>
-                  <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
                 </span>
                 <button class="secondary-btn small mapping-logic-value-btn" type="button" hidden>设置</button>
                 <span class="mapping-logic-value-preview" hidden></span>
@@ -5204,7 +5239,6 @@
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
         const manageCurrencyBigAccountBtn = row.querySelector('.mapping-currency-big-account-manage-btn');
-        const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
         const featureValueGroup = row.querySelector('.mapping-feature-value-group');
         const featureValueLabel = row.querySelector('.mapping-feature-value-label');
         const featureValueSelect = row.querySelector('.mapping-feature-value-select');
@@ -5355,10 +5389,9 @@
           if (manageCurrencyBigAccountBtn) {
             manageCurrencyBigAccountBtn.hidden = selectedValue !== MERCHANT_ID_CURRENCY_ONLY_OPTION;
           }
-          if (featureFilterBtn) {
+          if (featureValueGroup) {
             const isFeatureFilterMode = selectedValue === FEATURE_FILTER_MAPPING_FIELD;
             featureValueGroup.hidden = !isFeatureFilterMode;
-            featureFilterBtn.hidden = !isFeatureFilterMode;
             featureValueLabel.hidden = !isFeatureFilterMode;
             featureValueSelect.hidden = !isFeatureFilterMode;
           }
@@ -5450,12 +5483,9 @@
           });
         }
 
-        if (featureFilterBtn) {
+        if (featureValueSelect) {
           featureValueSelect.addEventListener('change', () => {
             featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
-          });
-          featureFilterBtn.addEventListener('click', () => {
-            openFeatureFilterManager();
           });
         }
 
@@ -5473,8 +5503,8 @@
         tbody.appendChild(row);
       });
 
-      // v3.2.21：「启用」列——从「原始账单预处理」标题行到最后一个勾选行，两侧竖线贯穿，勾选框居于竖线中间。
-      //   缺标题行或其后没有勾选行（旧载荷）时不加列，勾选框保持在文字右侧。
+      // v3.2.21：「启用」列——从「原始账单预处理」标题行到最后一个勾选行，勾选框居于「启用」列头正下方。
+      //   v3.2.22：去掉列两侧的竖线。缺标题行或其后没有勾选行（旧载荷）时不加列，勾选框保持在文字右侧。
       (function markEnableColumnRows() {
         const rows = Array.from(tbody.rows);
         const startIndex = rows.findIndex((item) => item.dataset.enableHead === 'true');
@@ -5485,8 +5515,6 @@
           return;
         }
         rows.slice(startIndex, endIndex + 1).forEach((item) => item.classList.add('mapping-enable-span'));
-        rows[startIndex].classList.add('mapping-enable-span-start');
-        rows[endIndex].classList.add('mapping-enable-span-end');
       })();
 
       // v3.2.19：取值只有 是 / 否（空白）的行用勾选框（勾选 = 是）：文字在左、勾选框紧跟其右；
@@ -5604,9 +5632,42 @@
         });
       }
 
+      // v3.2.22：「个性化映射设置」中「按字段区分发生额」下方的「特征值设置」——右侧【管理】打开特征值管理（原映射行内的【特征值管理】）。
+      //   不是映射行：不写 data-template-field，collectMappingDraftFromTable 不收集；载荷没有「按字段区分发生额」（旧载荷）时不渲染。
+      function renderFeatureFilterSettingRow() {
+        const row = document.createElement('tr');
+        row.className = 'mapping-setting-row';
+        row.dataset.role = 'feature-filter-setting';
+        row.innerHTML = `
+          <td>特征值设置</td>
+          <td>
+            <div class="mapping-field-editor">
+              <button class="secondary-btn small feature-filter-manage-btn" type="button">管理</button>
+            </div>
+          </td>
+        `;
+        row.querySelector('.feature-filter-manage-btn').addEventListener('click', () => openFeatureFilterManager());
+        tbody.appendChild(row);
+      }
+
       // v3.2.19：原始账单预处理——「过滤账单」勾选后显示【规则设置】；「重复账单过滤」只有勾选框；与拆分/合并无关，始终可用
+      // v3.2.21：「跨 Sheet 回填」勾选后显示【规则设置】
       function renderPreprocessRow(fieldName) {
         const savedValue = String(savedMap.get(fieldName)?.mappedField || '');
+        if (fieldName === CROSS_SHEET_BACKFILL_FIELD) {
+          renderMappingToggleRow(fieldName, {
+            label: fieldName,
+            checked: savedValue === '是',
+            checkedValue: '是',
+            uncheckedValue: '',
+            buttonClass: 'cross-sheet-backfill-btn',
+            buttonLabel: '规则设置',
+            showButtonWhenChecked: true,
+            onToggle: () => {},
+            onButtonClick: () => openCrossSheetBackfillDialog()
+          });
+          return;
+        }
         if (fieldName === DUPLICATE_ROW_FILTER_FIELD) {
           renderMappingToggleRow(fieldName, {
             label: fieldName,
@@ -5789,6 +5850,43 @@
         }));
       }
 
+      // v3.2.21：回填目标不能是发生额 / 余额 / 币种 / 账户所用的源列——这里按当前草稿的主映射先校验一遍；拆分、按字段区分
+      //   发生额等在各自弹窗保存的配置由主进程 collectCrossSheetBackfillExcludedTargets 在保存时一并校验
+      function collectCrossSheetBackfillExcludedTargets() {
+        const headerSet = new Set((payload.template.headers || []).map((header) => String(header ?? '').trim()).filter(Boolean));
+        const amountFields = new Set(['Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId', '按正负号拆分的发生额']);
+        const excluded = new Set();
+        collectMappingDraftFromTable(tbody).forEach((mapping) => {
+          if (!amountFields.has(mapping.templateField)) return;
+          // 字段筛选特征值：草稿中存的是特征值 id，实际读取的是该特征值的筛选字段（与主进程保存、生成时的排除规则一致）
+          const fields = mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD
+            ? [findFeatureFilterById(currentFeatureFilters, getFeatureFilterRef(mapping))?.sourceField]
+            : [mapping.mappedField].concat(mapping.mappedFields || []);
+          fields
+            .map((value) => String(value ?? '').trim())
+            .filter((value) => headerSet.has(value))
+            .forEach((value) => excluded.add(value));
+        });
+        return Array.from(excluded);
+      }
+
+      function openCrossSheetBackfillDialog() {
+        const entryButton = rowByField.get(CROSS_SHEET_BACKFILL_FIELD)?.querySelector('.cross-sheet-backfill-btn');
+        if (entryButton?.disabled || entryButton?.hidden) return;
+        pushModal(overlay, () => createCrossSheetBackfillDialog({
+          headers: payload.template.headers || [],
+          initialRule: currentCrossSheetBackfillRule,
+          getExcludedTargetFields: collectCrossSheetBackfillExcludedTargets,
+          onDone: (nextRule) => {
+            currentCrossSheetBackfillRule = cloneCrossSheetBackfillRule(nextRule);
+            returnToModal(overlay);
+          },
+          onCancel: () => {
+            returnToModal(overlay);
+          }
+        }));
+      }
+
       function openBillSplitMappingsDialogFromMain() {
         const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
         const draftMappings = collectMappingDraftFromTable(tbody);
@@ -5803,13 +5901,8 @@
           preprocessFields: preprocessFields.slice(),
           advancedMappingFields: advancedMappingFields.slice(),
           billSplitGroupFields: billSplitGroupFields.slice(),
-          // v3.2.18：与主映射共用特征值列表；拆分弹窗里的【特征值管理】即时落库后回写主映射
+          // v3.2.18：与主映射共用特征值列表；v3.2.22 起特征值只在主弹窗「特征值设置 →【管理】」维护，拆分弹窗只选用
           featureFilters: currentFeatureFilters,
-          getMainFeatureFilterUsage: () => collectFeatureFilterUsage(collectMappingDraftFromTable(tbody)),
-          onFeatureFiltersChange: (nextFeatureFilters) => {
-            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
-            refreshFeatureValueSelects();
-          },
           onDone: (nextMappings) => {
             currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
             // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
@@ -5872,13 +5965,18 @@
           templateId: payload.template.id,
           headers: payload.template.headers || [],
           featureFilters: currentFeatureFilters,
+          resultUncertain: featureFilterResultUncertain,
           getUsage: () => collectFeatureFilterUsage(
             currentBillSplitMappings,
             FEATURE_FILTER_SPLIT_USAGE_SUFFIX,
             collectFeatureFilterUsage(collectMappingDraftFromTable(tbody))
           ),
+          onResultUncertain: () => {
+            featureFilterResultUncertain = true;
+          },
           onChange: (nextFeatureFilters) => {
             currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
+            featureFilterResultUncertain = false;
             refreshFeatureValueSelects();
           },
           onClose: () => {
@@ -5921,21 +6019,18 @@
 
         function setRowDisabled(row, control, disabled) {
           if (!row || !control) return;
-          // v3.2.16：互斥禁用时【特征值管理】按钮与「选择特征值」随下拉框一起禁用
-          const featureFilterButton = row.querySelector('.mapping-feature-filter-btn');
+          // v3.2.16：互斥禁用时「选择特征值」随下拉框一起禁用
           const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           // v3.2.19：逻辑取值的【设置】同样随行禁用
           const logicValueButton = row.querySelector('.mapping-logic-value-btn');
           if (disabled) {
             row.classList.add('mapping-row-mutex-disabled');
             control.disabled = true;
-            if (featureFilterButton) featureFilterButton.disabled = true;
             if (featureValueSelect) featureValueSelect.disabled = true;
             if (logicValueButton) logicValueButton.disabled = true;
           } else {
             row.classList.remove('mapping-row-mutex-disabled');
             control.disabled = false;
-            if (featureFilterButton) featureFilterButton.disabled = false;
             if (featureValueSelect) featureValueSelect.disabled = false;
             if (logicValueButton) logicValueButton.disabled = false;
           }
@@ -6110,6 +6205,8 @@
             preprocessRowFilterRules: cloneRowFilterRules(currentPreprocessRowFilterRules),
             // v3.2.21：模板日期格式（没有渲染「日期格式」行时不提交，保持原值）
             ...(dateFormatRow ? { dateFormat: currentDateFormat } : {}),
+            // v3.2.21：未设置时传 {}，勾选了却没有设置由主进程拒绝；未勾选时保留草稿
+            crossSheetBackfillRule: cloneCrossSheetBackfillRule(currentCrossSheetBackfillRule) || {},
             preserveOwn: !bigAccountsLoadedWithOwn,
             ...(channelAssignment ? { channel: channelAssignment } : {})
           });
@@ -6322,16 +6419,14 @@
       advancedMappingFields = [],
       billSplitGroupFields = [],
       featureFilters = [],
-      getMainFeatureFilterUsage = null,
-      onFeatureFiltersChange = null,
       onDone,
       onCancel
     }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card bill-split-mappings-card';
-      // v3.2.18：与主映射共用特征值列表；【特征值管理】即时落库后经 onFeatureFiltersChange 回写主映射弹窗。
-      let currentFeatureFilters = cloneFeatureFilters(featureFilters);
+      // v3.2.18：与主映射共用特征值列表；v3.2.22 起本弹窗只选用，特征值在主弹窗「特征值设置 →【管理】」维护。
+      const currentFeatureFilters = cloneFeatureFilters(featureFilters);
 
       // 模板字段列表 = targetFields 排除 Currency / Credit Amount / Debit Amount + 高级字段 + bill-split group 字段
       const excludeFields = new Set([
@@ -6421,7 +6516,6 @@
                 ${supportsMultiSelect ? `
                 <span class="mapping-feature-value-label" hidden>选择特征值</span>
                 <select class="mapping-select mapping-feature-value-select" hidden></select>
-                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
                 ` : ''}
                 ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
@@ -6438,7 +6532,6 @@
           `;
 
           const select = row.querySelector('.bill-split-mapping-select');
-          const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
           const featureValueLabel = row.querySelector('.mapping-feature-value-label');
           const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           const concatPicker = row.querySelector('.concat-field-picker');
@@ -6506,14 +6599,11 @@
             });
           }
 
-          if (featureFilterBtn) {
+          if (featureValueSelect) {
             featureValueSelect.addEventListener('change', () => {
               entry.featureFilterRef = featureValueSelect.value;
               syncFeatureFilterRef();
               featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
-            });
-            featureFilterBtn.addEventListener('click', () => {
-              openFeatureFilterManager();
             });
           }
 
@@ -6526,8 +6616,7 @@
           function syncEditorState() {
             const isConcatMode = select.value === CONCAT_FIELDS_MAPPING_FIELD;
             const isFeatureFilterMode = select.value === FEATURE_FILTER_MAPPING_FIELD;
-            if (featureFilterBtn) {
-              featureFilterBtn.hidden = !isFeatureFilterMode;
+            if (featureValueSelect) {
               featureValueLabel.hidden = !isFeatureFilterMode;
               featureValueSelect.hidden = !isFeatureFilterMode;
             }
@@ -6560,40 +6649,6 @@
       function validateLocalMappings() {
         // 校验：同字段不可重复（已通过结构保证），空字段会被后端丢弃，无需前端报错
         return true;
-      }
-
-      // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」（保留已选）。
-      //   已删除特征值的缓存引用一并清掉：删除最大 id 后再新增会沿用该 id，残留引用切回时会指向新特征值而界面显示空白。
-      function refreshFeatureValueSelects() {
-        currentDialogMappings.forEach((entry) => {
-          if (!entry.featureFilterRef || findFeatureFilterById(currentFeatureFilters, entry.featureFilterRef)) return;
-          entry.featureFilterRef = '';
-          if (entry.mappedField === FEATURE_FILTER_MAPPING_FIELD) entry.mappedFields = [];
-        });
-        tbody.querySelectorAll('.mapping-feature-value-select').forEach((featureValueSelect) => {
-          renderFeatureFilterOptions(featureValueSelect, currentFeatureFilters, featureValueSelect.value);
-        });
-      }
-
-      function openFeatureFilterManager() {
-        pushModal(overlay, () => createFeatureFilterManagerDialog({
-          templateId: template.id,
-          headers,
-          featureFilters: currentFeatureFilters,
-          getUsage: () => collectFeatureFilterUsage(
-            currentDialogMappings,
-            FEATURE_FILTER_SPLIT_USAGE_SUFFIX,
-            typeof getMainFeatureFilterUsage === 'function' ? getMainFeatureFilterUsage() : new Map()
-          ),
-          onChange: (nextFeatureFilters) => {
-            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
-            refreshFeatureValueSelects();
-            if (typeof onFeatureFiltersChange === 'function') onFeatureFiltersChange(cloneFeatureFilters(currentFeatureFilters));
-          },
-          onClose: () => {
-            returnToModal(overlay);
-          }
-        }));
       }
 
       // 返回因「逻辑取值」留空的字段（拆分/合并账单映射不支持该值）。
@@ -6888,13 +6943,6 @@
         else seen.add(group.templateField);
         if (group.valueType === 'input' && !group.value) errors.push(`${label}：请输入映射值`);
         if (group.valueType === 'input' && group.value.length > 32767) errors.push(`${label}：映射值超过 32767 个字符（Excel 单元格上限）`);
-        // 同主进程 hasWorksheetEscapeLikeText：模拟写出（控制字符编码为 _xHHHH_）再读回（_xHHHH_ 还原），与原文不同即会被改写
-        if (group.valueType === 'input' && /_x/i.test(group.value)) {
-          const written = group.value.replace(/[\u0000-\u0008\u000b-\u001f]/g, (char) => `_x${char.charCodeAt(0).toString(16).padStart(4, '0')}_`);
-          if (written.replace(/_x([\da-f]{4})_/gi, (_match, code) => String.fromCharCode(parseInt(code, 16))) !== group.value) {
-            errors.push(`${label}：映射值含写入 Excel 后会被改写的文本（形如 _x0041_，或与回车等控制字符相连后构成此形式），请修改`);
-          }
-        }
         if (!BILL_SPLIT_FEE_FIELD_MAPPING_VALUE_TYPES.includes(group.valueType)) errors.push(`${label}：映射字段无效，请重新选择`);
       });
       return errors;
@@ -7113,7 +7161,7 @@
     }
 
     // 返回 { rules, errors }：字段与值都为空的条件忽略，没有条件的规则忽略；值去首尾空白。
-    function normalizeRowFilterDraft(groups) {
+    function normalizeRowFilterDraft(groups, { missingMessage = '请至少设置一条过滤规则' } = {}) {
       const rules = [];
       const errors = [];
       groups.forEach((group) => {
@@ -7127,7 +7175,7 @@
         if (conditions.length) rules.push({ seq: rules.length + 1, conditions });
       });
       if (!rules.length) {
-        errors.push('请至少设置一条过滤规则');
+        errors.push(missingMessage);
       }
       rules.forEach((rule) => {
         rule.conditions.forEach((condition, index) => {
@@ -7142,7 +7190,11 @@
       return { rules, errors };
     }
 
-    function createRowFilterRulesDialog({ headers = [], initialRules = [], tooltip = '', onDone, onCancel }) {
+    // v3.2.21：title / label / addLabel / missingMessage 供「跨 Sheet 回填 → 待回填行条件」复用本编辑器
+    function createRowFilterRulesDialog({
+      headers = [], initialRules = [], tooltip = '', title = '过滤规则设置', label = '过滤规则',
+      addLabel = '+ 新增过滤规则', missingMessage = '请至少设置一条过滤规则', onDone, onCancel
+    }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card scenario-config-card row-filter-rules-card';
@@ -7153,15 +7205,15 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">过滤规则设置</div>
+          <div class="dialog-title">${escapeHtml(title)}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body scenario-config-body">
           <div class="scenario-config-row scenario-config-row-multi">
-            <span class="scenario-config-label">过滤规则 <span class="scenario-config-tooltip" title="${escapeHtml(tooltip)}">ⓘ</span></span>
+            <span class="scenario-config-label">${escapeHtml(label)} <span class="scenario-config-tooltip" title="${escapeHtml(tooltip)}">ⓘ</span></span>
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-multi="rowFilterRules"></div>
-              <button class="text-action small" type="button" data-action="add-rule">+ 新增过滤规则</button>
+              <button class="text-action small" type="button" data-action="add-rule">${escapeHtml(addLabel)}</button>
             </div>
           </div>
         </div>
@@ -7283,7 +7335,7 @@
       });
 
       dialog.querySelector('[data-action="save"]').addEventListener('click', () => {
-        const { rules, errors } = normalizeRowFilterDraft(groups);
+        const { rules, errors } = normalizeRowFilterDraft(groups, { missingMessage });
         if (errors.length) {
           pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));
           return;
@@ -7332,6 +7384,294 @@
       dialog.querySelector('[data-action="save"]').addEventListener('click', () => onDone(select.value));
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => onCancel());
       dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ==================== v3.2.21 原始账单预处理「跨 Sheet 回填」：规则设置 ====================
+    // 主表（模板读取的第一个 Sheet）中满足「待回填行条件」的行，按配对字段与同一原始账单中来源 Sheet 的行一对一配对，
+    // 把配置的来源字段回填到本表空单元格。待回填行条件复用过滤规则编辑器（子弹窗）。
+    // 【保存】只校验并暂存，随映射关系管理【保存】提交；【取消】/ × 不改暂存。
+    // 与主进程 src/backend/file-service/cross-sheet-backfill.js 的 validateCrossSheetBackfillRule 同口径，改规则时两边一起改。
+    const CROSS_SHEET_BACKFILL_LABEL = '跨 Sheet 回填';
+    const CROSS_SHEET_BACKFILL_MATCH_MODES = [
+      { value: 'amount', label: '按金额' },
+      { value: 'exact', label: '按原值' }
+    ];
+    const CROSS_SHEET_BACKFILL_DATE_ORDERS = [
+      { value: 'auto', label: '自动' },
+      { value: 'DMY', label: '日在前（dd/mm/yyyy）' },
+      { value: 'MDY', label: '月在前（mm/dd/yyyy）' }
+    ];
+    const CROSS_SHEET_BACKFILL_TIPS = '主表（模板读取的第一个 Sheet）中满足「待回填行条件」的账单，按配对字段在来源 Sheet 中找第一笔未使用、配对值相同的行'
+      + '（同值多笔按顺序一对一，配上的来源行不再使用），把来源字段的值回填到本表对应字段的空单元格（不覆盖已有值）。'
+      + '按金额配对时，文本中有多个数字取紧跟币种符号的那个。'
+      + '配不上的账单不参与生成，并在错误报告中列出。本表币种列为空时自动取本 Sheet 其他账单的币种。'
+      + '【导出明细】时，回填后的原始账单另存为「原文件名_回填.xlsx」。';
+    const CROSS_SHEET_BACKFILL_CONDITION_TOOLTIP = `同一规则内的条件需全部满足；满足任一规则的账单需要从来源 Sheet 回填。${ROW_FILTER_FIELD_COMPARE_HINT}`;
+    const CROSS_SHEET_BACKFILL_MATCH_HINTS = {
+      amount: '两边识别出金额后比较，如「Trade - $65.45」与 65.45',
+      exact: '两边单元格去掉首尾空格后完全相同'
+    };
+
+    function createBlankCrossSheetBackfillField() {
+      return { targetField: '', sourceField: '' };
+    }
+
+    // 规范化为可编辑的规则对象；未设置返回 null
+    function cloneCrossSheetBackfillRule(rule) {
+      if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return null;
+      const matchMode = String(rule.matchMode || '');
+      const sourceDateOrder = String(rule.sourceDateOrder || '');
+      return {
+        sourceSheetName: String(rule.sourceSheetName || ''),
+        rowRules: cloneRowFilterRules(rule.rowRules),
+        matchMode: CROSS_SHEET_BACKFILL_MATCH_MODES.some((item) => item.value === matchMode) ? matchMode : 'amount',
+        matchField: String(rule.matchField || ''),
+        sourceMatchField: String(rule.sourceMatchField || ''),
+        sourceDateOrder: CROSS_SHEET_BACKFILL_DATE_ORDERS.some((item) => item.value === sourceDateOrder) ? sourceDateOrder : 'auto',
+        backfillFields: (Array.isArray(rule.backfillFields) ? rule.backfillFields : [])
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => ({ targetField: String(item.targetField || ''), sourceField: String(item.sourceField || '') }))
+      };
+    }
+
+    // 待回填行条件摘要：「ValueDate 空值」；多条件「且」，多规则「；或 」
+    function formatRowFilterRulesSummary(rules) {
+      return cloneRowFilterRules(rules).map((group) => group.conditions.map((condition) => (
+        ROW_FILTER_VALUELESS_OPS.has(condition.op)
+          ? `${condition.field} ${condition.op}`
+          : `${condition.field} ${condition.op} ${condition.value}`
+      )).join(' 且 ')).join('；或 ');
+    }
+
+    // 返回 { rule, errors }：去首尾空白（来源 Sheet 名除外）；本表字段与来源字段都为空的回填行忽略
+    function normalizeCrossSheetBackfillDraft(draft, { excludedTargetFields = [] } = {}) {
+      const errors = [];
+      const label = CROSS_SHEET_BACKFILL_LABEL;
+      // Sheet 名按原文保存（工作簿可同时有「USD」与「USD 」两张表，与主进程同口径），只有全为空白时视为未填写
+      const rawSheetName = String(draft.sourceSheetName || '');
+      const rule = {
+        sourceSheetName: rawSheetName.trim() ? rawSheetName : '',
+        rowRules: cloneRowFilterRules(draft.rowRules),
+        matchMode: draft.matchMode,
+        matchField: String(draft.matchField || '').trim(),
+        sourceMatchField: String(draft.sourceMatchField || '').trim(),
+        sourceDateOrder: draft.sourceDateOrder,
+        backfillFields: draft.backfillFields
+          .map((item) => ({ targetField: String(item.targetField || '').trim(), sourceField: String(item.sourceField || '').trim() }))
+          .filter((item) => item.targetField !== '' || item.sourceField !== '')
+      };
+      if (!rule.sourceSheetName) errors.push(`${label}：请填写来源 Sheet 名`);
+      if (!rule.rowRules.length) errors.push(`${label}：请至少设置一条待回填行条件`);
+      if (!rule.matchField) errors.push(`${label}：请选择本表配对字段`);
+      if (!rule.sourceMatchField) errors.push(`${label}：请填写来源配对字段`);
+      if (!rule.backfillFields.length) errors.push(`${label}：请至少设置一个回填字段`);
+      const excludedSet = new Set(excludedTargetFields);
+      const seenTargets = new Set();
+      rule.backfillFields.forEach((item, index) => {
+        const rowLabel = `${label}：回填字段第 ${index + 1} 行`;
+        if (!item.targetField) errors.push(`${rowLabel}请选择本表字段`);
+        if (!item.sourceField) errors.push(`${rowLabel}请填写来源字段`);
+        if (!item.targetField) return;
+        if (seenTargets.has(item.targetField)) errors.push(`${label}：本表字段「${item.targetField}」重复设置`);
+        seenTargets.add(item.targetField);
+        if (excludedSet.has(item.targetField)) {
+          errors.push(`${label}：「${item.targetField}」用于发生额、余额、币种或账户映射，不能作为回填字段`);
+        }
+      });
+      return { rule, errors };
+    }
+
+    function createCrossSheetBackfillDialog({ headers = [], initialRule = null, getExcludedTargetFields = null, onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card cross-sheet-backfill-card';
+      const headerList = (Array.isArray(headers) ? headers : []).map((header) => String(header ?? '')).filter((header) => header !== '');
+      const headerSet = new Set(headerList);
+      const draft = cloneCrossSheetBackfillRule(initialRule) || cloneCrossSheetBackfillRule({});
+      if (!draft.backfillFields.length) draft.backfillFields.push(createBlankCrossSheetBackfillField());
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">${escapeHtml(CROSS_SHEET_BACKFILL_LABEL)}${titleTipsHtml(CROSS_SHEET_BACKFILL_TIPS)}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">来源 Sheet</span>
+            <input class="scenario-config-input" type="text" data-field="sourceSheetName" placeholder="同一原始账单中的 Sheet 名，如 USD">
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">待回填行条件</span>
+            <span class="cross-sheet-backfill-condition-summary" data-role="condition-summary"></span>
+            <button class="secondary-btn small" type="button" data-action="edit-conditions">条件设置</button>
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">配对方式</span>
+            <select class="scenario-config-input scenario-config-input-narrow" data-field="matchMode">
+              ${CROSS_SHEET_BACKFILL_MATCH_MODES.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}
+            </select>
+            <span class="cross-sheet-backfill-hint" data-role="match-hint"></span>
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">本表配对字段</span>
+            <select class="scenario-config-input" data-field="matchField"></select>
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">来源配对字段</span>
+            <input class="scenario-config-input" type="text" data-field="sourceMatchField" placeholder="来源 Sheet 的表头名，如 Credit Amount">
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">来源日期格式</span>
+            <select class="scenario-config-input scenario-config-input-narrow cross-sheet-backfill-date-order" data-field="sourceDateOrder">
+              ${CROSS_SHEET_BACKFILL_DATE_ORDERS.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}
+            </select>
+            <span class="cross-sheet-backfill-hint">只影响来源 Sheet 中文本形式的日期；Excel 日期单元格不受影响</span>
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">回填字段</span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-role="backfill-fields"></div>
+              <button class="text-action small" type="button" data-action="add-field">+ 新增回填字段</button>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+
+      const sourceSheetInput = dialog.querySelector('[data-field="sourceSheetName"]');
+      const matchModeSelect = dialog.querySelector('[data-field="matchMode"]');
+      const matchFieldSelect = dialog.querySelector('[data-field="matchField"]');
+      const sourceMatchInput = dialog.querySelector('[data-field="sourceMatchField"]');
+      const dateOrderSelect = dialog.querySelector('[data-field="sourceDateOrder"]');
+      const summary = dialog.querySelector('[data-role="condition-summary"]');
+      const matchHint = dialog.querySelector('[data-role="match-hint"]');
+      const fieldsContainer = dialog.querySelector('[data-role="backfill-fields"]');
+
+      function renderFieldOptions(selected) {
+        const options = ['<option value="">（请选择）</option>']
+          .concat(headerList.map((header) => (
+            `<option value="${escapeHtml(header)}"${header === selected ? ' selected' : ''}>${escapeHtml(header)}</option>`
+          )));
+        // 模板【更新】后字段已不在表头：保留一个「（已删除）」选项，保存模板时由主进程拒绝。
+        if (selected && !headerSet.has(selected)) {
+          options.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}（已删除）</option>`);
+        }
+        return options.join('');
+      }
+
+      function isStale(field) {
+        return Boolean(field) && !headerSet.has(field);
+      }
+
+      function renderSummary() {
+        const text = formatRowFilterRulesSummary(draft.rowRules);
+        summary.textContent = text || '未设置';
+        summary.title = text;
+        summary.classList.toggle('is-empty', !text);
+      }
+
+      function renderMatchHint() {
+        matchHint.textContent = CROSS_SHEET_BACKFILL_MATCH_HINTS[draft.matchMode] || '';
+      }
+
+      function renderFields() {
+        fieldsContainer.innerHTML = draft.backfillFields.map((item, index) => `
+          <div class="scenario-config-multi-row" data-index="${index}">
+            <select class="scenario-config-input${isStale(item.targetField) ? ' is-stale' : ''}" data-backfill-field="targetField" title="本表字段">${renderFieldOptions(item.targetField)}</select>
+            <span class="cross-sheet-backfill-arrow" aria-hidden="true">←</span>
+            <input class="scenario-config-input" type="text" data-backfill-field="sourceField" value="${escapeHtml(item.sourceField)}" placeholder="来源 Sheet 的表头名" title="来源字段">
+            <button class="icon-close-small" type="button" data-backfill-action="remove" title="删除该回填字段">×</button>
+          </div>
+        `).join('');
+      }
+
+      sourceSheetInput.value = draft.sourceSheetName;
+      matchModeSelect.value = draft.matchMode;
+      matchFieldSelect.innerHTML = renderFieldOptions(draft.matchField);
+      matchFieldSelect.classList.toggle('is-stale', isStale(draft.matchField));
+      sourceMatchInput.value = draft.sourceMatchField;
+      dateOrderSelect.value = draft.sourceDateOrder;
+
+      sourceSheetInput.addEventListener('input', () => { draft.sourceSheetName = sourceSheetInput.value; });
+      sourceMatchInput.addEventListener('input', () => { draft.sourceMatchField = sourceMatchInput.value; });
+      matchModeSelect.addEventListener('change', () => {
+        draft.matchMode = matchModeSelect.value;
+        renderMatchHint();
+      });
+      matchFieldSelect.addEventListener('change', () => {
+        draft.matchField = matchFieldSelect.value;
+        matchFieldSelect.classList.toggle('is-stale', isStale(draft.matchField));
+      });
+      dateOrderSelect.addEventListener('change', () => { draft.sourceDateOrder = dateOrderSelect.value; });
+
+      fieldsContainer.addEventListener('change', (event) => {
+        const control = event.target.closest('select[data-backfill-field]');
+        const row = control && control.closest('[data-index]');
+        const item = row && draft.backfillFields[Number(row.dataset.index)];
+        if (!item) return;
+        item.targetField = control.value;
+        control.classList.toggle('is-stale', isStale(control.value));
+      });
+      fieldsContainer.addEventListener('input', (event) => {
+        const input = event.target.closest('input[data-backfill-field]');
+        const row = input && input.closest('[data-index]');
+        const item = row && draft.backfillFields[Number(row.dataset.index)];
+        if (item) item.sourceField = input.value;
+      });
+      fieldsContainer.addEventListener('click', (event) => {
+        const removeButton = event.target.closest('button[data-backfill-action="remove"]');
+        const row = removeButton && removeButton.closest('[data-index]');
+        if (!row) return;
+        // 删到最后一行时保留一个空白行
+        if (draft.backfillFields.length > 1) draft.backfillFields.splice(Number(row.dataset.index), 1);
+        else draft.backfillFields = [createBlankCrossSheetBackfillField()];
+        renderFields();
+      });
+      dialog.querySelector('[data-action="add-field"]').addEventListener('click', () => {
+        draft.backfillFields.push(createBlankCrossSheetBackfillField());
+        renderFields();
+      });
+
+      dialog.querySelector('[data-action="edit-conditions"]').addEventListener('click', () => {
+        pushModal(overlay, () => createRowFilterRulesDialog({
+          headers: headerList,
+          initialRules: draft.rowRules,
+          tooltip: CROSS_SHEET_BACKFILL_CONDITION_TOOLTIP,
+          title: '待回填行条件',
+          label: '待回填行条件',
+          addLabel: '+ 新增条件规则',
+          missingMessage: `${CROSS_SHEET_BACKFILL_LABEL}：请至少设置一条待回填行条件`,
+          onDone: (nextRules) => {
+            draft.rowRules = cloneRowFilterRules(nextRules);
+            renderSummary();
+            returnToModal(overlay);
+          },
+          onCancel: () => {
+            returnToModal(overlay);
+          }
+        }));
+      });
+
+      dialog.querySelector('[data-action="save"]').addEventListener('click', () => {
+        const excludedTargetFields = typeof getExcludedTargetFields === 'function' ? getExcludedTargetFields() : [];
+        const { rule, errors } = normalizeCrossSheetBackfillDraft(draft, { excludedTargetFields });
+        if (errors.length) {
+          pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));
+          return;
+        }
+        onDone(rule);
+      });
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => onCancel());
+      dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
+
+      renderSummary();
+      renderMatchHint();
+      renderFields();
       overlay.appendChild(dialog);
       return overlay;
     }
@@ -9885,42 +10225,6 @@
       return overlay;
     }
 
-    // 记忆顺序不匹配提示，由当前弹窗会话处理后续选择。
-    function createRememberOrderMismatchDialog({ message, bigAccountResult }) {
-      const overlay = createOverlay();
-      const dialog = document.createElement('div');
-      dialog.className = 'modal-card alert-card';
-      dialog.innerHTML = `
-        <div class="alert-body">
-          <div class="alert-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="rememberMismatchIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 3L2 20h20L12 3z" fill="none" stroke="url(#rememberMismatchIconG)" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" stroke="url(#rememberMismatchIconG)" stroke-width="2" stroke-linecap="round"/></svg>
-          </div>
-          <div class="alert-message">${message}</div>
-        </div>
-        <div class="dialog-actions center">
-          <button class="secondary-btn small" type="button" data-action="change-config">变更配置</button>
-          <button class="primary-btn small" type="button" data-action="confirm">确认</button>
-        </div>
-      `;
-
-      dialog.querySelector('[data-action="change-config"]').addEventListener('click', () => {
-        closeModal();
-        const selectionPayload = {
-          ...bigAccountResult,
-          status: 'select-big-account'
-        };
-        openModal(() => createBigAccountSelectionDialog(selectionPayload));
-      });
-
-      dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
-        api.files.cancelBigAccountSelection(bigAccountResult.contextId);
-        closeModal();
-      });
-
-      overlay.appendChild(dialog);
-      return overlay;
-    }
-
     function createAccountMappingMigrationDialog({ rows = [], templates = [], onDone }) {
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
@@ -10041,7 +10345,7 @@
     //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
     //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
 
-    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createDuplicateRowsReviewDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
+    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createDuplicateRowsReviewDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
   }
   global.ConfigurationDialogs = Object.freeze({ createConfigurationDialogs, buildBalanceSeedConfirmationRequest });
 })(window);

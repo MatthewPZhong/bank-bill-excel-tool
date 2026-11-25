@@ -244,6 +244,9 @@ function createFundReconService(options = {}) {
         fundTransferReconContext: { reconRows: workingReconRows },
         dispatchReconContext: { dispatchReconRows },
         fundTransferAuditContext: { reconRows: auditRows },
+        // v3.2.22：与主路径一致，R5s2 网关来源与多对多检测器网关侧共用账户映射。
+        fundTransferAccountMappingMap: snapshot.accountMappingMap,
+        fundTransferChannelMissingDiagnosticSource: snapshot.r5ChannelMissingDiagnosticSource || null,
         fundTransferDatePolicy: snapshot.datePolicy,
         initialWarnings: snapshot.initialWarnings,
         onProgress: jobContext.onProgress

@@ -17,6 +17,8 @@ node --test tests/unit/main-process/execution-descriptor-resource-profiles.test.
 
 v3.2.20 下线业务OP数据核对、月度Pending数据核对、收单单据币种校验、月度银行对账单BU回填校验时，两份 JSON 保持逐字不变；测试在读取后按 runtime helper 与 Archive 测试中显式列出的已下线 action / channel 前缀扣除对应条目（runtime 49 → 25 action，Archive 268 → 194 channel），并断言扣除数量，其余条目仍与固定期望逐项比较。原 `pending-import-contract.js` 只服务已下线的 Pending 导入，一并删除。
 
+v3.2.22 去掉网银账单「账号顺序固定」，删除 `big-account-mode:{load,save}`、`big-account-order:{load,save}` 四个入口（均未绑定 action）：两份 JSON 仍逐字不变，Archive 测试按显式列出的 channel 扣除（194 → 190 channel；可恢复 TaskPolicy 100 → 98），`action-task-binding-registry` 合同只重算 TaskPolicy 清单计数与摘要。
+
 Runtime 的五 registry 重建是测试准备，并非 production descriptor 转换器：它从已冻结 binding 反查已有值，不验证 descriptor exact shape、重复定义或 G1/G2 registrations。Main binding 清单由代码清点得到；[等价测试](../../unit/main-process/execution-descriptor-equivalence.test.js) 补充了正常注入、跨 generation 隔离与 passthrough，不能单靠本 fixture 的 callable 标记推断这些行为。
 
 函数的 callable/API 标记只证明注册形状。Archive 已执行固定领域行为样例，仍不等于真实文件/DB proof 或全部业务输入等价。资源测试走真实 Supervisor 但在载体创建前停止，不能作为实际 worker exit、取消、恢复、service/adapter 或 Windows 打包验收证据。
