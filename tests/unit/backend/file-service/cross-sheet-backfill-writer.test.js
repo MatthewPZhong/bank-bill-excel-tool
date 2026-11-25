@@ -1663,7 +1663,7 @@ test('普通 xlsx 的内容类型中注释掉的宏工作簿声明不算：按�
   assert.match(cellXml((await readZipEntries(outputPath))['xl/worksheets/sheet2.xml'], 'C2'), /<f>100\+100<\/f>/);
 });
 
-test('内容为 xlsm 的账单转换写出按工作簿实际生效的 workbookPr：注释中的旧 date1904="1" 不算，未回填的日期序号仍是原日期', async (t) => {
+test('内容为 xlsm 的账单转换写出：workbook.xml 注释中有旧 date1904="1" 时整份拒绝，不写出（release/v3.2.22 合入 B133 后）', async (t) => {
   const dir = makeTempDir(t);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
@@ -1672,15 +1672,14 @@ test('内容为 xlsm 的账单转换写出按工作簿实际生效的 workbookPr
   const sourceBuffer = await rewriteZipBuffer(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsm' }), 'xl/workbook.xml',
     (xml) => xml.replace(/<workbookPr\b[^>]*\/>/, '<!-- <workbookPr date1904="1"/> --><workbookPr/>'));
   const outputPath = path.join(dir, 'xlsm-commented-1904_回填.xlsx');
-  const result = await writeCrossSheetBackfillWorkbook({
+  // release/v3.2.22 合入 fix/statement-xlsx-io-boundary（B133）后：workbook.xml 含带标签的注释、或标签内（含属性值）有制表符等
+  //   非常规空白时无法核对读取库读的是哪张表，按无法定位工作表原文整份拒绝（Excel、WPS 与银行系统不会写出这些写法）
+  //   导入时同一文件已被拒绝，这里确认写出侧同样不写出
+  await assert.rejects(writeCrossSheetBackfillWorkbook({
     sourceFilePath: path.join(dir, 'xlsm-commented-1904.xlsx'), sourceBuffer, outputFilePath: outputPath,
     patches: [{ rowNumber: 3, cells: [{ columnIndex: 0, value: '2026-09-26', kind: 'date' }] }], source: BIFF_SOURCE
-  });
-  assert.equal(result.converted, true);
-  const output = XLSX.readFile(outputPath);
-  assert.equal(Boolean(output.Workbook && output.Workbook.WBProps && output.Workbook.WBProps.date1904), false);
-  assert.equal(output.Sheets.NGN.A2.v, 46290);
-  assert.equal(output.Sheets.NGN.A3.v, 46291);
+  }), /无法定位工作表「NGN」的原文/);
+  assert.equal(fs.existsSync(outputPath), false);
 });
 
 test('ODS 转换写出：日期单元格被扩展属性误读成文本时按标准日期写出；只写在属性上的文本保留连续空格；mimetype 被压缩时同样按 ODS 处理', async (t) => {

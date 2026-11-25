@@ -17538,7 +17538,7 @@ function registerFileHandlers() {
         if (prepared.previewOnly && !selectionResult.parentProvisionalEntries) {
           selectionResult.parentProvisionalEntries = provisionalFileEntries;
         }
-        // v3.2.21：跨 Sheet 回填跳过了全部交易时返回逐行跳过原因（不按「账户个数或账户号匹配不上」提示检查账户）
+        // v3.2.21：跨 Sheet 回填跳过了全部交易时返回逐行跳过原因（不提示用户检查账户个数或账户号）
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
         if (!selectionRows.length || isAllTransactionsSkippedByBackfill(provisionalFileEntries)) {

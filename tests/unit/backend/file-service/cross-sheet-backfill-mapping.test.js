@@ -1990,7 +1990,6 @@ test('xlsx 的日期系统按工作簿根元素下实际生效的 workbookPr：�
   const JSZip = require('jszip');
   const dir = makeTempDir(t);
   const variants = {
-    commented: (xml) => xml.replace(/<workbookPr\b[^>]*\/>/, '<!-- <workbookPr date1904="1"/> --><workbookPr/>'),
     extension: (xml) => xml.replace(/<workbookPr\b[^>]*\/>/, '<workbookPr/>').replace('</workbook>',
       '<extLst><ext uri="urn:example"><x15:workbookPr xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" date1904="1"/></ext></extLst></workbook>')
   };
@@ -2011,6 +2010,17 @@ test('xlsx 的日期系统按工作簿根元素下实际生效的 workbookPr：�
     });
     assert.equal(mapped[1][0], '2026-09-25', label);
   }
+  // release/v3.2.22 合入 fix/statement-xlsx-io-boundary（B133）后：workbook.xml 含带标签的注释、或标签内（含属性值）有制表符等
+  //   非常规空白时无法核对读取库读的是哪张表，按无法定位工作表原文整份拒绝（Excel、WPS 与银行系统不会写出这些写法）
+  const commentedPath = path.join(dir, 'workbook-pr-commented.xlsx');
+  writeWorkbook(commentedPath, { main: [['Date', 'In', 'Desc'], [46290, 1, 'x']], source: [['Date', 'Credit']] });
+  await rewriteZipEntry(commentedPath, 'xl/workbook.xml', (xml) => xml.replace(/<workbookPr\b[^>]*\/>/, '<!-- <workbookPr date1904="1"/> --><workbookPr/>'));
+  assert.throws(() => buildMappedRows({
+    inputFilePath: commentedPath,
+    orderedTargetFields: ['BillDate', 'Credit Amount'],
+    mappingByField: { BillDate: 'Date', 'Credit Amount': 'In' },
+    expectedSourceHeaders: ['Date', 'In', 'Desc']
+  }), /无法定位工作表「MAIN」的原文/, 'commented');
 });
 
 // ---- v3.2.21 审查回归（第二十六轮）----
@@ -2119,7 +2129,7 @@ test('xlsx 日期系统按根元素及其直接子元素的命名空间解析：
   const filePath = path.join(dir, 'local-namespace.xlsx');
   writeWorkbook(filePath, { main: [['Date', 'In', 'Desc'], [46290, 1, 'x']], source: [['Date', 'Credit']] });
   await rewriteZipEntry(filePath, 'xl/workbook.xml', (xml) => xml
-    .replace(/<workbookPr\b[^>]*\/>/, '<!-- <workbookPr date1904="1"/> --><workbookPr/>')
+    .replace(/<workbookPr\b[^>]*\/>/, '<workbookPr/>')
     .replace('</workbook>', '<extLst><ext uri="urn:example" xmlns="urn:example:other"><workbookPr date1904="1"/></ext></extLst></workbook>'));
   const map = (inputFilePath) => buildMappedRows({
     inputFilePath,
@@ -2128,6 +2138,14 @@ test('xlsx 日期系统按根元素及其直接子元素的命名空间解析：
     expectedSourceHeaders: ['Date', 'In', 'Desc']
   });
   assert.equal(map(filePath)[1][0], '2026-09-25');
+  // release/v3.2.22 合入 fix/statement-xlsx-io-boundary（B133）后：workbook.xml 含带标签的注释、或标签内（含属性值）有制表符等
+  //   非常规空白时无法核对读取库读的是哪张表，按无法定位工作表原文整份拒绝（Excel、WPS 与银行系统不会写出这些写法）
+  const commentedPath = path.join(dir, 'local-namespace-commented.xlsx');
+  writeWorkbook(commentedPath, { main: [['Date', 'In', 'Desc'], [46290, 1, 'x']], source: [['Date', 'Credit']] });
+  await rewriteZipEntry(commentedPath, 'xl/workbook.xml', (xml) => xml
+    .replace(/<workbookPr\b[^>]*\/>/, '<!-- <workbookPr date1904="1"/> --><workbookPr/>')
+    .replace('</workbook>', '<extLst><ext uri="urn:example" xmlns="urn:example:other"><workbookPr date1904="1"/></ext></extLst></workbook>'));
+  assert.throws(() => map(commentedPath), /无法定位工作表「MAIN」的原文/);
   const unknownPath = path.join(dir, 'unknown-namespace.xlsx');
   writeWorkbook(unknownPath, { main: [['Date', 'In', 'Desc'], [46290, 1, 'x']], source: [['Date', 'Credit']] });
   await rewriteZipEntry(unknownPath, 'xl/workbook.xml', (xml) => xml
@@ -2640,9 +2658,12 @@ test('xlsx 的 date1904 按 XML Schema 布尔值解析：首尾空白不改变�
       expectedSourceHeaders: ['Date', 'In']
     }).slice(1).map((row) => row.slice(0, 2));
   };
-  for (const value of ['1', 'true', ' true ', '\n1\t']) {
+  for (const value of ['1', 'true', ' true ', '\n1 ']) {
     assert.deepEqual((await read(value))(), [['2026-09-25', '1']], JSON.stringify(value));
   }
+  // release/v3.2.22 合入 fix/statement-xlsx-io-boundary（B133）后：workbook.xml 含带标签的注释、或标签内（含属性值）有制表符等
+  //   非常规空白时无法核对读取库读的是哪张表，按无法定位工作表原文整份拒绝（Excel、WPS 与银行系统不会写出这些写法）
+  assert.throws(await read('\n1\t'), /无法定位工作表「MAIN」的原文/);
   for (const value of [' 0 ', 'false']) {
     assert.deepEqual((await read(value))(), [['2022-09-24', '1']], JSON.stringify(value));
   }
