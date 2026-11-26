@@ -1,5 +1,11 @@
 # 版本功能变更清单
 
+## v3.2.23（2026-11-25）
+
+本版只升版本号，代码与 `v3.2.22` 相同（`ba4e8fb9`，PR #260 合并提交）。`v3.2.22` 附注标签（对象 `ad96559a` → `ba4e8fb9`）于 2026-11-25 07:58 PST 推送时 GitHub 故障（Actions 部分中断、Webhooks 性能下降），`release-windows.yml` 没有启动；GitHub 恢复正常后仍没有该标签的运行，未生成 Release。该 workflow 只由推送 `v*.*.*` 标签触发，正式标签受「Immutable stable release tags」规则保护，不移动、不重建；用户 2026-11-25 决定改发 v3.2.23，v3.2.22 的功能随本版首次发出安装包。经过见 `changes/v3.2.22/release.md`「合并、标签与发布」与 `changes/v3.2.23/release.md`。
+
+已知限制与顺延：B147（平盘单遍导入 Windows 实机、真实大文件与人工验收）改为本版发布后进行；v3.2.22 顺延的 15 项（B47、B48、B52–B56、B70、B75、B77、B79、B86、B92、B105、B120）顺延至 v3.2.24（暂定）。
+
 ## v3.2.22（2026-11-24）
 
 本轮包含 9 个模块分支：`fix/backlog-low-risk-batch`、`feat/feature-value-settings`、`feat/fund-recon-gateway-account-mapping`、`fix/statement-xlsx-io-boundary`（只纳入已提交部分 `4bfe28a0`，该分支工作区的未提交改动不在本版）、`feat/position-single-pass-import`、`fix/toolbox-publication-freshness`、`fix/statement-multi-template-rollback`、`feat/cross-sheet-backfill`（v3.2.21 顺延，B129）、`feat/balance-eod-file-import`，另同步 `origin/main`（v3.2.21 发布记录）。各分支自行登记的 backlog 编号合入时按顺序改编为 B134–B163，见 `changes/v3.2.22/release.md`。

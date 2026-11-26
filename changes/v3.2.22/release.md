@@ -100,8 +100,29 @@
 - **本地门禁**：`npm run release-check` 在候选 `35deef49` 上 PASS（2026-11-24 23:07–23:15 PST，运行前后 HEAD 一致）：lint；架构检查 668/668 文件；smoke（含 `render-status-box` 23/23）；单测 9783 项（9779 通过、4 跳过、0 失败）；集成 93 个脚本、3901 个用例全部通过，回写 `rules/integration-test-policy.md` 第七节（`18369169` 单独提交）。之后的提交只改 `rules/integration-test-policy.md`（检查生成）与本记录，不含代码。
 - **失败与处置**：在 `7c7c3a71` 首次运行时集成 `fund-transfer-recon-account-mapping.js`、`statement-long-number-precision.js` 失败，即上文链接表 `_xHHHH_` 口径冲突与 AST 注入依赖，修复后两脚本 118/118、32/32。在 `f49b26c6` 运行时 smoke `render-status-box` B5-4 失败：检查用正则要求 `writeStatusBox(element, text, tone)` 精确形式，本轮状态框另透传脱敏日志 `options`；放宽为可选 `options`（`35deef49`）后 23/23 通过，检查意图（经注入的 `ui.status` 保持全局格式化）不变。
 - **人工复核与授权**：资金红线人工复核由用户 2026-11-24 确认通过，并授权 production-release 审批；B147 改为发布后进行。
-- **远端 CI**：见 PR 状态检查（Windows），以 PR 最终 head 与合并提交为准。
+- **远端 CI（PR #260，Windows）**：
+  - `7eff9609`（run 45567050472）`release-check-unit (4/6)` 失败 2 项：
+    - 「异常报告日期往返在上海时区同样成立」：子进程断言按 TAP 写法 `# pass 1` 匹配，CI 的 Node 24 默认 spec 报告写作 `ℹ pass 1`。`a6c97d26` 给子进程加 `--test-reporter=spec`，断言两种写法都接受。
+    - 「merge：输入经指向输出目录的目录链接读取……报目标变化（B57）」：`fs.realpathSync` 在 Windows 上保留 8.3 短名（`RUNNER~1`），与冻结时的长名对不上，错误被当成系统错误透传。`474db74b` 改为同时按 `realpathSync` 与 `realpathSync.native` 两种写法解析，新增替身用例（`toolbox-publication-freshness.test.js` 76 项通过，撤回修复时新用例失败）。
+  - `a6c97d26`（run 45568784227）只剩 B57 一项失败。`smoke-test` 两次都只是汇总单测分片的失败，没有独立失败项。
+  - `474db74b`（run 45575518304）11 项检查全部通过，Codex 云端审查无意见。
+- **最终候选本地门禁**：`npm run release-check` 在 `474db74b` 上 PASS（2026-11-25 00:21–00:29 PST）：lint；架构检查 668/668；smoke；单测 9784 项（9780 通过、4 跳过、0 失败）；集成 93 个脚本全部通过，无回写。
 
 ## 合并、标签与发布（清单 E–F）
 
+| 项目 | 事实 |
+| --- | --- |
+| PR | #260 `release/v3.2.22` → `main`，head `474db74b`，2026-11-25 07:40 PST 以 merge commit 合并 |
+| 最终 main `M` | `ba4e8fb9598f16f98636b09b9aa11dd28852821a`，父提交 `4a60e1e2`、`474db74b`，tree 与 `474db74b` 相同，版本 3.2.22 |
+| main CI | run 45647766319，11 项全部通过 |
+| 正式标签 | `v3.2.22` 附注标签（对象 `ad96559a5fc857a5ea23c40711b7587a9c84b28d` → `M`），2026-11-25 07:58 PST 推送；推送前后都核对远端 main 等于 `M`，只推了这一个标签 |
+| 发布流程 | **没有启动**：GitHub 当时故障（Actions 部分中断，Webhooks 与 Git 操作性能下降，08:10 PST 起调查）。等到 09:12 PST，GitHub 已恢复正常，`release-windows.yml` 仍没有该标签的运行，仓库事件中也没有该标签的创建记录 |
+| Release / 安装包 | 无 |
+
+- 处置：`release-windows.yml` 只由推送 `v*.*.*` 标签触发，没有手动入口。正式标签受「Immutable stable release tags」规则保护，清单 E5 也不允许删除重推。在 main 上给 workflow 加手动入口会让 main 前进，与标签提交不一致，发布校验通不过。2026-11-25 用户决定改发 v3.2.23（只升版本号）。
+- GitHub 若事后补投该标签的推送事件，补出的运行会停在 `production-release` 审批，不予批准；即使获批，也会因 tag commit 不等于当时的 main 而在校验步骤失败。
+
 ## 结论
+
+- v3.2.22 **未发布**：标签保留，没有 Release，没有安装包。代码不变，随 v3.2.23 首次发布，见 [v3.2.23 记录](../v3.2.23/release.md)。
+- B147 改为 v3.2.23 发布后进行。上文「顺延到 v3.2.23（暂定）」的 15 项在 v3.2.23 仍未纳入，已顺延至 v3.2.24（暂定）。
